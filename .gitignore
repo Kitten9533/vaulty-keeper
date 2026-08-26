@@ -1,0 +1,5 @@
+# build artifacts
+bin/
+
+# superpowers tool state
+.superpowers/

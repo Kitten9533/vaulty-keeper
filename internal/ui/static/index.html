@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ai-tools · 配置工作台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><span class="mark">✦</span> ai-tools</div>
+    <button class="new" type="button" data-action="import"><b>+</b> 导入配置快照</button>
+    <div class="rail-scroll">
+      <div class="group">快照</div>
+      <div id="snapshot-list"></div>
+      <div class="group">工具</div>
+      <div class="nav-item" id="nav-aes">AES 加解密</div>
+      <div class="nav-item" id="nav-settings">设置</div>
+    </div>
+    <div class="foot"><div class="avatar">K</div><div><b>本地工作区</b><span>仅此设备可访问</span></div></div>
+  </aside>
+  <main id="app">
+    <header class="topbar">
+      <div id="breadcrumb" class="crumb"></div>
+      <button class="more" type="button" aria-label="更多操作">•••</button>
+    </header>
+
+    <div class="view" id="view-snapshots">
+      <div class="canvas">
+        <div id="hero" class="hero">
+          <div>
+            <h1 id="hero-title">检查配置状态。</h1>
+            <p class="sub">快照在本地加密，敏感值默认遮罩。</p>
+          </div>
+          <button class="cta" type="button" data-action="import">导入快照</button>
+        </div>
+        <div id="error-region" class="error-region" hidden></div>
+        <div class="layout">
+          <section>
+            <div id="snapshot-context" class="context">
+              <div class="env">·</div>
+              <div><strong id="context-name">—</strong><p id="context-meta">加载中…</p></div>
+              <div class="secure"><i></i>已加密</div>
+            </div>
+            <div class="sec-head"><h2>配置</h2><span id="config-count" class="count"></span></div>
+            <div class="search" id="config-search">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+              <input id="search-input" type="search" placeholder="搜索 key 或可见值…" aria-label="搜索配置" autocomplete="off" spellcheck="false">
+            </div>
+            <table id="config-table">
+              <tbody id="config-body"></tbody>
+            </table>
+          </section>
+          <aside class="assist" id="next-steps">
+            <div class="card">
+              <div class="card-title">下一步</div>
+              <div class="task" data-action="compare"><button class="task-btn" type="button"><strong>比较环境</strong></button><span>检查新增、删除与变更。</span></div>
+              <div class="task" data-action="multi-compare"><button class="task-btn" type="button"><strong>横向对比多环境</strong></button><span>多环境同 key 并排对比。</span></div>
+              <div class="task" data-action="focus-search"><button class="task-btn" type="button"><strong>查看或修改单项</strong></button><span>按 key 搜索；敏感内容默认隐藏。</span></div>
+              <div class="task" data-action="bulk-edit"><button class="task-btn" type="button"><strong>明文编辑全部</strong></button><span>确认后以明文编辑并重新加密。</span></div>
+              <div class="task" data-action="export"><button class="task-btn" type="button"><strong>导出配置</strong></button><span>生成明文前需要再次确认。</span></div>
+              <div class="task" data-action="aes-tools"><button class="task-btn" type="button"><strong>AES 加解密</strong></button><span>手动 key/iv 加解密与生成。</span></div>
+            </div>
+            <div class="note">🔒 <b>本地优先。</b> 明文只在确认后短暂显示。</div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="view-aes" hidden>
+      <div class="canvas">
+        <div class="hero">
+          <div>
+            <h1>AES 加解密工具。</h1>
+            <p class="sub">Java CryptoUtil 兼容（AES/GCM/NoPadding）。key/iv 手动输入，或从本机 aes.json 预填。</p>
+          </div>
+        </div>
+        <div id="aes-error" class="error-region" hidden></div>
+        <div class="panel">
+          <div class="fields">
+            <label class="field" for="aes-key">AES key（16/24/32 字节 UTF-8）
+              <input id="aes-key" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="field" for="aes-iv">IV（UTF-8 字节）
+              <input id="aes-iv" type="text" autocomplete="off" spellcheck="false">
+            </label>
+          </div>
+          <div class="row-actions">
+            <button class="ghost" type="button" id="aes-load-config">从 aes.json 预填</button>
+            <button class="ghost" type="button" id="aes-gen-key">生成 key/iv</button>
+            <button class="ghost" type="button" id="aes-save-config">保存为默认</button>
+          </div>
+          <label class="field" for="aes-input">输入
+            <textarea id="aes-input" rows="6" placeholder="明文或 base64 密文…" spellcheck="false"></textarea>
+          </label>
+          <div class="row-actions">
+            <button class="primary" type="button" id="aes-encrypt-btn">加密</button>
+            <button class="primary" type="button" id="aes-decrypt-btn">解密</button>
+          </div>
+          <label class="field" for="aes-output">结果
+            <textarea id="aes-output" rows="6" readonly spellcheck="false"></textarea>
+          </label>
+          <div class="row-actions">
+            <button class="ghost" type="button" id="aes-copy">复制结果</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="view-settings" hidden>
+      <div class="canvas">
+        <div class="hero">
+          <div>
+            <h1>设置。</h1>
+            <p class="sub">本地密钥与 AES 默认配置管理。</p>
+          </div>
+        </div>
+        <div id="settings-error" class="error-region" hidden></div>
+        <div class="panel">
+          <div class="sec-head"><h2>快照密钥</h2></div>
+          <div id="key-status" class="status-line">检测中…</div>
+          <div class="row-actions">
+            <button class="primary" type="button" id="init-key-btn" hidden>生成快照密钥</button>
+          </div>
+          <div class="sec-head"><h2>自定义 AES key/iv（aes.json）</h2></div>
+          <div id="aes-config-status" class="status-line">检测中…</div>
+          <div class="row-actions">
+            <button class="ghost" type="button" id="clear-aes-config-btn" hidden>清除已保存的 key/iv</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<dialog id="import-dialog" aria-labelledby="import-title">
+  <form id="import-form" class="dialog">
+    <h3 id="import-title">导入配置快照</h3>
+    <label class="field" for="import-name">环境
+      <input id="import-name" type="text" placeholder="例如 prod" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="field" for="import-appid">应用 ID（必填）
+      <input id="import-appid" type="text" placeholder="例如 merdi-portal" autocomplete="off" spellcheck="false">
+    </label>
+    <div id="import-dupe" class="warn-line" hidden></div>
+    <label class="field" for="import-text">粘贴 key=value 配置
+      <textarea id="import-text" rows="8" placeholder="APP_NAME = merdi&#10;SECRET_TOKEN = ..." spellcheck="false"></textarea>
+    </label>
+    <div id="import-preview" class="preview" hidden></div>
+    <div id="import-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="ghost" id="import-preview-btn">预览</button>
+      <button type="submit" class="primary" id="import-confirm-btn" hidden>确认导入</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="entry-dialog" aria-labelledby="entry-title">
+  <form id="entry-form" class="dialog">
+    <h3 id="entry-title">编辑配置项</h3>
+    <div class="entry-head">
+      <span class="env" id="entry-env">k</span>
+      <code id="entry-key" class="entry-key"></code>
+    </div>
+    <p id="entry-warning" class="warning" hidden>当前为敏感值，无法显示。输入新值将替换它；留空并保存不修改。</p>
+    <label class="field" for="entry-value">值
+      <input id="entry-value" type="text" autocomplete="off" spellcheck="false">
+    </label>
+    <div id="entry-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="danger" id="entry-delete-btn">删除</button>
+      <button type="submit" class="primary" id="entry-save-btn">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="delete-dialog" aria-labelledby="delete-title">
+  <form method="dialog" class="dialog">
+    <h3 id="delete-title">删除配置项</h3>
+    <p>确定要删除 <code id="delete-key"></code> 吗？此操作不可撤销。</p>
+    <div id="delete-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="danger" id="delete-confirm-btn">删除</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="snap-delete-dialog" aria-labelledby="snap-delete-title">
+  <form method="dialog" class="dialog">
+    <h3 id="snap-delete-title">删除快照</h3>
+    <p>确定删除 <code id="snap-delete-name"></code> / <code id="snap-delete-appid"></code> 快照吗？此操作不可撤销。</p>
+    <div id="snap-delete-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="danger" id="snap-delete-confirm-btn">删除</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="compare-dialog" aria-labelledby="compare-title">
+  <form method="dialog" class="dialog">
+    <h3 id="compare-title">比较环境</h3>
+    <p class="muted">将 <code id="compare-from"></code> 与以下环境对比：</p>
+    <label class="field" for="compare-target">目标环境
+      <select id="compare-target"></select>
+    </label>
+    <div id="compare-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="primary" id="compare-confirm-btn">开始对比</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="compare-result-dialog" aria-labelledby="compare-result-title">
+  <div class="dialog result-dialog">
+    <div class="result-head">
+      <h3 id="compare-result-title">配置对比</h3>
+      <div class="result-actions">
+        <button type="button" class="ghost" id="compare-copy-btn">复制差异</button>
+        <button type="button" class="ghost" data-close>关闭</button>
+      </div>
+    </div>
+    <div id="compare-refs" class="compare-refs" hidden></div>
+    <div class="search" id="compare-filter-box">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      <input id="compare-filter" type="search" placeholder="过滤差异 key…" autocomplete="off" spellcheck="false">
+    </div>
+    <div id="compare-body" class="diff"></div>
+  </div>
+</dialog>
+
+<dialog id="multi-compare-dialog" aria-labelledby="multi-compare-title">
+  <form method="dialog" class="dialog">
+    <h3 id="multi-compare-title">横向对比多环境</h3>
+    <p class="muted">选择 2 个以上快照，按 key 并排对比各环境取值。</p>
+    <div id="multi-ref-list" class="check-list"></div>
+    <div id="multi-compare-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="primary" id="multi-compare-confirm-btn">开始对比</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="multi-result-dialog" aria-labelledby="multi-result-title">
+  <div class="dialog result-dialog">
+    <div class="result-head">
+      <h3 id="multi-result-title">横向对比</h3>
+      <div class="result-actions">
+        <button type="button" class="ghost" id="multi-report-btn">差异报告</button>
+        <button type="button" class="ghost" id="multi-copy-btn">复制对比</button>
+        <button type="button" class="ghost" id="multi-csv-btn">复制 CSV</button>
+        <button type="button" class="ghost" data-close>关闭</button>
+      </div>
+    </div>
+    <div id="multi-table-wrap" class="table-wrap"></div>
+  </div>
+</dialog>
+
+<dialog id="multi-report-dialog" aria-labelledby="multi-report-title">
+  <div class="dialog result-dialog">
+    <div class="result-head">
+      <h3 id="multi-report-title">差异报告</h3>
+      <div class="result-actions">
+        <button type="button" class="ghost" id="multi-report-copy-btn">复制报告</button>
+        <button type="button" class="ghost" data-close>关闭</button>
+      </div>
+    </div>
+    <pre id="multi-report-body" class="report-body"></pre>
+  </div>
+</dialog>
+
+<dialog id="key-compare-dialog" aria-labelledby="key-compare-title">
+  <div class="dialog result-dialog">
+    <div class="result-head">
+      <h3 id="key-compare-title">单 key 对比</h3>
+      <button type="button" class="ghost" data-close>关闭</button>
+    </div>
+    <div id="key-compare-body" class="diff"></div>
+  </div>
+</dialog>
+
+<dialog id="export-dialog" aria-labelledby="export-title">
+  <form method="dialog" class="dialog">
+    <h3 id="export-title">导出配置</h3>
+    <p>将生成 <code id="export-name"></code> 的明文 key=value 文件，并在本机浏览器中下载。</p>
+    <p class="warning">⚠ 明文包含敏感值，请仅在本机查看，不要转发。</p>
+    <div id="export-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="danger" id="export-copy-btn">复制到剪贴板</button>
+      <button type="button" class="danger" id="export-confirm-btn">确认导出</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="reveal-dialog" aria-labelledby="reveal-title">
+  <form method="dialog" class="dialog">
+    <h3 id="reveal-title">解密显示</h3>
+    <p class="warning">⚠ 将显示 <code id="reveal-key"></code> 的明文值，请仅在本机查看。</p>
+    <div id="reveal-value" class="reveal-box" hidden></div>
+    <div id="reveal-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>关闭</button>
+      <button type="button" class="danger" id="reveal-confirm-btn">解密并显示</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="edit-dialog" aria-labelledby="edit-title">
+  <form id="edit-form" class="dialog">
+    <h3 id="edit-title">明文编辑</h3>
+    <p class="warning">⚠ 将以明文编辑 <code id="edit-name"></code> 的全部条目，保存后重新加密。</p>
+    <label class="field" for="edit-text">配置内容
+      <textarea id="edit-text" rows="14" spellcheck="false"></textarea>
+    </label>
+    <div id="edit-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="submit" class="primary" id="edit-save-btn" hidden>保存并重新加密</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="summary-dialog" aria-labelledby="summary-title">
+  <form method="dialog" class="dialog">
+    <h3 id="summary-title">安全 AI 摘要</h3>
+    <p>安全摘要仅基于可见值与本机元数据生成，不包含原始密钥。此能力在当前版本为占位，将在后续版本提供。</p>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>关闭</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/app.js" defer></script>
+</body>
+</html>

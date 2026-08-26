@@ -1,0 +1,1358 @@
+'use strict';
+
+const state = { snapshots: [], active: null, activeAppID: '', snapshot: null, compare: null, view: 'snapshots', lastCompareTo: '', collapsedEnv: {} };
+const MASK = '••••••••••••';
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const $ = (id) => document.getElementById(id);
+let editing = null;
+
+// ---- api ----
+
+async function api(path, options = {}) {
+  const method = options.method || 'GET';
+  if (TOKEN && method !== 'GET') {
+    options = { ...options, headers: { ...(options.headers || {}), 'X-Auth-Token': TOKEN } };
+  }
+  const res = await fetch(path, options);
+  if (res.status === 204) return null;
+  const type = res.headers.get('content-type') || '';
+  if (!res.ok) {
+    let message = `请求失败 (${res.status})`;
+    try {
+      if (type.includes('application/json')) {
+        const body = await res.json();
+        if (body && body.error && body.error.message) message = body.error.message;
+      } else {
+        const text = await res.text();
+        if (text) message = text;
+      }
+    } catch (_) { /* keep default message */ }
+    throw new Error(message);
+  }
+  if (type.includes('application/json')) return res.json();
+  return res;
+}
+
+function jsonOptions(method, body) {
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function relTime(iso) {
+  const t = new Date(iso);
+  if (isNaN(t.getTime())) return '';
+  const diff = Date.now() - t.getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min} 分钟前`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} 天前`;
+  return t.toLocaleDateString('zh-CN');
+}
+
+// ---- render: rail ----
+
+function renderRail() {
+  const list = $('snapshot-list');
+  list.textContent = '';
+  if (!state.snapshots.length) {
+    const d = document.createElement('div');
+    d.className = 'item';
+    d.textContent = '暂无快照';
+    list.appendChild(d);
+    return;
+  }
+  const groups = new Map();
+  for (const s of state.snapshots) {
+    if (!groups.has(s.name)) groups.set(s.name, []);
+    groups.get(s.name).push(s);
+  }
+  for (const [env, refs] of groups) {
+    const g = document.createElement('div');
+    g.className = 'rail-group' + (state.collapsedEnv[env] ? ' collapsed' : '');
+    const gTitle = document.createElement('div');
+    gTitle.className = 'group-title';
+    gTitle.title = state.collapsedEnv[env] ? '点击展开' : '点击折叠';
+    const arrow = document.createElement('span');
+    arrow.className = 'arrow';
+    arrow.textContent = state.collapsedEnv[env] ? '▸' : '▾';
+    const envName = document.createElement('span');
+    envName.className = 'env-name';
+    envName.textContent = env;
+    const gCount = document.createElement('span');
+    gCount.className = 'g-count';
+    gCount.textContent = `${refs.length}`;
+    gTitle.appendChild(arrow);
+    gTitle.appendChild(envName);
+    gTitle.appendChild(gCount);
+    gTitle.addEventListener('click', () => {
+      state.collapsedEnv[env] = !state.collapsedEnv[env];
+      renderRail();
+    });
+    g.appendChild(gTitle);
+    for (const s of refs) {
+      const d = document.createElement('div');
+      d.className = 'item' + (s.name === state.active && (s.app_id || '') === (state.activeAppID || '') ? ' active' : '');
+      const top = document.createElement('div');
+      top.className = 'rail-row';
+      const name = document.createElement('span');
+      name.textContent = s.app_id ? s.app_id : s.name;
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = `${s.total} 项`;
+      top.appendChild(name);
+      top.appendChild(count);
+      d.appendChild(top);
+      const sub = document.createElement('div');
+      sub.className = 'rail-sub';
+      sub.textContent = relTime(s.captured_at) ? `更新于 ${relTime(s.captured_at)}` : '';
+      d.appendChild(sub);
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'rail-del';
+      del.textContent = '删除';
+      del.title = '删除快照';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openDeleteSnapshot(s);
+      });
+      d.appendChild(del);
+      d.addEventListener('click', () => selectSnapshot(s.name, s.app_id));
+      g.appendChild(d);
+    }
+    list.appendChild(g);
+  }
+}
+
+function refLabel(name, appID) {
+  return appID ? `${name} (${appID})` : name;
+}
+
+// ---- view switching ----
+
+function switchView(name) {
+  state.view = name;
+  for (const v of ['snapshots', 'aes', 'settings']) {
+    const el = $(`view-${v}`);
+    if (el) el.hidden = v !== name;
+    const nav = $(`nav-${v}`);
+    if (nav) nav.classList.toggle('active', v === name);
+  }
+  $('breadcrumb').innerHTML = name === 'snapshots'
+    ? '<b>配置工作台</b>'
+    : `<b>${name === 'aes' ? 'AES 加解密' : '设置'}</b>`;
+  if (name === 'aes') loadAESConfigIntoForm();
+  if (name === 'settings') loadSettings();
+}
+
+// ---- AES tools ----
+
+let aesConfigCache = null;
+
+async function loadAESConfigIntoForm() {
+  if (!aesConfigCache) {
+    try { aesConfigCache = await api('/api/aes/config'); } catch (_) { aesConfigCache = { key: '', iv: '' }; }
+  }
+  if (aesConfigCache.key) { $('aes-key').value = aesConfigCache.key; $('aes-iv').value = aesConfigCache.iv; }
+}
+
+async function runAES(op) {
+  const key = $('aes-key').value.trim();
+  const iv = $('aes-iv').value.trim();
+  const text = $('aes-input').value;
+  if (!key || !iv) { showAESError('请填写 key 和 iv。'); return; }
+  if (!text) { showAESError('请填写输入内容。'); return; }
+  try {
+    const data = await api('/api/aes/transform', jsonOptions('POST', { op, key, iv, text }));
+    $('aes-output').value = data.result;
+    showAESError('');
+  } catch (err) { showAESError(err.message); }
+}
+
+async function genAESKey() {
+  try {
+    const data = await api('/api/aes/gen-key', jsonOptions('POST', { bytes: 16, iv_bytes: 12 }));
+    $('aes-key').value = data.key;
+    $('aes-iv').value = data.iv;
+    showAESError('已生成 key/iv。');
+  } catch (err) { showAESError(err.message); }
+}
+
+async function saveAESConfig() {
+  const key = $('aes-key').value.trim();
+  const iv = $('aes-iv').value.trim();
+  if (!key || !iv) { showAESError('请填写 key 和 iv。'); return; }
+  try {
+    await api('/api/aes/config', jsonOptions('PUT', { key, iv }));
+    aesConfigCache = { key, iv };
+    showAESError('已保存到 aes.json。');
+  } catch (err) { showAESError(err.message); }
+}
+
+function showAESError(msg) {
+  $('aes-error').textContent = msg;
+  $('aes-error').hidden = !msg;
+}
+
+function copyAESOutput() {
+  const text = $('aes-output').value;
+  if (!text) return;
+  copyText(text).then(() => showAESError('已复制到剪贴板。')).catch(() => showAESError('复制失败。'));
+}
+
+// ---- settings ----
+
+async function loadSettings() {
+  const status = $('key-status');
+  const initBtn = $('init-key-btn');
+  try {
+    const ks = await api('/api/key');
+    if (ks.available) {
+      status.textContent = '快照密钥可用（Keychain 或环境变量）。';
+      status.className = 'status-line ok';
+      initBtn.hidden = true;
+    } else {
+      throw new Error('unavailable');
+    }
+  } catch (_) {
+    status.textContent = '快照密钥不可用。点击下方按钮生成本机密钥。';
+    status.className = 'status-line warn';
+    initBtn.hidden = false;
+  }
+  try {
+    const c = await api('/api/aes/config');
+    const el = $('aes-config-status');
+    if (c.key) {
+      el.textContent = `已保存（${c.path}）。`;
+      el.className = 'status-line ok';
+      $('clear-aes-config-btn').hidden = false;
+    } else {
+      el.textContent = `未保存自定义 key/iv（${c.path}）。`;
+      el.className = 'status-line';
+      $('clear-aes-config-btn').hidden = true;
+    }
+  } catch (err) { showSettingsError(err.message); }
+}
+
+async function initKey() {
+  try {
+    await api('/api/init', jsonOptions('POST', { force: false }));
+    $('init-key-btn').hidden = true;
+    $('key-status').textContent = '快照密钥已生成。';
+    $('key-status').className = 'status-line ok';
+  } catch (err) { showSettingsError(err.message); }
+}
+
+async function clearAESConfig() {
+  try {
+    await api('/api/aes/config', { method: 'DELETE' });
+    aesConfigCache = null;
+    loadSettings();
+  } catch (err) { showSettingsError(err.message); }
+}
+
+function showSettingsError(msg) {
+  $('settings-error').textContent = msg;
+  $('settings-error').hidden = !msg;
+}
+
+// ---- render: context / hero ----
+
+function renderContext() {
+  const s = state.snapshots.find((x) => x.name === state.active && (x.app_id || '') === (state.activeAppID || ''));
+  const secure = $('snapshot-context').querySelector('.secure');
+  if (!s) {
+    $('context-name').textContent = '未选择快照';
+    $('context-meta').textContent = '暂无快照，点击左侧「导入配置快照」开始。';
+    $('snapshot-context').querySelector('.env').textContent = '✦';
+    secure.hidden = true;
+    $('breadcrumb').innerHTML = '<b>配置工作台</b>';
+    $('hero-title').textContent = '检查配置状态。';
+    return;
+  }
+  $('context-name').textContent = state.active + (state.activeAppID ? ' / ' + state.activeAppID : '');
+  $('context-meta').textContent = `${s.total} 项配置 · ${s.sensitive} 个敏感项 · ${relTime(s.captured_at)}更新`;
+  $('snapshot-context').querySelector('.env').textContent = s.name.slice(0, 1);
+  secure.hidden = false;
+  $('breadcrumb').innerHTML = `<b>配置工作台</b><span class="sep">/</span>${escapeHtml(s.name)}${s.app_id ? `<span class="sep">/</span>${escapeHtml(s.app_id)}` : ''}`;
+  $('hero-title').textContent = `检查 ${s.name}${s.app_id ? ` (${s.app_id})` : ''} 的配置状态。`;
+}
+
+// ---- render: table ----
+
+function currentItems() {
+  if (!state.snapshot) return [];
+  const q = $('search-input').value.trim().toLowerCase();
+  const items = [...state.snapshot.items];
+  if (!q) return items;
+  return items.filter((it) => {
+    if (it.key.toLowerCase().includes(q)) return true;
+    return !it.sensitive && it.value && it.value.toLowerCase().includes(q);
+  });
+}
+
+function renderTable() {
+  const body = $('config-body');
+  body.textContent = '';
+  const items = currentItems();
+  $('config-count').textContent = state.snapshot ? `${items.length} / ${state.snapshot.items.length}` : '';
+  if (!items.length) {
+    const row = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 2;
+    const span = document.createElement('span');
+    span.className = 'empty';
+    span.textContent = state.snapshot ? '没有匹配的配置项' : '暂无配置，点击左侧「导入配置快照」开始。';
+    td.appendChild(span);
+    row.appendChild(td);
+    body.appendChild(row);
+    return;
+  }
+  for (const it of items) {
+    const tr = document.createElement('tr');
+    const tdKey = document.createElement('td');
+    tdKey.textContent = it.key;
+    const tdVal = document.createElement('td');
+    if (it.sensitive) {
+      tdVal.className = 'masked';
+      tdVal.textContent = MASK;
+      const i = document.createElement('i');
+      i.textContent = `${it.length} 字符`;
+      tdVal.appendChild(i);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'reveal-btn';
+      btn.textContent = '解密显示';
+      tdVal.appendChild(btn);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openReveal(it);
+      });
+    } else {
+      tdVal.textContent = it.value || '';
+    }
+    const cmpBtn = document.createElement('button');
+    cmpBtn.type = 'button';
+    cmpBtn.className = 'reveal-btn';
+    cmpBtn.textContent = '对比此 key';
+    cmpBtn.title = '查看此 key 在所有快照中的取值';
+    tdVal.appendChild(cmpBtn);
+    cmpBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openKeyCompare(it.key);
+    });
+    tr.appendChild(tdKey);
+    tr.appendChild(tdVal);
+    tr.addEventListener('click', () => openEntry(it));
+    body.appendChild(tr);
+  }
+}
+
+// ---- snapshot loading ----
+
+function showError(msg) {
+  $('error-region').textContent = msg;
+  $('error-region').hidden = false;
+}
+
+function clearError() {
+  $('error-region').textContent = '';
+  $('error-region').hidden = true;
+}
+
+async function loadSnapshot(name, appID) {
+  const requested = name;
+  const requestedAppID = appID || '';
+  state.active = name;
+  state.activeAppID = requestedAppID;
+  state.compare = null;
+  state.snapshot = null;
+  $('compare-result-dialog').close();
+  $('search-input').value = '';
+  clearError();
+  renderRail();
+  renderContext();
+  const q = state.activeAppID ? `?appid=${encodeURIComponent(state.activeAppID)}` : '';
+  try {
+    const data = await api(`/api/snapshots/${encodeURIComponent(name)}${q}`);
+    if (state.active !== requested || state.activeAppID !== requestedAppID) return;
+    state.snapshot = { name: data.name, items: data.items };
+  } catch (err) {
+    if (state.active !== requested || state.activeAppID !== requestedAppID) return;
+    showError(err.message);
+  }
+  renderTable();
+}
+
+function selectSnapshot(name, appID) {
+  switchView('snapshots');
+  loadSnapshot(name, appID);
+}
+
+// Reloads the active snapshot's data and the rail summaries without resetting
+// UI state (search text, scroll position, compare panel).
+async function reloadSnapshotData() {
+  const reqName = state.active;
+  if (!reqName) return;
+  const q = state.activeAppID ? `?appid=${encodeURIComponent(state.activeAppID)}` : '';
+  try {
+    const data = await api(`/api/snapshots/${encodeURIComponent(reqName)}${q}`);
+    state.snapshot = { name: data.name, items: data.items };
+  } catch (err) {
+    showError(err.message);
+  }
+  try {
+    const list = await api('/api/snapshots');
+    state.snapshots = list.snapshots;
+  } catch (_) { /* keep current list */ }
+  renderRail();
+  renderContext();
+  renderTable();
+}
+
+async function refreshSnapshots(selectRef) {
+  try {
+    const data = await api('/api/snapshots');
+    state.snapshots = data.snapshots;
+  } catch (err) {
+    showError(err.message);
+  }
+  renderRail();
+  const target = selectRef || (state.active ? { name: state.active, app_id: state.activeAppID } : state.snapshots[0]);
+  if (target && target.name) await loadSnapshot(target.name, target.app_id);
+  else {
+    state.active = null;
+    state.activeAppID = '';
+    renderContext();
+    renderTable();
+  }
+}
+
+// ---- dialogs ----
+
+function openDialog(id) {
+  clearDialogError(id);
+  $(id).showModal();
+}
+
+function closeDialog(id) {
+  $(id).close();
+}
+
+function dialogError(id, msg) {
+  const el = $(id).querySelector('.error');
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = false;
+}
+
+function clearDialogError(id) {
+  const el = $(id).querySelector('.error');
+  if (!el) return;
+  el.textContent = '';
+  el.hidden = true;
+}
+
+// ---- import ----
+
+function openImport() {
+  $('import-name').value = '';
+  $('import-appid').value = '';
+  $('import-text').value = '';
+  $('import-preview').hidden = true;
+  $('import-preview').textContent = '';
+  $('import-dupe').hidden = true;
+  $('import-confirm-btn').hidden = true;
+  $('import-preview-btn').hidden = false;
+  openDialog('import-dialog');
+  $('import-name').focus();
+}
+
+function checkImportDuplicate() {
+  const env = $('import-name').value.trim();
+  const appid = $('import-appid').value.trim();
+  const el = $('import-dupe');
+  if (!env || !appid) {
+    el.hidden = true;
+    return;
+  }
+  const dupe = state.snapshots.find((s) => s.name === env && s.app_id === appid);
+  if (dupe) {
+    el.textContent = `已存在快照：${dupe.name} (${dupe.app_id})，共 ${dupe.total} 项配置。导入会失败，请换用其他环境或应用 ID。`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
+async function runImportPreview() {
+  const text = $('import-text').value;
+  if (!text.trim()) {
+    dialogError('import-dialog', '请先粘贴配置内容。');
+    return;
+  }
+  try {
+    const data = await api('/api/import/preview', jsonOptions('POST', { text }));
+    renderImportPreview(data);
+    $('import-confirm-btn').hidden = false;
+    $('import-preview-btn').hidden = true;
+  } catch (err) {
+    dialogError('import-dialog', err.message);
+  }
+}
+
+function renderImportPreview(data) {
+  const box = $('import-preview');
+  box.textContent = '';
+  const warns = data.warnings || [];
+  if (warns.length) {
+    const w = document.createElement('div');
+    w.className = 'warn';
+    w.textContent = warns.join('\n');
+    box.appendChild(w);
+  }
+  for (const it of data.items || []) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const code = document.createElement('code');
+    code.textContent = it.key;
+    row.appendChild(code);
+    if (it.sensitive) {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = '敏感';
+      row.appendChild(tag);
+    }
+    box.appendChild(row);
+  }
+  box.hidden = false;
+}
+
+async function confirmImport() {
+  const name = $('import-name').value.trim();
+  const appId = $('import-appid').value.trim();
+  const text = $('import-text').value;
+  if (!name) {
+    dialogError('import-dialog', '请填写环境。');
+    return;
+  }
+  if (!appId) {
+    dialogError('import-dialog', '请填写应用 ID。');
+    return;
+  }
+  if (!text.trim()) {
+    dialogError('import-dialog', '请先粘贴配置内容。');
+    return;
+  }
+  const dupe = state.snapshots.find((s) => s.name === name && s.app_id === appId);
+  if (dupe) {
+    dialogError('import-dialog', `快照 ${name} (${appId}) 已存在，无法重复导入。`);
+    return;
+  }
+  try {
+    const data = await api('/api/snapshots', jsonOptions('POST', { name, app_id: appId, text }));
+    closeDialog('import-dialog');
+    await refreshSnapshots({ name: data.name, app_id: data.app_id });
+  } catch (err) {
+    dialogError('import-dialog', err.message);
+  }
+}
+
+// ---- entry edit / replace / delete ----
+
+function openEntry(item) {
+  editing = item;
+  $('entry-key').textContent = item.key;
+  $('entry-env').textContent = item.key.slice(0, 1);
+  const input = $('entry-value');
+  const warn = $('entry-warning');
+  if (item.sensitive) {
+    $('entry-title').textContent = '替换敏感值';
+    input.type = 'password';
+    input.value = '';
+    input.placeholder = '输入新值以替换…';
+    warn.hidden = false;
+  } else {
+    $('entry-title').textContent = '编辑配置项';
+    input.type = 'text';
+    input.value = item.value || '';
+    input.placeholder = '';
+    warn.hidden = true;
+  }
+  openDialog('entry-dialog');
+  input.focus();
+}
+
+async function saveEntry() {
+  if (!editing) return;
+  const key = editing.key;
+  const secret = editing.sensitive;
+  const value = $('entry-value').value;
+  if (secret && !value.trim()) {
+    closeDialog('entry-dialog');
+    editing = null;
+    return;
+  }
+  try {
+    await api(`/api/snapshots/${encodeURIComponent(state.active)}/items/${encodeURIComponent(key)}${snapshotQuery()}`,
+      jsonOptions('PUT', { value, secret }));
+    closeDialog('entry-dialog');
+    editing = null;
+    await reloadSnapshotData();
+  } catch (err) {
+    dialogError('entry-dialog', err.message);
+  }
+}
+
+function openDelete() {
+  if (!editing) return;
+  $('delete-key').textContent = editing.key;
+  openDialog('delete-dialog');
+}
+
+async function confirmDelete() {
+  if (!editing) return;
+  const key = editing.key;
+  try {
+    await api(`/api/snapshots/${encodeURIComponent(state.active)}/items/${encodeURIComponent(key)}${snapshotQuery()}`,
+      { method: 'DELETE' });
+    closeDialog('delete-dialog');
+    closeDialog('entry-dialog');
+    editing = null;
+    await reloadSnapshotData();
+  } catch (err) {
+    dialogError('delete-dialog', err.message);
+  }
+}
+
+// ---- compare ----
+
+function openCompare() {
+  const select = $('compare-target');
+  select.textContent = '';
+  $('compare-from').textContent = refLabel(state.active, state.activeAppID) || '—';
+  for (const s of state.snapshots) {
+    if (s.name === state.active && (s.app_id || '') === (state.activeAppID || '')) continue;
+    const opt = document.createElement('option');
+    opt.value = `${s.name}\u0000${s.app_id || ''}`;
+    opt.textContent = s.app_id ? `${s.name} (${s.app_id})` : s.name;
+    select.appendChild(opt);
+  }
+  if (!select.options.length) {
+    showError('没有可对比的其他快照。');
+    return;
+  }
+  if (state.lastCompareTo) {
+    const match = [...select.options].find((o) => o.value === state.lastCompareTo);
+    if (match) match.selected = true;
+  }
+  openDialog('compare-dialog');
+}
+
+async function confirmCompare() {
+  const from = state.active;
+  const optVal = $('compare-target').value;
+  const sepIdx = optVal.indexOf('\u0000');
+  const to = sepIdx >= 0 ? optVal.slice(0, sepIdx) : optVal;
+  const toApp = sepIdx >= 0 ? optVal.slice(sepIdx + 1) : '';
+  const fromRef = `${from}\u0000${state.activeAppID || ''}`;
+  const toRef = `${to}\u0000${toApp}`;
+  if (!from || !to || fromRef === toRef) {
+    dialogError('compare-dialog', '请选择目标环境。');
+    return;
+  }
+  try {
+    const params = new URLSearchParams({ from, to });
+    if (state.activeAppID) params.set('from_appid', state.activeAppID);
+    if (toApp) params.set('to_appid', toApp);
+    const data = await api(`/api/compare?${params.toString()}`);
+    state.compare = data;
+    state.lastCompareTo = optVal;
+    state.compareMeta = {
+      fromLabel: refLabel(from, state.activeAppID),
+      toLabel: refLabel(to, toApp),
+      changes: data.changes || [],
+    };
+    $('compare-filter').value = '';
+    renderCompareRefs(state.compareMeta.fromLabel, state.compareMeta.toLabel, state.compareMeta.changes);
+    renderCompare(state.compareMeta.changes);
+    closeDialog('compare-dialog');
+    openDialog('compare-result-dialog');
+  } catch (err) {
+    dialogError('compare-dialog', err.message);
+  }
+}
+
+function renderCompareRefs(fromLabel, toLabel, changes) {
+  const bar = $('compare-refs');
+  bar.textContent = '';
+  const f = document.createElement('span');
+  f.className = 'compare-ref from';
+  f.textContent = fromLabel;
+  const arrow = document.createElement('span');
+  arrow.className = 'compare-arrow';
+  arrow.textContent = '→';
+  const t = document.createElement('span');
+  t.className = 'compare-ref to';
+  t.textContent = toLabel;
+  bar.appendChild(f);
+  bar.appendChild(arrow);
+  bar.appendChild(t);
+  const stat = document.createElement('span');
+  stat.className = 'compare-stat';
+  const counts = { added: 0, removed: 0, changed: 0 };
+  for (const c of changes) counts[c.kind] = (counts[c.kind] || 0) + 1;
+  const parts = [];
+  if (counts.added) {
+    const s = document.createElement('span');
+    s.className = 'add';
+    s.textContent = `+${counts.added} 新增`;
+    parts.push(s);
+  }
+  if (counts.removed) {
+    const s = document.createElement('span');
+    s.className = 'del';
+    s.textContent = `-${counts.removed} 删除`;
+    parts.push(s);
+  }
+  if (counts.changed) {
+    const s = document.createElement('span');
+    s.className = 'chg';
+    s.textContent = `~${counts.changed} 变更`;
+    parts.push(s);
+  }
+  if (!parts.length) {
+    const s = document.createElement('span');
+    s.className = 'same';
+    s.textContent = '0 处变更';
+    parts.push(s);
+  }
+  for (const p of parts) stat.appendChild(p);
+  bar.appendChild(stat);
+  bar.hidden = false;
+}
+
+function renderCompare(changes) {
+  const body = $('compare-body');
+  body.textContent = '';
+  if (!changes.length) {
+    const d = document.createElement('span');
+    d.className = 'empty';
+    d.textContent = '两个环境配置一致。';
+    body.appendChild(d);
+    return;
+  }
+  const fmt = (v) => {
+    if (!v || !v.present) return '';
+    if (v.sensitive) {
+      const fp = v.fingerprint ? ` · 指纹 ${v.fingerprint}` : '';
+      return `敏感值 · ${v.length} 字符${fp}`;
+    }
+    return v.value == null ? '' : v.value;
+  };
+  const line = (sym, cls, text) => {
+    const row = document.createElement('div');
+    row.className = 'row ' + cls;
+    const s = document.createElement('span');
+    s.className = 'sym';
+    s.textContent = sym;
+    const code = document.createElement('code');
+    code.textContent = text;
+    row.appendChild(s);
+    row.appendChild(code);
+    return row;
+  };
+  for (const c of changes) {
+    if (c.kind === 'added') {
+      body.appendChild(line('+', 'add', `${c.key} = ${fmt(c.new)}`));
+    } else if (c.kind === 'removed') {
+      body.appendChild(line('-', 'del', `${c.key} = ${fmt(c.old)}`));
+    } else {
+      body.appendChild(line('-', 'del', `${c.key} = ${fmt(c.old)}`));
+      body.appendChild(line('+', 'add', `${c.key} = ${fmt(c.new)}`));
+    }
+  }
+}
+
+function applyCompareFilter() {
+  const q = $('compare-filter').value.trim().toLowerCase();
+  const all = state.compareMeta ? state.compareMeta.changes : [];
+  const filtered = q ? all.filter((c) => c.key.toLowerCase().includes(q)) : all;
+  renderCompare(filtered);
+}
+
+function copyText(text) {
+  return new Promise((resolve, reject) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(resolve).catch(() => {
+        legacyCopy(text) ? resolve() : reject(new Error('copy failed'));
+      });
+      return;
+    }
+    legacyCopy(text) ? resolve() : reject(new Error('copy failed'));
+  });
+  function legacyCopy(t) {
+    const ta = document.createElement('textarea');
+    ta.value = t;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+
+function copyCompareDiff() {
+  const meta = state.compareMeta;
+  if (!meta) return;
+  const fmtLine = (v) => {
+    if (!v || !v.present) return '—';
+    if (v.sensitive) {
+      const fp = v.fingerprint ? ` · 指纹 ${v.fingerprint}` : '';
+      return `敏感值 · ${v.length} 字符${fp}`;
+    }
+    return v.value == null ? '' : v.value;
+  };
+  const lines = [`${meta.fromLabel} → ${meta.toLabel}`];
+  for (const c of meta.changes) {
+    if (c.kind === 'added') lines.push(`+ ${c.key} = ${fmtLine(c.new)}`);
+    else if (c.kind === 'removed') lines.push(`- ${c.key} = ${fmtLine(c.old)}`);
+    else {
+      lines.push(`- ${c.key} = ${fmtLine(c.old)}`);
+      lines.push(`+ ${c.key} = ${fmtLine(c.new)}`);
+    }
+  }
+  copyText(lines.join('\n'))
+    .then(() => {
+      const btn = $('compare-copy-btn');
+      btn.textContent = '已复制';
+      setTimeout(() => { btn.textContent = '复制差异'; }, 1500);
+    })
+    .catch(() => {
+      const btn = $('compare-copy-btn');
+      btn.textContent = '复制失败';
+      setTimeout(() => { btn.textContent = '复制差异'; }, 1500);
+    });
+}
+
+// ---- multi-environment horizontal compare ----
+
+let multiState = null;
+
+function openMultiCompare() {
+  const list = $('multi-ref-list');
+  list.textContent = '';
+  $('multi-compare-error').hidden = true;
+  for (const s of state.snapshots) {
+    const label = document.createElement('label');
+    label.className = 'check-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = `${s.name}\u0000${s.app_id || ''}`;
+    if (s.name === state.active && (s.app_id || '') === (state.activeAppID || '')) cb.checked = true;
+    const txt = document.createElement('span');
+    txt.textContent = refLabel(s.name, s.app_id);
+    label.appendChild(cb);
+    label.appendChild(txt);
+    list.appendChild(label);
+  }
+  openDialog('multi-compare-dialog');
+}
+
+async function confirmMultiCompare() {
+  const refs = [];
+  for (const cb of $('multi-ref-list').querySelectorAll('input[type=checkbox]:checked')) {
+    const [name, appID] = cb.value.split('\u0000');
+    refs.push({ name, app_id: appID });
+  }
+  if (refs.length < 2) {
+    dialogError('multi-compare-dialog', '请至少选择 2 个快照。');
+    return;
+  }
+  try {
+    const data = await api('/api/compare/multi', jsonOptions('POST', { refs }));
+    multiState = data;
+    renderMultiTable(data);
+    closeDialog('multi-compare-dialog');
+    openDialog('multi-result-dialog');
+  } catch (err) {
+    dialogError('multi-compare-dialog', err.message);
+  }
+}
+
+function multiValueText(v) {
+  if (!v || !v.present) return { text: '—', cls: 'absent' };
+  if (v.sensitive) {
+    const fp = v.fingerprint ? ` · 指纹 ${v.fingerprint}` : '';
+    return { text: `敏感值 · ${v.length} 字符${fp}`, cls: 'masked' };
+  }
+  return { text: v.value == null ? '' : v.value, cls: 'plain' };
+}
+
+function stripQuotes(s) {
+  if (typeof s !== 'string') return s;
+  if (s.length >= 2 && ((s[0] === '"' && s[s.length - 1] === '"') || (s[0] === "'" && s[s.length - 1] === "'"))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+function rowHasDiff(row) {
+  const seen = new Set();
+  let presentCount = 0;
+  for (const v of row.values) {
+    if (!v || !v.present) continue;
+    presentCount++;
+    const t = v.sensitive ? `s:${v.length}:${v.fingerprint || ''}` : `p:${stripQuotes(v.value)}`;
+    seen.add(t);
+  }
+  return seen.size > 1 || (presentCount > 0 && presentCount < row.values.length);
+}
+
+function renderMultiTable(data) {
+  const wrap = $('multi-table-wrap');
+  wrap.textContent = '';
+  const table = document.createElement('table');
+  table.className = 'multi-table';
+  const thead = document.createElement('thead');
+  const hrow = document.createElement('tr');
+  const thKey = document.createElement('th');
+  thKey.textContent = 'KEY';
+  hrow.appendChild(thKey);
+  for (const ref of data.refs) {
+    const th = document.createElement('th');
+    th.textContent = refLabel(ref.name, ref.app_id);
+    th.title = `${ref.total} 项 · ${ref.sensitive} 个敏感`;
+    hrow.appendChild(th);
+  }
+  thead.appendChild(hrow);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const row of data.rows) {
+    const tr = document.createElement('tr');
+    const tdKey = document.createElement('td');
+    tdKey.className = 'k';
+    tdKey.textContent = row.key;
+    tr.appendChild(tdKey);
+    let hasDiff = rowHasDiff(row);
+    for (const v of row.values) {
+      const td = document.createElement('td');
+      const info = multiValueText(v);
+      td.textContent = info.text;
+      if (info.cls === 'masked') td.classList.add('m');
+      if (info.cls === 'absent') td.classList.add('a');
+      tr.appendChild(td);
+    }
+    if (hasDiff) tr.classList.add('diff-row');
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+}
+
+function copyMultiCompare() {
+  if (!multiState) return;
+  const lines = ['KEY\t' + multiState.refs.map((r) => refLabel(r.name, r.app_id)).join('\t')];
+  for (const row of multiState.rows) {
+    lines.push(row.key + '\t' + row.values.map((v) => {
+      if (!v || !v.present) return '—';
+      if (v.sensitive) return `敏感值·${v.length}字符${v.fingerprint ? `·${v.fingerprint}` : ''}`;
+      return v.value == null ? '' : v.value;
+    }).join('\t'));
+  }
+  copyText(lines.join('\n'))
+    .then(() => {
+      const btn = $('multi-copy-btn');
+      btn.textContent = '已复制';
+      setTimeout(() => { btn.textContent = '复制对比'; }, 1500);
+    })
+    .catch(() => {
+      const btn = $('multi-copy-btn');
+      btn.textContent = '复制失败';
+      setTimeout(() => { btn.textContent = '复制对比'; }, 1500);
+    });
+}
+
+function multiCellText(v) {
+  if (!v || !v.present) return '—';
+  if (v.sensitive) return `敏感值·${v.length}字符${v.fingerprint ? `·${v.fingerprint}` : ''}`;
+  return v.value == null ? '' : v.value;
+}
+
+function showMultiReport() {
+  if (!multiState) return;
+  $('multi-report-body').textContent = buildMultiReportText(multiState);
+  openDialog('multi-report-dialog');
+}
+
+function buildMultiReportText(data) {
+  const refsLabel = data.refs.map((r) => refLabel(r.name, r.app_id)).join(' / ');
+  const diffRows = data.rows.filter(rowHasDiff);
+  const sensitiveDiff = diffRows.filter((r) => r.values.some((v) => v && v.sensitive)).length;
+  const lines = [];
+  lines.push('横向对比报告');
+  lines.push(`对比环境：${refsLabel}`);
+  lines.push(`统计：共 ${data.rows.length} 个 key，${diffRows.length} 个存在差异，${data.rows.length - diffRows.length} 个全部一致；敏感值差异 ${sensitiveDiff} 个`);
+  lines.push('');
+  if (!diffRows.length) {
+    lines.push('所有环境配置完全一致。');
+  } else {
+    lines.push('差异字段：');
+    for (const row of diffRows) {
+      const cells = data.refs.map((r, i) => `${refLabel(r.name, r.app_id)}: ${multiCellText(row.values[i])}`);
+      lines.push(`${row.key} → ${cells.join(' | ')}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function copyMultiReport() {
+  if (!multiState) return;
+  copyText(buildMultiReportText(multiState))
+    .then(() => {
+      const btn = $('multi-report-copy-btn');
+      btn.textContent = '已复制';
+      setTimeout(() => { btn.textContent = '复制报告'; }, 1500);
+    })
+    .catch(() => {
+      const btn = $('multi-report-copy-btn');
+      btn.textContent = '复制失败';
+      setTimeout(() => { btn.textContent = '复制报告'; }, 1500);
+    });
+}
+
+function csvEscape(v) {
+  if (/[",\n\r]/.test(v)) return '"' + v.replace(/"/g, '""') + '"';
+  return v;
+}
+
+function copyMultiCSV() {
+  if (!multiState) return;
+  const lines = [['KEY', ...multiState.refs.map((r) => refLabel(r.name, r.app_id))].map(csvEscape).join(',')];
+  for (const row of multiState.rows) {
+    const cells = [row.key, ...row.values.map(multiCellText)].map(csvEscape);
+    lines.push(cells.join(','));
+  }
+  copyText(lines.join('\n'))
+    .then(() => {
+      const btn = $('multi-csv-btn');
+      btn.textContent = '已复制';
+      setTimeout(() => { btn.textContent = '复制 CSV'; }, 1500);
+    })
+    .catch(() => {
+      const btn = $('multi-csv-btn');
+      btn.textContent = '复制失败';
+      setTimeout(() => { btn.textContent = '复制 CSV'; }, 1500);
+    });
+}
+
+// ---- single key across snapshots ----
+
+function openKeyCompare(key) {
+  const appid = state.activeAppID || '';
+  $('key-compare-title').textContent = appid
+    ? `单 key 对比：${key}（同 appid ${appid}）`
+    : `单 key 对比：${key}（无 appid 快照）`;
+  const body = $('key-compare-body');
+  body.textContent = '';
+  const loading = document.createElement('span');
+  loading.className = 'empty';
+  loading.textContent = '加载中…';
+  body.appendChild(loading);
+  openDialog('key-compare-dialog');
+  loadKeyCompare(key);
+}
+async function loadKeyCompare(key) {
+  const body = $('key-compare-body');
+  try {
+    const appid = state.activeAppID || '';
+    const data = await api(`/api/compare/key?key=${encodeURIComponent(key)}&appid=${encodeURIComponent(appid)}`);
+    body.textContent = '';
+    if (!data.rows.length) {
+      const d = document.createElement('span');
+      d.className = 'empty';
+      d.textContent = '没有快照包含此 key。';
+      body.appendChild(d);
+      return;
+    }
+    for (const row of data.rows) {
+      const line = document.createElement('div');
+      line.className = 'row';
+      const ref = document.createElement('code');
+      ref.className = 'key-ref';
+      ref.textContent = refLabel(row.name, row.app_id);
+      const val = document.createElement('code');
+      const info = multiValueText(row.value);
+      val.className = info.cls;
+      val.textContent = info.text;
+      line.appendChild(ref);
+      line.appendChild(val);
+      body.appendChild(line);
+    }
+  } catch (err) {
+    body.textContent = '';
+    const d = document.createElement('span');
+    d.className = 'empty';
+    d.textContent = err.message;
+    body.appendChild(d);
+  }
+}
+
+// ---- export ----
+
+function openExport() {
+  if (!state.active) {
+    showError('当前没有已选快照。');
+    return;
+  }
+  $('export-name').textContent = refLabel(state.active, state.activeAppID);
+  openDialog('export-dialog');
+}
+
+async function confirmExport() {
+  const name = state.active;
+  if (!name) {
+    dialogError('export-dialog', '当前没有已选快照。');
+    return;
+  }
+  try {
+    const res = await api(`/api/snapshots/${encodeURIComponent(name)}/export${snapshotQuery()}`,
+      jsonOptions('POST', { confirm: true }));
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}${state.activeAppID ? `__${state.activeAppID}` : ''}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    closeDialog('export-dialog');
+  } catch (err) {
+    dialogError('export-dialog', err.message);
+  }
+}
+
+async function copyExport() {
+  const name = state.active;
+  if (!name) { dialogError('export-dialog', '当前没有已选快照。'); return; }
+  try {
+    const res = await api(`/api/snapshots/${encodeURIComponent(name)}/export${snapshotQuery()}`,
+      jsonOptions('POST', { confirm: true }));
+    const text = await res.text();
+    await copyText(text);
+    closeDialog('export-dialog');
+  } catch (err) {
+    dialogError('export-dialog', err.message);
+  }
+}
+
+// ---- summary (placeholder) ----
+
+function openSummary() {
+  openDialog('summary-dialog');
+}
+
+// ---- snapshot delete ----
+
+function snapshotQuery() {
+  return state.activeAppID ? `?appid=${encodeURIComponent(state.activeAppID)}` : '';
+}
+
+let deletingSnapshot = null;
+
+function openDeleteSnapshot(s) {
+  deletingSnapshot = s;
+  $('snap-delete-name').textContent = s.name;
+  $('snap-delete-appid').textContent = s.app_id || '—';
+  openDialog('snap-delete-dialog');
+}
+
+async function confirmDeleteSnapshot() {
+  if (!deletingSnapshot) return;
+  const { name, app_id } = deletingSnapshot;
+  const q = app_id ? `?appid=${encodeURIComponent(app_id)}` : '';
+  try {
+    await api(`/api/snapshots/${encodeURIComponent(name)}${q}`, { method: 'DELETE' });
+    closeDialog('snap-delete-dialog');
+    deletingSnapshot = null;
+    if (state.active === name && (state.activeAppID || '') === (app_id || '')) {
+      state.active = null;
+      state.activeAppID = '';
+    }
+    await refreshSnapshots();
+  } catch (err) {
+    dialogError('snap-delete-dialog', err.message);
+  }
+}
+
+// ---- reveal ----
+
+let revealItem = null;
+
+function openReveal(item) {
+  revealItem = item;
+  $('reveal-key').textContent = item.key;
+  $('reveal-value').textContent = '';
+  $('reveal-value').hidden = true;
+  $('reveal-confirm-btn').hidden = false;
+  openDialog('reveal-dialog');
+}
+
+async function confirmReveal() {
+  if (!revealItem) return;
+  const key = revealItem.key;
+  try {
+    const data = await api(`/api/snapshots/${encodeURIComponent(state.active)}/reveal${snapshotQuery()}`,
+      jsonOptions('POST', { targets: [key], confirm: true }));
+    $('reveal-value').textContent = data.values[key] != null ? data.values[key] : '(空)';
+    $('reveal-value').hidden = false;
+    $('reveal-confirm-btn').hidden = true;
+  } catch (err) {
+    dialogError('reveal-dialog', `${err.message}\n\n解密显示仅用于 AES 加密的值（如 OSS AK/SK，配合快照内 imile.fs.aes.* 配置）。普通敏感值出于安全不提供明文查看。`);
+  }
+}
+
+// ---- bulk edit ----
+
+let editLoaded = false;
+
+function openBulkEdit() {
+  if (!state.active) { showError('当前没有已选快照。'); return; }
+  $('edit-name').textContent = refLabel(state.active, state.activeAppID);
+  $('edit-text').value = '';
+  $('edit-save-btn').hidden = true;
+  editLoaded = false;
+  openDialog('edit-dialog');
+  loadBulkEdit();
+}
+
+async function loadBulkEdit() {
+  if (!state.active) return;
+  try {
+    const data = await api(`/api/snapshots/${encodeURIComponent(state.active)}/edit${snapshotQuery()}`,
+      jsonOptions('POST', { confirm: true }));
+    $('edit-text').value = data.text;
+    $('edit-save-btn').hidden = false;
+    editLoaded = true;
+  } catch (err) {
+    dialogError('edit-dialog', err.message);
+  }
+}
+
+async function saveBulkEdit() {
+  if (!state.active || !editLoaded) return;
+  const text = $('edit-text').value;
+  try {
+    await api(`/api/snapshots/${encodeURIComponent(state.active)}/edit${snapshotQuery()}`,
+      jsonOptions('PUT', { text }));
+    closeDialog('edit-dialog');
+    await reloadSnapshotData();
+  } catch (err) {
+    dialogError('edit-dialog', err.message);
+  }
+}
+
+// ---- wiring ----
+
+function wire() {
+  document.addEventListener('click', (e) => {
+    const close = e.target.closest('[data-close]');
+    if (close) {
+      close.closest('dialog').close();
+      return;
+    }
+    const act = e.target.closest('[data-action]');
+    if (!act) return;
+    switch (act.dataset.action) {
+      case 'import': openImport(); break;
+      case 'compare': openCompare(); break;
+      case 'export': openExport(); break;
+      case 'focus-search': switchView('snapshots'); $('search-input').focus(); break;
+      case 'summary': openSummary(); break;
+      case 'bulk-edit': openBulkEdit(); break;
+      case 'aes-tools': switchView('aes'); break;
+      case 'multi-compare': openMultiCompare(); break;
+    }
+  });
+
+  $('nav-aes').addEventListener('click', () => switchView('aes'));
+  $('nav-settings').addEventListener('click', () => switchView('settings'));
+
+  $('aes-encrypt-btn').addEventListener('click', () => runAES('encrypt'));
+  $('aes-decrypt-btn').addEventListener('click', () => runAES('decrypt'));
+  $('aes-gen-key').addEventListener('click', genAESKey);
+  $('aes-load-config').addEventListener('click', loadAESConfigIntoForm);
+  $('aes-save-config').addEventListener('click', saveAESConfig);
+  $('aes-copy').addEventListener('click', copyAESOutput);
+
+  $('init-key-btn').addEventListener('click', initKey);
+  $('clear-aes-config-btn').addEventListener('click', clearAESConfig);
+
+  $('reveal-confirm-btn').addEventListener('click', confirmReveal);
+  $('edit-form').addEventListener('submit', (e) => { e.preventDefault(); saveBulkEdit(); });
+
+  $('snap-delete-confirm-btn').addEventListener('click', confirmDeleteSnapshot);
+
+  $('export-copy-btn').addEventListener('click', copyExport);
+
+  $('search-input').addEventListener('input', renderTable);
+
+  $('import-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if ($('import-confirm-btn').hidden) runImportPreview();
+    else confirmImport();
+  });
+  $('import-preview-btn').addEventListener('click', runImportPreview);
+  $('import-name').addEventListener('input', checkImportDuplicate);
+  $('import-appid').addEventListener('input', checkImportDuplicate);
+
+  $('entry-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    saveEntry();
+  });
+  $('entry-delete-btn').addEventListener('click', openDelete);
+  $('delete-confirm-btn').addEventListener('click', confirmDelete);
+  $('compare-confirm-btn').addEventListener('click', confirmCompare);
+  $('compare-filter').addEventListener('input', applyCompareFilter);
+  $('compare-copy-btn').addEventListener('click', copyCompareDiff);
+  $('multi-compare-confirm-btn').addEventListener('click', confirmMultiCompare);
+  $('multi-copy-btn').addEventListener('click', copyMultiCompare);
+  $('multi-report-btn').addEventListener('click', showMultiReport);
+  $('multi-report-copy-btn').addEventListener('click', copyMultiReport);
+  $('multi-csv-btn').addEventListener('click', copyMultiCSV);
+  $('export-confirm-btn').addEventListener('click', confirmExport);
+}
+
+async function init() {
+  wire();
+  switchView('snapshots');
+  if (!TOKEN) {
+    showError('未携带访问令牌：请用启动时打印的完整 URL（含 ?t=...）打开，否则导入/修改/导出/解密等操作不可用。');
+  }
+  try {
+    const data = await api('/api/snapshots');
+    state.snapshots = data.snapshots;
+  } catch (err) {
+    showError(err.message);
+  }
+  renderRail();
+  const first = state.snapshots[0];
+  if (first) await loadSnapshot(first.name, first.app_id);
+  else {
+    state.active = null;
+    state.activeAppID = '';
+    renderContext();
+    renderTable();
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init);
