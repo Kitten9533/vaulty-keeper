@@ -12,9 +12,10 @@ import (
 )
 
 // Import parses Apollo key/value text and writes a new encrypted snapshot.
+// Sensitive values are encrypted with sensitiveKey, others with snapKey.
 // It does not check for an existing snapshot; callers decide overwrite policy.
 // Returns the number of entries written.
-func Import(dir, name, appID, text string, snapKey []byte) (int, error) {
+func Import(dir, name, appID, text string, snapKey, sensitiveKey []byte) (int, error) {
 	if err := apollo.ValidateSnapshotName(name); err != nil {
 		return 0, err
 	}
@@ -27,7 +28,7 @@ func Import(dir, name, appID, text string, snapKey []byte) (int, error) {
 	}
 	s := apollo.NewSnapshot(name, appID)
 	for _, kv := range kvs {
-		if err := s.Set(snapKey, kv.Key, kv.Value, nil); err != nil {
+		if err := s.Set(snapKey, sensitiveKey, kv.Key, kv.Value, nil); err != nil {
 			return 0, err
 		}
 	}
@@ -38,7 +39,7 @@ func Import(dir, name, appID, text string, snapKey []byte) (int, error) {
 }
 
 // GetValue returns a decrypted value and whether it exists.
-func GetValue(dir, name, appID string, snapKey []byte, key string) (string, bool, error) {
+func GetValue(dir, name, appID string, snapKey, sensitiveKey []byte, key string) (string, bool, error) {
 	if err := apollo.ValidateKey(key); err != nil {
 		return "", false, err
 	}
@@ -46,11 +47,11 @@ func GetValue(dir, name, appID string, snapKey []byte, key string) (string, bool
 	if err != nil {
 		return "", false, err
 	}
-	return s.Get(snapKey, key)
+	return s.Get(snapKey, sensitiveKey, key)
 }
 
 // SetValue upserts an item and saves. Returns the safe view of the item.
-func SetValue(dir, name, appID, key, value string, secret *bool, snapKey []byte) (*apollo.VisibleItem, error) {
+func SetValue(dir, name, appID, key, value string, secret *bool, snapKey, sensitiveKey []byte) (*apollo.VisibleItem, error) {
 	if err := apollo.ValidateKey(key); err != nil {
 		return nil, err
 	}
@@ -58,13 +59,13 @@ func SetValue(dir, name, appID, key, value string, secret *bool, snapKey []byte)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Set(snapKey, key, value, secret); err != nil {
+	if err := s.Set(snapKey, sensitiveKey, key, value, secret); err != nil {
 		return nil, err
 	}
 	if err := s.Save(apollo.SnapPath(dir, name, appID)); err != nil {
 		return nil, err
 	}
-	visible, err := s.VisibleItems(snapKey)
+	visible, err := s.VisibleItems(snapKey, sensitiveKey)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +96,7 @@ func DeleteValue(dir, name, appID, key string, snapKey []byte) (bool, error) {
 }
 
 // Compare returns the added/removed/changed diff between two snapshots.
-func Compare(dir, from, fromAppID, to, toAppID string, snapKey []byte) ([]apollo.Change, error) {
+func Compare(dir, from, fromAppID, to, toAppID string, snapKey, sensitiveKey []byte) ([]apollo.Change, error) {
 	if err := apollo.ValidateSnapshotName(from); err != nil {
 		return nil, err
 	}
@@ -110,11 +111,11 @@ func Compare(dir, from, fromAppID, to, toAppID string, snapKey []byte) ([]apollo
 	if err != nil {
 		return nil, err
 	}
-	return a.Diff(b, snapKey)
+	return a.Diff(b, snapKey, sensitiveKey)
 }
 
 // Export returns the full plaintext "KEY = value" listing, keys sorted.
-func Export(dir, name, appID string, snapKey []byte) (string, error) {
+func Export(dir, name, appID string, snapKey, sensitiveKey []byte) (string, error) {
 	s, err := load(dir, name, appID)
 	if err != nil {
 		return "", err
@@ -126,7 +127,7 @@ func Export(dir, name, appID string, snapKey []byte) (string, error) {
 	sort.Strings(keys)
 	var buf strings.Builder
 	for _, k := range keys {
-		v, err := s.Items[k].DecryptValue(snapKey)
+		v, err := s.DecryptItem(s.Items[k], snapKey, sensitiveKey)
 		if err != nil {
 			return "", err
 		}
@@ -137,13 +138,13 @@ func Export(dir, name, appID string, snapKey []byte) (string, error) {
 
 // EditLoad returns the snapshot as plaintext "KEY = value" lines, keys sorted
 // — the same projection as Export, consumed by the bulk-edit flow.
-func EditLoad(dir, name, appID string, snapKey []byte) (string, error) {
-	return Export(dir, name, appID, snapKey)
+func EditLoad(dir, name, appID string, snapKey, sensitiveKey []byte) (string, error) {
+	return Export(dir, name, appID, snapKey, sensitiveKey)
 }
 
 // EditApply parses plaintext and re-encrypts the whole snapshot. Returns the
 // new entry count. Fails without saving if nothing parses.
-func EditApply(dir, name, appID string, snapKey []byte, text string) (int, error) {
+func EditApply(dir, name, appID string, snapKey, sensitiveKey []byte, text string) (int, error) {
 	s, err := load(dir, name, appID)
 	if err != nil {
 		return 0, err
@@ -154,7 +155,7 @@ func EditApply(dir, name, appID string, snapKey []byte, text string) (int, error
 	}
 	ns := apollo.NewSnapshot(s.Meta.Name, s.Meta.AppID)
 	for _, kv := range kvs {
-		if err := ns.Set(snapKey, kv.Key, kv.Value, nil); err != nil {
+		if err := ns.Set(snapKey, sensitiveKey, kv.Key, kv.Value, nil); err != nil {
 			return 0, err
 		}
 	}
@@ -164,53 +165,43 @@ func EditApply(dir, name, appID string, snapKey []byte, text string) (int, error
 	return len(kvs), nil
 }
 
-// Reveal decrypts AES-protected targets using the snapshot's AES config
-// (imile.fs.aes.secret-key / imile.fs.aes.iv). Overrides take precedence over
-// env vars, which take precedence over the snapshot. Fails without returning
-// any plaintext if any target fails.
-func Reveal(dir, name, appID string, snapKey []byte, targets []string, aesKeyOverride, aesIVOverride string) (map[string]string, error) {
+// Reveal returns plaintext for the requested keys. Without key/iv overrides it
+// decrypts each target with its own key (the sensitive key for sensitive
+// values, the snapshot key otherwise) — the "show" path for masked values.
+// With explicit key/iv overrides it decrypts the raw stored value as a Java
+// CryptoUtil AES ciphertext (e.g. OSS AK/SK pulled from Apollo as ciphertext).
+// Fails without returning any plaintext if any target fails.
+func Reveal(dir, name, appID string, snapKey, sensitiveKey []byte, targets []string, aesKeyOverride, aesIVOverride string) (map[string]string, error) {
 	s, err := load(dir, name, appID)
 	if err != nil {
 		return nil, err
-	}
-	aesKey := aesKeyOverride
-	if aesKey == "" {
-		aesKey = os.Getenv("AI_TOOLS_AES_KEY")
-	}
-	if aesKey == "" {
-		if v, ok, err := s.Get(snapKey, "imile.fs.aes.secret-key"); err != nil {
-			return nil, err
-		} else if ok {
-			aesKey = v
-		}
-	}
-	aesIV := aesIVOverride
-	if aesIV == "" {
-		aesIV = os.Getenv("AI_TOOLS_AES_IV")
-	}
-	if aesIV == "" {
-		if v, ok, err := s.Get(snapKey, "imile.fs.aes.iv"); err != nil {
-			return nil, err
-		} else if ok {
-			aesIV = v
-		}
-	}
-	if aesKey == "" || aesIV == "" {
-		return nil, errors.New("AES key/iv not found (pass --key/--iv, set AI_TOOLS_AES_KEY/IV, or keep imile.fs.aes.secret-key / imile.fs.aes.iv in the snapshot)")
 	}
 	plain := map[string]string{}
 	for _, k := range targets {
 		if err := apollo.ValidateKey(k); err != nil {
 			return nil, err
 		}
-		cipher, ok, err := s.Get(snapKey, k)
-		if err != nil {
-			return nil, err
-		}
+		it, ok := s.Items[k]
 		if !ok {
 			return nil, fmt.Errorf("key %q not found in snapshot %q", k, name)
 		}
-		p, err := aesx.Decrypt(aesKey, aesIV, cipher)
+		if aesKeyOverride != "" && aesIVOverride != "" {
+			readKey := snapKey
+			if it.Secret {
+				readKey = sensitiveKey
+			}
+			cipher, err := it.DecryptValue(readKey)
+			if err != nil {
+				return nil, fmt.Errorf("read %q: %w", k, err)
+			}
+			p, err := aesx.Decrypt(aesKeyOverride, aesIVOverride, cipher)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt %q: %w", k, err)
+			}
+			plain[k] = p
+			continue
+		}
+		p, err := s.DecryptItem(it, snapKey, sensitiveKey)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt %q: %w", k, err)
 		}

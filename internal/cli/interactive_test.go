@@ -17,8 +17,8 @@ func TestCustomKeyIv(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "aes.json")
 	t.Setenv("AI_TOOLS_AES_CONFIG", cfg)
 
-	// set custom key/iv via prompts
-	it := newIt("MyAesSecretKey12\n0123456789abcdef\n")
+	// add an entry via the management menu: 1=新增, then name/key/iv, 0=返回
+	it := newIt("1\nmykey\nMyAesSecretKey12\n0123456789abcdef\n0\n")
 	it.cmdCustomKeyIv()
 	if it.aesKey != "MyAesSecretKey12" || it.aesIV != "0123456789abcdef" {
 		t.Fatalf("got key=%q iv=%q", it.aesKey, it.aesIV)
@@ -27,15 +27,15 @@ func TestCustomKeyIv(t *testing.T) {
 		t.Fatalf("config not saved: %v", err)
 	}
 
-	// a fresh session loads the saved values
+	// a fresh session loads the saved entries
 	it2 := newIt("")
 	it2.loadAesConfig()
-	if it2.aesKey != it.aesKey || it2.aesIV != it.aesIV {
-		t.Errorf("reload mismatch: %q %q", it2.aesKey, it2.aesIV)
+	if len(it2.aesEntries) != 1 || it2.aesEntries[0].Name != "mykey" || it2.aesKey != it.aesKey || it2.aesIV != it.aesIV {
+		t.Errorf("reload mismatch: %#v", it2.aesEntries)
 	}
 
 	// aesKeyIv uses the saved values as defaults on empty input
-	it3 := newIt("\n\n")
+	it3 := newIt("\n\n\n")
 	it3.loadAesConfig()
 	k, iv, cancel := it3.aesKeyIv()
 	if cancel || k != it.aesKey || iv != it.aesIV {
@@ -43,7 +43,7 @@ func TestCustomKeyIv(t *testing.T) {
 	}
 
 	// empty key/iv input is rejected
-	it4 := newIt("clear\n\n")
+	it4 := newIt("\nclear\n\n")
 	k, iv, cancel = it4.aesKeyIv()
 	if !cancel && k != "" {
 		t.Errorf("unexpected: %q %q cancel=%v", k, iv, cancel)

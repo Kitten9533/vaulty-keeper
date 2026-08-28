@@ -19,7 +19,20 @@ import (
 	"ai-tools/internal/ui"
 )
 
-const Version = "0.4.0"
+const Version = "0.5.0"
+
+// bothKeys resolves both the snapshot key and the sensitive-value key.
+func bothKeys() ([]byte, []byte, error) {
+	snapKey, err := apollo.SnapshotKey()
+	if err != nil {
+		return nil, nil, err
+	}
+	sensitiveKey, err := apollo.SensitiveKey()
+	if err != nil {
+		return nil, nil, err
+	}
+	return snapKey, sensitiveKey, nil
+}
 
 func Run(args []string) int {
 	if len(args) == 0 {
@@ -34,6 +47,8 @@ func Run(args []string) int {
 		return runApollo(args[1:])
 	case "aes":
 		return runAES(args[1:])
+	case "sensitive":
+		return runSensitive(args[1:])
 	case "ui":
 		return runUI(args[1:])
 	case "completion":
@@ -58,6 +73,7 @@ Usage:
   ai-tools                          interactive menu (TTY only)
   ai-tools apollo <subcommand>   Apollo snapshot tool (encrypted at rest)
   ai-tools aes <subcommand>      AES/GCM encrypt/decrypt (Java CryptoUtil compatible)
+  ai-tools sensitive <subcommand>  sensitive-value key management
   ai-tools ui [--dir <dir>] [--port <port>] [--no-open]
   ai-tools completion <shell>    print zsh/bash/fish completion
   ai-tools version
@@ -234,13 +250,13 @@ rm requires confirmation on a TTY (or --yes when piped).
 import refuses to overwrite an existing snapshot without --force
 (on a TTY it asks for confirmation instead).
 Plaintext-emitting commands (get on a sensitive key, list/compare --reveal,
-reveal, export, edit, aes decrypt) require --yes when piped, so scripts/AI
-never dump secrets into stdout by accident.
+reveal, export, edit, aes decrypt) are only available in an interactive
+terminal; scripts/AI environments are always refused, even with --yes.
 
 Snapshots live in ~/.ai-tools/apollo/ (override: --dir or AI_TOOLS_APOLLO_DIR).
-Sensitive keys (password/token/secret/...) are masked unless --reveal.
-reveal decrypts values using the AES config from the same snapshot
-(imile.fs.aes.secret-key / imile.fs.aes.iv) — e.g. OSS AK/SK.
+Sensitive keys (password/token/secret/...) are encrypted with the sensitive
+key and masked unless --reveal; reveal shows their plaintext by default and
+decrypts an external CryptoUtil AES ciphertext when --key/--iv are given.
 `)
 }
 
@@ -295,7 +311,7 @@ func apolloImport(args []string) int {
 	if len(kvs) == 0 {
 		return fail("apollo import: no key/value entries parsed")
 	}
-	key, err := apollo.SnapshotKey()
+	key, sensitiveKey, err := bothKeys()
 	if err != nil {
 		return fail("apollo import: %v", err)
 	}
@@ -318,7 +334,7 @@ func apolloImport(args []string) int {
 			}
 		}
 	}
-	n, err := app.Import(dirPath, *name, *appID, text, key)
+	n, err := app.Import(dirPath, *name, *appID, text, key, sensitiveKey)
 	if err != nil {
 		return fail("apollo import: %v", err)
 	}
@@ -329,15 +345,16 @@ func apolloImport(args []string) int {
 func apolloList(args []string) int {
 	fs := flag.NewFlagSet("apollo list", flag.ContinueOnError)
 	reveal := fs.Bool("reveal", false, "show plaintext values")
-	yes := fs.Bool("yes", false, "acknowledge plaintext reveal when piped")
+	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	jsonOut := fs.Bool("json", false, "output JSON")
 	dir := fs.String("dir", "", "snapshot directory")
 	appID := fs.String("appid", "", "app id (default: legacy {env}.json)")
 	if code := parseFlags(fs, args); code != 0 {
 		return code
 	}
-	if *reveal && !*yes && !isTerminal() {
-		return fail("apollo list: --reveal outputs plaintext; requires --yes when piped")
+	_ = *yes
+	if *reveal && !isTerminal() {
+		return fail("apollo list: plaintext output is only available in an interactive terminal; scripts/AI environments never receive plaintext")
 	}
 
 	dirPath, err := snapDir(*dir)
@@ -359,7 +376,7 @@ func apolloList(args []string) int {
 		return 0
 	}
 	name := fs.Arg(0)
-	key, err := apollo.SnapshotKey()
+	snapKey, sensitiveKey, err := bothKeys()
 	if err != nil {
 		return fail("apollo list: %v", err)
 	}
@@ -379,7 +396,7 @@ func apolloList(args []string) int {
 
 	decrypted := map[string]string{}
 	for _, k := range keys {
-		v, err := s.Items[k].DecryptValue(key)
+		v, err := s.DecryptItem(s.Items[k], snapKey, sensitiveKey)
 		if err != nil {
 			return fail("apollo list: %v", err)
 		}
@@ -389,7 +406,7 @@ func apolloList(args []string) int {
 	if *jsonOut {
 		items := map[string]string{}
 		for _, k := range keys {
-			if s.Items[k].Secret && !*reveal {
+			if (s.Items[k].Secret || apollo.IsSensitiveKeyValue(k, decrypted[k])) && !*reveal {
 				items[k] = apollo.MaskWithLen(len(decrypted[k]))
 			} else {
 				items[k] = decrypted[k]
@@ -408,7 +425,7 @@ func apolloList(args []string) int {
 	}
 
 	for _, k := range keys {
-		if s.Items[k].Secret && !*reveal {
+		if (s.Items[k].Secret || apollo.IsSensitiveKeyValue(k, decrypted[k])) && !*reveal {
 			fmt.Printf("%s = %s\n", k, apollo.MaskWithLen(len(decrypted[k])))
 			continue
 		}
@@ -421,31 +438,37 @@ func apolloGet(args []string) int {
 	fs := flag.NewFlagSet("apollo get", flag.ContinueOnError)
 	dir := fs.String("dir", "", "snapshot directory")
 	appID := fs.String("appid", "", "app id (default: legacy {env}.json)")
-	yes := fs.Bool("yes", false, "acknowledge plaintext output of a sensitive key when piped")
+	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	if code := parseFlags(fs, args); code != 0 {
 		return code
 	}
+	_ = *yes
 	if fs.NArg() != 2 {
 		return fail("apollo get: usage: ai-tools apollo get <name> <key>")
 	}
 	name, k := fs.Arg(0), fs.Arg(1)
-	if apollo.IsSensitive(k) && !*yes && !isTerminal() {
-		return fail("apollo get: key %q is sensitive; plaintext output requires --yes when piped", k)
+	if apollo.IsSensitive(k) && !isTerminal() {
+		return fail("apollo get: key %q is sensitive; plaintext is only available in an interactive terminal, scripts/AI environments never receive it", k)
 	}
 	dirPath, err := snapDir(*dir)
 	if err != nil {
 		return fail("apollo get: %v", err)
 	}
-	key, err := apollo.SnapshotKey()
+	key, sensitiveKey, err := bothKeys()
 	if err != nil {
 		return fail("apollo get: %v", err)
 	}
-	v, ok, err := app.GetValue(dirPath, name, *appID, key, k)
+	v, ok, err := app.GetValue(dirPath, name, *appID, key, sensitiveKey, k)
 	if err != nil {
 		return fail("apollo get: %v", err)
 	}
 	if !ok {
 		return fail("apollo get: key %q not found in snapshot %q", k, name)
+	}
+	// credential URIs (e.g. mongodb://user:pw@host) are only caught by value;
+	// gate them the same way as name-based sensitive keys.
+	if apollo.IsSensitiveKeyValue(k, v) && !isTerminal() {
+		return fail("apollo get: key %q carries inline credentials; plaintext is only available in an interactive terminal, scripts/AI environments never receive it", k)
 	}
 	fmt.Println(v)
 	return 0
@@ -468,7 +491,7 @@ func apolloSet(args []string) int {
 	if err != nil {
 		return fail("apollo set: %v", err)
 	}
-	key, err := apollo.SnapshotKey()
+	key, sensitiveKey, err := bothKeys()
 	if err != nil {
 		return fail("apollo set: %v", err)
 	}
@@ -481,7 +504,7 @@ func apolloSet(args []string) int {
 		t := false
 		secret = &t
 	}
-	if _, err := app.SetValue(dirPath, name, *appID, k, v, secret, key); err != nil {
+	if _, err := app.SetValue(dirPath, name, *appID, k, v, secret, key, sensitiveKey); err != nil {
 		return fail("apollo set: %v", err)
 	}
 	fmt.Println(green(fmt.Sprintf("set %s.%s", name, k)))
@@ -503,11 +526,7 @@ func apolloUnset(args []string) int {
 	if err != nil {
 		return fail("apollo unset: %v", err)
 	}
-	key, err := apollo.SnapshotKey()
-	if err != nil {
-		return fail("apollo unset: %v", err)
-	}
-	ok, err := app.DeleteValue(dirPath, name, *appID, k, key)
+	ok, err := app.DeleteValue(dirPath, name, *appID, k, nil)
 	if err != nil {
 		return fail("apollo unset: %v", err)
 	}
@@ -521,7 +540,7 @@ func apolloUnset(args []string) int {
 func apolloCompare(args []string) int {
 	fs := flag.NewFlagSet("apollo compare", flag.ContinueOnError)
 	reveal := fs.Bool("reveal", false, "show plaintext values")
-	yes := fs.Bool("yes", false, "acknowledge plaintext reveal when piped")
+	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	jsonOut := fs.Bool("json", false, "output JSON")
 	dir := fs.String("dir", "", "snapshot directory")
 	appID := fs.String("appid", "", "app id for the first snapshot")
@@ -529,8 +548,9 @@ func apolloCompare(args []string) int {
 	if code := parseFlags(fs, args); code != 0 {
 		return code
 	}
-	if *reveal && !*yes && !isTerminal() {
-		return fail("apollo compare: --reveal outputs plaintext; requires --yes when piped")
+	_ = *yes
+	if *reveal && !isTerminal() {
+		return fail("apollo compare: plaintext output is only available in an interactive terminal; scripts/AI environments never receive plaintext")
 	}
 	if fs.NArg() != 2 {
 		return fail("apollo compare: usage: ai-tools apollo compare <nameA> <nameB>")
@@ -540,11 +560,11 @@ func apolloCompare(args []string) int {
 	if err != nil {
 		return fail("apollo compare: %v", err)
 	}
-	key, err := apollo.SnapshotKey()
+	key, sensitiveKey, err := bothKeys()
 	if err != nil {
 		return fail("apollo compare: %v", err)
 	}
-	changes, err := app.Compare(dirPath, nameA, *appID, nameB, *appIDTo, key)
+	changes, err := app.Compare(dirPath, nameA, *appID, nameB, *appIDTo, key, sensitiveKey)
 	if err != nil {
 		return fail("apollo compare: %v", err)
 	}
@@ -557,7 +577,7 @@ func apolloCompare(args []string) int {
 		if which == "new" {
 			v = c.New
 		}
-		if c.Secret && !*reveal {
+		if (c.Secret || apollo.IsSensitiveKeyValue(c.Key, v)) && !*reveal {
 			return apollo.MaskWithLen(len(v))
 		}
 		return v
@@ -609,12 +629,13 @@ func apolloExport(args []string) int {
 	dir := fs.String("dir", "", "snapshot directory")
 	appID := fs.String("appid", "", "app id (default: legacy {env}.json)")
 	copyToClip := fs.Bool("copy", false, "copy to clipboard (macOS pbcopy)")
-	yes := fs.Bool("yes", false, "acknowledge plaintext export when piped")
+	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	if code := parseFlags(fs, args); code != 0 {
 		return code
 	}
-	if !*yes && !isTerminal() {
-		return fail("apollo export: plaintext output requires --yes when piped")
+	_ = *yes
+	if !isTerminal() {
+		return fail("apollo export: plaintext output is only available in an interactive terminal; scripts/AI environments never receive plaintext")
 	}
 	if fs.NArg() != 1 {
 		return fail("apollo export: usage: ai-tools apollo export <name>")
@@ -624,11 +645,11 @@ func apolloExport(args []string) int {
 	if err != nil {
 		return fail("apollo export: %v", err)
 	}
-	key, err := apollo.SnapshotKey()
+	key, sensitiveKey, err := bothKeys()
 	if err != nil {
 		return fail("apollo export: %v", err)
 	}
-	text, err := app.Export(dirPath, name, *appID, key)
+	text, err := app.Export(dirPath, name, *appID, key, sensitiveKey)
 	if err != nil {
 		return fail("apollo export: %v", err)
 	}
@@ -688,8 +709,9 @@ func apolloRm(args []string) int {
 	return 0
 }
 
-// apolloReveal decrypts values in a snapshot using the AES config from the
-// same snapshot (imile.fs.aes.secret-key / imile.fs.aes.iv), e.g. OSS AK/SK.
+// apolloReveal shows plaintext for snapshot keys (sensitive values via the
+// sensitive key), or decrypts an external CryptoUtil AES ciphertext when
+// --key/--iv are given.
 func apolloReveal(args []string) int {
 	fs := flag.NewFlagSet("apollo reveal", flag.ContinueOnError)
 	dir := fs.String("dir", "", "snapshot directory")
@@ -697,12 +719,13 @@ func apolloReveal(args []string) int {
 	appID := fs.String("appid", "", "app id (default: legacy {env}.json)")
 	keyFlag := fs.String("key", "", "AES secret key override (env AI_TOOLS_AES_KEY)")
 	ivFlag := fs.String("iv", "", "AES iv override (env AI_TOOLS_AES_IV)")
-	yes := fs.Bool("yes", false, "acknowledge plaintext reveal when piped")
+	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	if code := parseFlags(fs, args); code != 0 {
 		return code
 	}
-	if !*yes && !isTerminal() {
-		return fail("apollo reveal: plaintext output requires --yes when piped")
+	_ = *yes
+	if !isTerminal() {
+		return fail("apollo reveal: plaintext output is only available in an interactive terminal; scripts/AI environments never receive plaintext")
 	}
 	if fs.NArg() < 2 {
 		return fail("apollo reveal: usage: ai-tools apollo reveal <name> <key...>")
@@ -714,11 +737,11 @@ func apolloReveal(args []string) int {
 	if err != nil {
 		return fail("apollo reveal: %v", err)
 	}
-	snapKey, err := apollo.SnapshotKey()
+	snapKey, sensitiveKey, err := bothKeys()
 	if err != nil {
 		return fail("apollo reveal: %v", err)
 	}
-	plain, err := app.Reveal(dirPath, name, *appID, snapKey, targets, *keyFlag, *ivFlag)
+	plain, err := app.Reveal(dirPath, name, *appID, snapKey, sensitiveKey, targets, *keyFlag, *ivFlag)
 	if err != nil {
 		return fail("apollo reveal: %v", err)
 	}
@@ -742,20 +765,21 @@ func apolloReveal(args []string) int {
 }
 
 // apolloEdit opens a snapshot as plaintext in $EDITOR; on save it re-encrypts.
-// In non-TTY (script/AI) contexts it requires --yes: the plaintext is written
-// to a temp file and handed to $EDITOR, so an attacker-controlled editor (or
-// EDITOR=cat) would otherwise dump every value in plaintext.
+// Plaintext is only available in an interactive terminal: in script/AI
+// contexts the whole command is refused, so an agent cannot dump every value
+// in plaintext (e.g. via EDITOR=cat) even when asked to.
 func apolloEdit(args []string) int {
 	fs := flag.NewFlagSet("apollo edit", flag.ContinueOnError)
 	dir := fs.String("dir", "", "snapshot directory")
 	appID := fs.String("appid", "", "app id (default: legacy {env}.json)")
 	editor := fs.String("editor", "", "editor binary (default $EDITOR or vi)")
-	yes := fs.Bool("yes", false, "acknowledge plaintext editing when piped")
+	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	if code := parseFlags(fs, args); code != 0 {
 		return code
 	}
-	if !*yes && !isTerminal() {
-		return fail("apollo edit: editing exposes the snapshot as plaintext; requires --yes when piped")
+	_ = *yes
+	if !isTerminal() {
+		return fail("apollo edit: plaintext is only available in an interactive terminal; scripts/AI environments never receive plaintext")
 	}
 	if fs.NArg() != 1 {
 		return fail("apollo edit: usage: ai-tools apollo edit <name>")
@@ -765,11 +789,11 @@ func apolloEdit(args []string) int {
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
-	snapKey, err := apollo.SnapshotKey()
+	snapKey, sensitiveKey, err := bothKeys()
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
-	text, err := app.EditLoad(dirPath, name, *appID, snapKey)
+	text, err := app.EditLoad(dirPath, name, *appID, snapKey, sensitiveKey)
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
@@ -811,11 +835,54 @@ func apolloEdit(args []string) int {
 	for _, w := range warnings {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
-	n, err := app.EditApply(dirPath, name, *appID, snapKey, string(content))
+	n, err := app.EditApply(dirPath, name, *appID, snapKey, sensitiveKey, string(content))
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
 	fmt.Println(green(fmt.Sprintf("updated snapshot %q: %d entries", name, n)))
+	return 0
+}
+
+// ---- sensitive ----
+
+func runSensitive(args []string) int {
+	if len(args) == 0 {
+		sensitiveUsage(os.Stderr)
+		return 2
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "init":
+		return sensitiveInit(rest)
+	case "help", "-h", "--help":
+		sensitiveUsage(os.Stdout)
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "ai-tools sensitive: unknown subcommand %q\n\n", sub)
+		sensitiveUsage(os.Stderr)
+		return 2
+	}
+}
+
+func sensitiveUsage(w io.Writer) {
+	fmt.Fprintf(w, `Usage:
+  ai-tools sensitive init [--force]   create the sensitive-value key in Keychain
+
+The sensitive key encrypts sensitive snapshot values, so masked values can
+only be revealed with this key (env override: AI_TOOLS_SENSITIVE_KEY).
+`)
+}
+
+func sensitiveInit(args []string) int {
+	fs := flag.NewFlagSet("sensitive init", flag.ContinueOnError)
+	force := fs.Bool("force", false, "regenerate even if a key already exists")
+	if code := parseFlags(fs, args); code != 0 {
+		return code
+	}
+	if err := app.InitSensitiveKey(*force); err != nil {
+		return fail("sensitive init: %v", err)
+	}
+	fmt.Println(green("sensitive key created in Keychain"))
 	return 0
 }
 
@@ -834,6 +901,10 @@ func runAES(args []string) int {
 		return aesOp(rest, false)
 	case "gen-key":
 		return aesGenKey(rest)
+	case "list":
+		return aesList(rest)
+	case "add":
+		return aesAdd(rest)
 	case "help", "-h", "--help":
 		aesUsage(os.Stdout)
 		return 0
@@ -846,22 +917,64 @@ func runAES(args []string) int {
 
 func aesUsage(w io.Writer) {
 	fmt.Fprintf(w, `Usage:
-  ai-tools aes encrypt [--key <secret>] [--iv <iv>] [--file <path>] [<plaintext>]
-  ai-tools aes decrypt [--key <secret>] [--iv <iv>] [--file <path>] [--yes] [<base64>]
-  ai-tools aes gen-key [--bytes 16|24|32] [--iv-bytes 12|16]
+  ai-tools aes encrypt [--key <secret>] [--iv <iv>] [--name <entry>] [--file <path>] [<plaintext>]
+  ai-tools aes decrypt [--key <secret>] [--iv <iv>] [--name <entry>] [--file <path>] [--yes] [<base64>]
+  ai-tools aes gen-key [--bytes 16|24|32] [--iv-bytes 12|16] [--name <entry>]
+  ai-tools aes list
+  ai-tools aes add --name <entry> --key <secret> --iv <iv>
 
-Input comes from --file, arguments or stdin. Key/iv may also be provided via
+Key/iv entries live in aes.json (array of {name, secret-key, iv}).
+Key/iv resolution: --key/--iv, then --name (looked up in aes.json), then
 AI_TOOLS_AES_KEY / AI_TOOLS_AES_IV. Algorithm: AES/GCM/NoPadding, tag 128
 bits, key 16/24/32 bytes (UTF-8), iv as UTF-8 bytes (Java CryptoUtil
-compatible). gen-key prints fresh printable key/iv for encrypting new values.
-decrypt outputs plaintext and requires --yes when piped.
+compatible). gen-key prints fresh printable key/iv for encrypting new values;
+with --name it also saves the entry to aes.json. decrypt outputs plaintext and
+is only available in an interactive terminal (scripts/AI are always refused).
 `)
+}
+
+func aesList(args []string) int {
+	fs := flag.NewFlagSet("aes list", flag.ContinueOnError)
+	if code := parseFlags(fs, args); code != 0 {
+		return code
+	}
+	entries, err := app.AESConfigList()
+	if err != nil {
+		return fail("aes list: %v", err)
+	}
+	if len(entries) == 0 {
+		fmt.Println("(no entries)")
+		return 0
+	}
+	for _, e := range entries {
+		fmt.Printf("%s\t%s\t%s\n", e.Name, e.SecretKey, e.IV)
+	}
+	return 0
+}
+
+func aesAdd(args []string) int {
+	fs := flag.NewFlagSet("aes add", flag.ContinueOnError)
+	name := fs.String("name", "", "entry name (required)")
+	key := fs.String("key", "", "secret key (required)")
+	iv := fs.String("iv", "", "iv string (required)")
+	if code := parseFlags(fs, args); code != 0 {
+		return code
+	}
+	if *name == "" {
+		return fail("aes add: --name is required")
+	}
+	if err := app.AESConfigAdd(*name, *key, *iv); err != nil {
+		return fail("aes add: %v", err)
+	}
+	fmt.Println(green(fmt.Sprintf("saved entry %q to %s", *name, app.AESConfigPath())))
+	return 0
 }
 
 func aesGenKey(args []string) int {
 	fs := flag.NewFlagSet("aes gen-key", flag.ContinueOnError)
 	keyBytes := fs.Int("bytes", 16, "key length in bytes (16/24/32)")
 	ivBytes := fs.Int("iv-bytes", 16, "iv length in bytes (12/16)")
+	name := fs.String("name", "", "save the generated key/iv to aes.json under this name")
 	if code := parseFlags(fs, args); code != 0 {
 		return code
 	}
@@ -875,6 +988,12 @@ func aesGenKey(args []string) int {
 	if err != nil {
 		return fail("aes gen-key: %v", err)
 	}
+	if *name != "" {
+		if err := app.AESConfigAdd(*name, key, iv); err != nil {
+			return fail("aes gen-key: %v", err)
+		}
+		fmt.Println(green(fmt.Sprintf("saved entry %q to %s", *name, app.AESConfigPath())))
+	}
 	fmt.Printf("SECRET_KEY: %s\n", key)
 	fmt.Printf("IV: %s\n", iv)
 	return 0
@@ -884,25 +1003,42 @@ func aesOp(args []string, encrypt bool) int {
 	fs := flag.NewFlagSet("aes", flag.ContinueOnError)
 	key := fs.String("key", "", "secret key (UTF-8, 16/24/32 bytes); env AI_TOOLS_AES_KEY")
 	iv := fs.String("iv", "", "iv string (UTF-8); env AI_TOOLS_AES_IV")
+	name := fs.String("name", "", "use key/iv from the named aes.json entry")
 	file := fs.String("file", "", "read input from file (supports multi-line)")
-	yes := fs.Bool("yes", false, "acknowledge plaintext decrypt output when piped")
+	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	if code := parseFlags(fs, args); code != 0 {
 		return code
 	}
-	if !encrypt && !*yes && !isTerminal() {
-		return fail("aes decrypt: plaintext output requires --yes when piped")
+	_ = *yes
+	if !encrypt && !isTerminal() {
+		return fail("aes decrypt: plaintext output is only available in an interactive terminal; scripts/AI environments never receive plaintext")
 	}
 
 	k := *key
+	i := *iv
+	if (k == "" || i == "") && *name != "" {
+		e, err := app.AESConfigGet(*name)
+		if err != nil {
+			return fail("aes: %v", err)
+		}
+		if e == nil {
+			return fail("aes: entry %q not found in %s", *name, app.AESConfigPath())
+		}
+		if k == "" {
+			k = e.SecretKey
+		}
+		if i == "" {
+			i = e.IV
+		}
+	}
 	if k == "" {
 		k = os.Getenv("AI_TOOLS_AES_KEY")
 	}
-	i := *iv
 	if i == "" {
 		i = os.Getenv("AI_TOOLS_AES_IV")
 	}
 	if k == "" || i == "" {
-		return fail("aes: --key and --iv are required (or AI_TOOLS_AES_KEY/AI_TOOLS_AES_IV)")
+		return fail("aes: --key/--iv (or --name, or AI_TOOLS_AES_KEY/AI_TOOLS_AES_IV) are required")
 	}
 
 	var input string
@@ -979,6 +1115,7 @@ _ai-tools() {
   commands=(
     'apollo:Apollo snapshot tool (encrypted at rest)'
     'aes:AES/GCM encrypt/decrypt (Java CryptoUtil compatible)'
+    'sensitive:sensitive-value key management'
     'ui:local web UI'
     'completion:print shell completion'
     'version:show version'
@@ -999,7 +1136,7 @@ _ai-tools() {
         'set:set a value'
         'unset:unset a value'
         'compare:compare two snapshots'
-        'reveal:decrypt with AES config'
+        'reveal:show plaintext values'
         'edit:edit snapshot in $EDITOR'
         'export:export plaintext KV'
       )
@@ -1007,7 +1144,12 @@ _ai-tools() {
       ;;
     aes)
       local -a subs
-      subs=('encrypt:encrypt plaintext' 'decrypt:decrypt base64' 'gen-key:generate key/iv')
+      subs=('encrypt:encrypt plaintext' 'decrypt:decrypt base64' 'gen-key:generate key/iv' 'list:list saved entries' 'add:add a saved entry')
+      if (( CURRENT == 3 )); then _describe 'subcommand' subs; fi
+      ;;
+    sensitive)
+      local -a subs
+      subs=('init:create sensitive-value key')
       if (( CURRENT == 3 )); then _describe 'subcommand' subs; fi
       ;;
   esac
@@ -1019,7 +1161,7 @@ const completionBash = `_ai-tools() {
   local cur
   cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "apollo aes ui completion version help" -- "${cur}") )
+    COMPREPLY=( $(compgen -W "apollo aes sensitive ui completion version help" -- "${cur}") )
     return
   fi
   case "${COMP_WORDS[1]}" in
@@ -1030,7 +1172,12 @@ const completionBash = `_ai-tools() {
       ;;
     aes)
       if [[ ${COMP_CWORD} -eq 2 ]]; then
-        COMPREPLY=( $(compgen -W "encrypt decrypt gen-key help" -- "${cur}") )
+        COMPREPLY=( $(compgen -W "encrypt decrypt gen-key list add help" -- "${cur}") )
+      fi
+      ;;
+    sensitive)
+      if [[ ${COMP_CWORD} -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "init help" -- "${cur}") )
       fi
       ;;
   esac
@@ -1040,12 +1187,14 @@ complete -F _ai-tools ai-tools
 
 const completionFish = `complete -c ai-tools -f -n '__fish_use_subcommand' -a apollo -d 'Apollo snapshot tool'
 complete -c ai-tools -f -n '__fish_use_subcommand' -a aes -d 'AES/GCM encrypt/decrypt'
+complete -c ai-tools -f -n '__fish_use_subcommand' -a sensitive -d 'sensitive-value key management'
 complete -c ai-tools -f -n '__fish_use_subcommand' -a ui -d 'local web UI'
 complete -c ai-tools -f -n '__fish_use_subcommand' -a completion -d 'print shell completion'
 complete -c ai-tools -f -n '__fish_use_subcommand' -a version -d 'show version'
 complete -c ai-tools -f -n '__fish_use_subcommand' -a help -d 'show help'
 complete -c ai-tools -f -n '__fish_seen_subcommand_from apollo' -a 'init import list get set unset compare reveal edit export help'
-complete -c ai-tools -f -n '__fish_seen_subcommand_from aes' -a 'encrypt decrypt gen-key help'
+complete -c ai-tools -f -n '__fish_seen_subcommand_from aes' -a 'encrypt decrypt gen-key list add help'
+complete -c ai-tools -f -n '__fish_seen_subcommand_from sensitive' -a 'init help'
 `
 
 func runCompletion(args []string) int {

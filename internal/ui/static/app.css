@@ -43,7 +43,7 @@ aside{background:var(--rail);border-right:1px solid var(--line);padding:15px 10p
 /* ---- canvas ---- */
 main{min-width:0;display:flex;flex-direction:column;height:100vh;overflow:hidden}
 .view{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}
-.canvas{max-width:900px;margin:auto;padding:46px 40px 72px}
+.canvas{max-width:1200px;margin:auto;padding:46px 40px 72px}
 .hero{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:34px}
 h1{font:500 30px/1.2 Georgia,"Songti SC",serif;letter-spacing:-.028em;margin:0 0 8px;color:#232220}
 .sub{margin:0;color:var(--mute);font-size:13.5px}
@@ -75,11 +75,12 @@ h1{font:500 30px/1.2 Georgia,"Songti SC",serif;letter-spacing:-.028em;margin:0 0
 /* table */
 table{width:100%;border-collapse:collapse;font-size:13px}
 #config-table .empty{display:block;padding:26px 8px;color:var(--faint);font-size:12.5px;text-align:center}
+#config-table{table-layout:fixed}
 tr{transition:background .1s}
 tr:hover{background:#fbf9f5}
 td{padding:11px 8px;border-bottom:1px solid var(--line-soft)}
-td:first-child{width:50%;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#4c4842}
-td:last-child{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#5b554d;text-align:right;word-break:break-all;overflow-wrap:anywhere;vertical-align:top}
+#config-table td:first-child{width:50%;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#4c4842;word-break:break-all;overflow-wrap:anywhere;vertical-align:top}
+#config-table td:last-child{width:50%;font:13px/1.6 inherit;color:#5b554d;text-align:right;word-break:break-all;overflow-wrap:anywhere;vertical-align:top}
 .masked{color:#b59d91}
 .masked i{font-style:normal;font-size:11px;color:var(--faint);margin-left:7px}
 
@@ -193,6 +194,23 @@ dialog::backdrop{background:rgba(38,38,36,.28)}
 /* ---- reveal box ---- */
 .reveal-box{margin:0 0 14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fdfbf8;
   font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#4c4842;overflow-wrap:anywhere;white-space:pre-wrap;max-height:200px;overflow:auto}
+
+/* ---- reveal key/iv inputs ---- */
+#reveal-dialog .fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#reveal-dialog .hint{margin:0 0 14px;font-size:12px}
+.reveal-advanced{margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fdfbf8}
+.reveal-advanced .row-actions{margin:0 0 10px}
+
+/* ---- select + aes list ---- */
+.select{font:inherit;font-size:13px;border:1px solid var(--line);border-radius:var(--r-ctl);background:#fff;color:#4a4641;padding:7px 10px;outline:none;max-width:280px}
+.select:focus{border-color:#d9d3c9}
+#view-aes .row-actions .select{flex:0 1 auto}
+.aes-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:14px}
+.aes-table td{padding:8px 10px;border-bottom:1px solid var(--line-soft)}
+.aes-table td:first-child{width:30%;font:600 12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#4c4842;word-break:break-all;overflow-wrap:anywhere}
+.aes-table td:nth-child(2),.aes-table td:nth-child(3){width:28%;word-break:break-all;overflow-wrap:anywhere}
+.aes-table td:last-child{width:14%;text-align:right}
+.aes-table td.empty{color:var(--faint);text-align:center;padding:18px 8px}
 
 /* ---- reveal button in table rows ---- */
 .reveal-btn{margin-left:8px;border:1px solid var(--line);background:#fff;color:#984d36;font:11.5px inherit;border-radius:6px;padding:2px 8px;cursor:pointer}

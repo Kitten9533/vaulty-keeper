@@ -106,6 +106,7 @@ func TestIsBoolFlag(t *testing.T) {
 func TestApolloPipeline(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 
@@ -126,8 +127,8 @@ func TestApolloPipeline(t *testing.T) {
 	if code := Run([]string{"apollo", "get", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 0 {
 		t.Fatalf("get failed with code %d", code)
 	}
-	// compare prod vs test: FOO changed 1->2
-	if code := Run([]string{"apollo", "compare", "prod", "test", "--reveal", "--yes", "--dir", snap, "--appid", "app-x", "--appid-to", "app-x"}); code != 0 {
+	// compare prod vs test: FOO changed 1->2 (masked output is fine)
+	if code := Run([]string{"apollo", "compare", "prod", "test", "--dir", snap, "--appid", "app-x", "--appid-to", "app-x"}); code != 0 {
 		t.Fatalf("compare failed with code %d", code)
 	}
 
@@ -144,6 +145,7 @@ func TestApolloPipeline(t *testing.T) {
 func TestImportAutoName(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "merdi_portal.txt")
@@ -164,6 +166,7 @@ func TestImportRefusesOverwriteWithoutForce(t *testing.T) {
 
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -209,6 +212,7 @@ func TestReveal(t *testing.T) {
 	asTTY(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 
@@ -219,22 +223,31 @@ func TestReveal(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := filepath.Join(dir, "paste.txt")
-	os.WriteFile(in, []byte("imile.fs.aes.secret-key = "+aesKey+"\nimile.fs.aes.iv = "+aesIV+"\nimile.fs.oss.secret-key = "+ct+"\n"), 0o600)
+	os.WriteFile(in, []byte("imile.fs.oss.secret-key = "+ct+"\nSECRET_TOKEN = plain-secret\n"), 0o600)
 	if code := Run([]string{"apollo", "import", in, "--name", "prod", "--dir", snap, "--app-id", "app-x"}); code != 0 {
 		t.Fatalf("import failed with code %d", code)
 	}
 
-	// reveal using AES config from the same snapshot
+	// reveal of a sensitive value shows its plaintext (decrypted with the
+	// sensitive key); an external ciphertext value is returned as stored
 	out := captureStdout(t, func() {
-		if code := Run([]string{"apollo", "reveal", "prod", "imile.fs.oss.secret-key", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		if code := Run([]string{"apollo", "reveal", "prod", "SECRET_TOKEN", "--dir", snap, "--appid", "app-x"}); code != 0 {
 			t.Fatalf("reveal failed with code %d", code)
 		}
 	})
-	if strings.TrimSpace(out) != "LTAI5t-secret-SK" {
-		t.Errorf("reveal got %q", out)
+	if strings.TrimSpace(out) != "plain-secret" {
+		t.Errorf("reveal sensitive got %q", out)
+	}
+	out = captureStdout(t, func() {
+		if code := Run([]string{"apollo", "reveal", "prod", "imile.fs.oss.secret-key", "--dir", snap, "--appid", "app-x"}); code != 0 {
+			t.Fatalf("reveal ciphertext failed with code %d", code)
+		}
+	})
+	if strings.TrimSpace(out) != ct {
+		t.Errorf("reveal without override got %q, want stored ciphertext", out)
 	}
 
-	// reveal with explicit --key/--iv override
+	// reveal with explicit --key/--iv override decrypts the external ciphertext
 	out = captureStdout(t, func() {
 		if code := Run([]string{"apollo", "reveal", "prod", "imile.fs.oss.secret-key", "--key", aesKey, "--iv", aesIV, "--dir", snap, "--appid", "app-x"}); code != 0 {
 			t.Fatalf("reveal --key failed with code %d", code)
@@ -253,7 +266,7 @@ func TestReveal(t *testing.T) {
 		t.Fatalf("set failed with code %d", code)
 	}
 	out = captureStdout(t, func() {
-		if code := Run([]string{"apollo", "reveal", "prod", "imile.fs.oss.secret-key", "imile.fs.oss.access-key-id", "--json", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		if code := Run([]string{"apollo", "reveal", "prod", "imile.fs.oss.secret-key", "imile.fs.oss.access-key-id", "--key", aesKey, "--iv", aesIV, "--json", "--dir", snap, "--appid", "app-x"}); code != 0 {
 			t.Fatalf("reveal --json failed with code %d", code)
 		}
 	})
@@ -266,10 +279,11 @@ func TestReveal(t *testing.T) {
 	}
 }
 
-func TestRevealMissingAesConfig(t *testing.T) {
+func TestRevealPlainValue(t *testing.T) {
 	asTTY(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -277,15 +291,22 @@ func TestRevealMissingAesConfig(t *testing.T) {
 	if code := Run([]string{"apollo", "import", in, "--name", "prod", "--dir", snap, "--app-id", "app-x"}); code != 0 {
 		t.Fatalf("import failed with code %d", code)
 	}
-	// no aes config anywhere -> should fail with a helpful message (code 1)
-	if code := Run([]string{"apollo", "reveal", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 1 {
-		t.Fatalf("expected failure code 1, got %d", code)
+	// reveal of a plain non-sensitive value decrypts with the snapshot key
+	out := captureStdout(t, func() {
+		if code := Run([]string{"apollo", "reveal", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 0 {
+			t.Fatalf("reveal FOO failed with code %d", code)
+		}
+	})
+	if strings.TrimSpace(out) != "bar" {
+		t.Errorf("reveal FOO got %q", out)
 	}
 }
 
 func TestEdit(t *testing.T) {
+	asTTY(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -298,7 +319,7 @@ func TestEdit(t *testing.T) {
 	editor := filepath.Join(dir, "editor.sh")
 	os.WriteFile(editor, []byte("#!/bin/sh\nsed -i '' 's/FOO = 1/FOO = 9/' \"$1\"\nprintf 'NEW_KEY = 3\\n' >> \"$1\"\n"), 0o700)
 
-	if code := Run([]string{"apollo", "edit", "prod", "--editor", editor, "--yes", "--dir", snap, "--appid", "app-x"}); code != 0 {
+	if code := Run([]string{"apollo", "edit", "prod", "--editor", editor, "--dir", snap, "--appid", "app-x"}); code != 0 {
 		t.Fatalf("edit failed with code %d", code)
 	}
 
@@ -323,6 +344,7 @@ func TestEdit(t *testing.T) {
 func TestListAndCompareJSON(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -377,6 +399,7 @@ func TestListAndCompareJSON(t *testing.T) {
 func TestApolloRejectsUnsafeSnapshotName(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	err := captureStderr(t, func() {
 		if code := Run([]string{"apollo", "list", "../outside", "--dir", t.TempDir(), "--appid", "app-x"}); code != 1 {
 			t.Fatalf("list with unsafe name returned %d, want 1", code)
@@ -441,6 +464,7 @@ func TestCompletion(t *testing.T) {
 func TestApolloRm(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -471,10 +495,11 @@ func TestApolloRm(t *testing.T) {
 	}
 }
 
-func TestPlaintextCommandsRequireYesWhenPiped(t *testing.T) {
+func TestPlaintextCommandsRejectedWhenPiped(t *testing.T) {
 	asPiped(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -482,21 +507,31 @@ func TestPlaintextCommandsRequireYesWhenPiped(t *testing.T) {
 	if code := Run([]string{"apollo", "import", in, "--name", "prod", "--dir", snap, "--app-id", "app-x"}); code != 0 {
 		t.Fatalf("import failed with code %d", code)
 	}
-
-	cases := []struct {
-		name string
-		args []string
-	}{
-		{"get sensitive key", []string{"apollo", "get", "prod", "SECRET_TOKEN", "--dir", snap, "--appid", "app-x"}},
-		{"list --reveal", []string{"apollo", "list", "prod", "--reveal", "--dir", snap, "--appid", "app-x"}},
-		{"compare --reveal", []string{"apollo", "compare", "prod", "prod", "--reveal", "--dir", snap, "--appid", "app-x", "--appid-to", "app-x"}},
-		{"export", []string{"apollo", "export", "prod", "--dir", snap, "--appid", "app-x"}},
-		{"edit", []string{"apollo", "edit", "prod", "--editor", "/bin/true", "--dir", snap, "--appid", "app-x"}},
-		{"aes decrypt", []string{"aes", "decrypt", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop", "AAAA"}},
+	ct, err := aesx.Encrypt("0123456789abcdef", "abcdefghijklmnop", "hello")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		if code := Run(c.args); code != 1 {
-			t.Fatalf("%s without --yes returned %d, want 1", c.name, code)
+	noopEditor := filepath.Join(dir, "noop-editor.sh")
+	os.WriteFile(noopEditor, []byte("#!/bin/sh\nexit 0\n"), 0o700)
+
+	// plaintext commands are refused in non-TTY contexts even with --yes
+	cases := [][]string{
+		{"apollo", "get", "prod", "SECRET_TOKEN", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "get", "prod", "SECRET_TOKEN", "--yes", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "list", "prod", "--reveal", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "list", "prod", "--reveal", "--yes", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "compare", "prod", "prod", "--reveal", "--dir", snap, "--appid", "app-x", "--appid-to", "app-x"},
+		{"apollo", "compare", "prod", "prod", "--reveal", "--yes", "--dir", snap, "--appid", "app-x", "--appid-to", "app-x"},
+		{"apollo", "export", "prod", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "export", "prod", "--yes", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "edit", "prod", "--editor", noopEditor, "--dir", snap, "--appid", "app-x"},
+		{"apollo", "edit", "prod", "--editor", noopEditor, "--yes", "--dir", snap, "--appid", "app-x"},
+		{"aes", "decrypt", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop", ct},
+		{"aes", "decrypt", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop", "--yes", ct},
+	}
+	for _, args := range cases {
+		if code := Run(args); code != 1 {
+			t.Fatalf("non-TTY plaintext %v returned %d, want 1", args, code)
 		}
 	}
 
@@ -508,24 +543,39 @@ func TestPlaintextCommandsRequireYesWhenPiped(t *testing.T) {
 	if code := Run([]string{"aes", "encrypt", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop", "hello"}); code != 0 {
 		t.Fatalf("aes encrypt failed with code %d", code)
 	}
-	// each plaintext command works with --yes
+}
+
+func TestPlaintextCommandsAvailableOnTTY(t *testing.T) {
+	asTTY(t)
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	in := filepath.Join(dir, "paste.txt")
+	os.WriteFile(in, []byte("SECRET_TOKEN = abc\nFOO = 1\n"), 0o600)
+	if code := Run([]string{"apollo", "import", in, "--name", "prod", "--dir", snap, "--app-id", "app-x"}); code != 0 {
+		t.Fatalf("import failed with code %d", code)
+	}
 	ct, err := aesx.Encrypt("0123456789abcdef", "abcdefghijklmnop", "hello")
 	if err != nil {
 		t.Fatal(err)
 	}
 	noopEditor := filepath.Join(dir, "noop-editor.sh")
 	os.WriteFile(noopEditor, []byte("#!/bin/sh\nexit 0\n"), 0o700)
-	withYes := [][]string{
-		{"apollo", "get", "prod", "SECRET_TOKEN", "--yes", "--dir", snap, "--appid", "app-x"},
-		{"apollo", "list", "prod", "--reveal", "--yes", "--dir", snap, "--appid", "app-x"},
-		{"apollo", "compare", "prod", "prod", "--reveal", "--yes", "--dir", snap, "--appid", "app-x", "--appid-to", "app-x"},
-		{"apollo", "export", "prod", "--yes", "--dir", snap, "--appid", "app-x"},
-		{"apollo", "edit", "prod", "--editor", noopEditor, "--yes", "--dir", snap, "--appid", "app-x"},
-		{"aes", "decrypt", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop", "--yes", ct},
+
+	// plaintext commands run in an interactive terminal
+	cases := [][]string{
+		{"apollo", "get", "prod", "SECRET_TOKEN", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "list", "prod", "--reveal", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "compare", "prod", "prod", "--reveal", "--dir", snap, "--appid", "app-x", "--appid-to", "app-x"},
+		{"apollo", "export", "prod", "--dir", snap, "--appid", "app-x"},
+		{"apollo", "edit", "prod", "--editor", noopEditor, "--dir", snap, "--appid", "app-x"},
+		{"aes", "decrypt", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop", ct},
 	}
-	for _, args := range withYes {
+	for _, args := range cases {
 		if code := Run(args); code != 0 {
-			t.Fatalf("with --yes returned %d: %v", code, args)
+			t.Fatalf("TTY plaintext %v returned %d, want 0", args, code)
 		}
 	}
 }

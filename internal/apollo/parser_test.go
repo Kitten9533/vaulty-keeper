@@ -182,7 +182,7 @@ func TestDiffIgnoresSurroundingQuotes(t *testing.T) {
 		{"QUOTED", `"hello"`},
 		{"REAL_DIFF", "1"},
 	} {
-		if err := a.Set(key, kv.k, kv.v, nil); err != nil {
+		if err := a.Set(key, key, kv.k, kv.v, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -191,11 +191,11 @@ func TestDiffIgnoresSurroundingQuotes(t *testing.T) {
 		{"QUOTED", "'hello'"},
 		{"REAL_DIFF", "2"},
 	} {
-		if err := b.Set(key, kv.k, kv.v, nil); err != nil {
+		if err := b.Set(key, key, kv.k, kv.v, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	changes, err := a.Diff(b, key)
+	changes, err := a.Diff(b, key, key)
 	if err != nil {
 		t.Fatal(err)
 	}

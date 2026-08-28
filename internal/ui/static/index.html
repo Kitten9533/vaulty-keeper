@@ -61,7 +61,6 @@
               <div class="task" data-action="focus-search"><button class="task-btn" type="button"><strong>查看或修改单项</strong></button><span>按 key 搜索；敏感内容默认隐藏。</span></div>
               <div class="task" data-action="bulk-edit"><button class="task-btn" type="button"><strong>明文编辑全部</strong></button><span>确认后以明文编辑并重新加密。</span></div>
               <div class="task" data-action="export"><button class="task-btn" type="button"><strong>导出配置</strong></button><span>生成明文前需要再次确认。</span></div>
-              <div class="task" data-action="aes-tools"><button class="task-btn" type="button"><strong>AES 加解密</strong></button><span>手动 key/iv 加解密与生成。</span></div>
             </div>
             <div class="note">🔒 <b>本地优先。</b> 明文只在确认后短暂显示。</div>
           </aside>
@@ -74,12 +73,20 @@
         <div class="hero">
           <div>
             <h1>AES 加解密工具。</h1>
-            <p class="sub">Java CryptoUtil 兼容（AES/GCM/NoPadding）。key/iv 手动输入，或从本机 aes.json 预填。</p>
+            <p class="sub">Java CryptoUtil 兼容（AES/GCM/NoPadding）。从本机 aes.json 列表选择 key/iv，或手动输入。</p>
           </div>
         </div>
         <div id="aes-error" class="error-region" hidden></div>
         <div class="panel">
+          <div class="row-actions">
+            <select id="aes-list-select" class="select" aria-label="选择已保存的 key/iv"></select>
+            <button class="ghost" type="button" id="aes-load-config">加载所选</button>
+            <button class="ghost" type="button" id="aes-refresh-list">刷新列表</button>
+          </div>
           <div class="fields">
+            <label class="field" for="aes-name">名称
+              <input id="aes-name" type="text" autocomplete="off" spellcheck="false" placeholder="保存到列表时使用">
+            </label>
             <label class="field" for="aes-key">AES key（16/24/32 字节 UTF-8）
               <input id="aes-key" type="text" autocomplete="off" spellcheck="false">
             </label>
@@ -88,9 +95,8 @@
             </label>
           </div>
           <div class="row-actions">
-            <button class="ghost" type="button" id="aes-load-config">从 aes.json 预填</button>
             <button class="ghost" type="button" id="aes-gen-key">生成 key/iv</button>
-            <button class="ghost" type="button" id="aes-save-config">保存为默认</button>
+            <button class="ghost" type="button" id="aes-save-config">保存到列表</button>
           </div>
           <label class="field" for="aes-input">输入
             <textarea id="aes-input" rows="6" placeholder="明文或 base64 密文…" spellcheck="false"></textarea>
@@ -114,7 +120,7 @@
         <div class="hero">
           <div>
             <h1>设置。</h1>
-            <p class="sub">本地密钥与 AES 默认配置管理。</p>
+            <p class="sub">本地密钥与 AES 配置管理。</p>
           </div>
         </div>
         <div id="settings-error" class="error-region" hidden></div>
@@ -124,10 +130,18 @@
           <div class="row-actions">
             <button class="primary" type="button" id="init-key-btn" hidden>生成快照密钥</button>
           </div>
-          <div class="sec-head"><h2>自定义 AES key/iv（aes.json）</h2></div>
-          <div id="aes-config-status" class="status-line">检测中…</div>
+          <div class="sec-head"><h2>敏感值密钥</h2></div>
+          <div id="sensitive-key-status" class="status-line">检测中…</div>
           <div class="row-actions">
-            <button class="ghost" type="button" id="clear-aes-config-btn" hidden>清除已保存的 key/iv</button>
+            <button class="primary" type="button" id="init-sensitive-btn" hidden>生成敏感值密钥</button>
+          </div>
+          <div class="sec-head"><h2>AES key/iv 列表（aes.json）</h2></div>
+          <div id="aes-config-status" class="status-line">检测中…</div>
+          <table class="aes-table" id="aes-list-table">
+            <tbody id="aes-list-body"></tbody>
+          </table>
+          <div class="row-actions">
+            <button class="ghost" type="button" id="aes-list-new">在 AES 工具中新增</button>
           </div>
         </div>
       </div>
@@ -254,8 +268,8 @@
       <h3 id="multi-result-title">横向对比</h3>
       <div class="result-actions">
         <button type="button" class="ghost" id="multi-report-btn">差异报告</button>
-        <button type="button" class="ghost" id="multi-copy-btn">复制对比</button>
-        <button type="button" class="ghost" id="multi-csv-btn">复制 CSV</button>
+        <button type="button" class="ghost" id="multi-copy-btn">复制为表格（Tab 分隔）</button>
+        <button type="button" class="ghost" id="multi-csv-btn">复制 CSV（逗号分隔）</button>
         <button type="button" class="ghost" data-close>关闭</button>
       </div>
     </div>
@@ -302,13 +316,28 @@
 
 <dialog id="reveal-dialog" aria-labelledby="reveal-title">
   <form method="dialog" class="dialog">
-    <h3 id="reveal-title">解密显示</h3>
+    <h3 id="reveal-title">显示</h3>
     <p class="warning">⚠ 将显示 <code id="reveal-key"></code> 的明文值，请仅在本机查看。</p>
+    <div id="reveal-advanced" class="reveal-advanced" hidden>
+      <div class="row-actions">
+        <select id="reveal-list-select" class="select" aria-label="选择已保存的 key/iv"></select>
+        <button class="ghost" type="button" id="reveal-load-config">加载所选</button>
+      </div>
+      <div class="fields">
+        <label class="field" for="reveal-key-input">AES key
+          <input id="reveal-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="留空用系统敏感密钥">
+        </label>
+        <label class="field" for="reveal-iv-input">IV
+          <input id="reveal-iv-input" type="text" autocomplete="off" spellcheck="false" placeholder="留空用系统敏感密钥">
+        </label>
+      </div>
+      <p class="muted hint">值不是用系统敏感密钥加密时（如外部 AES 密文），从列表选择或手动填写 key/iv 后重试。</p>
+    </div>
     <div id="reveal-value" class="reveal-box" hidden></div>
     <div id="reveal-error" class="error" hidden></div>
     <div class="actions">
       <button type="button" class="ghost" data-close>关闭</button>
-      <button type="button" class="danger" id="reveal-confirm-btn">解密并显示</button>
+      <button type="button" class="danger" id="reveal-confirm-btn">显示</button>
     </div>
   </form>
 </dialog>

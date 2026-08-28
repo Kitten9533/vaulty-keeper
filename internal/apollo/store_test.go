@@ -8,11 +8,47 @@ import (
 )
 
 var testKey = make([]byte, 32)
+var testSensitiveKey = make([]byte, 32)
+
+func TestDecryptItemFallsBackToSnapshotKey(t *testing.T) {
+	// old-format snapshots encrypted sensitive values with the snapshot key;
+	// DecryptItem falls back so they stay readable even with a different
+	// sensitive key
+	snapKey := make([]byte, 32)
+	for i := range snapKey {
+		snapKey[i] = byte(i + 1)
+	}
+	otherKey := make([]byte, 32)
+	for i := range otherKey {
+		otherKey[i] = byte(100 - i)
+	}
+	s := NewSnapshot("prod", "")
+	if err := s.Set(snapKey, snapKey, "SECRET_TOKEN", "old-value", nil); err != nil {
+		t.Fatal(err)
+	}
+	v, err := s.DecryptItem(s.Items["SECRET_TOKEN"], snapKey, otherKey)
+	if err != nil || v != "old-value" {
+		t.Fatalf("fallback decrypt = %q, %v", v, err)
+	}
+	// new-format items (encrypted with the sensitive key) must NOT decrypt
+	// with a different sensitive key
+	s2 := NewSnapshot("prod", "")
+	if err := s2.Set(snapKey, otherKey, "SECRET_TOKEN", "new-value", nil); err != nil {
+		t.Fatal(err)
+	}
+	wrong := make([]byte, 32)
+	if _, err := s2.DecryptItem(s2.Items["SECRET_TOKEN"], snapKey, wrong); err == nil {
+		t.Fatal("new-format item decrypted with wrong sensitive key")
+	}
+}
 
 func TestStoreRoundTrip(t *testing.T) {
 	s := NewSnapshot("prod", "imile-fs")
 	for i := 0; i < len(testKey); i++ {
 		testKey[i] = byte(i + 1)
+	}
+	for i := 0; i < len(testSensitiveKey); i++ {
+		testSensitiveKey[i] = byte(200 - i)
 	}
 	mustSet(t, s, "APP_NAME", "merdi", nil)
 	mustSet(t, s, "PASSWORD_SALT", "10", nil)
@@ -28,9 +64,20 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Error("APP_NAME should not be secret")
 	}
 
-	v, ok, err := s.Get(testKey, "APP_NAME")
+	v, ok, err := s.Get(testKey, testSensitiveKey, "APP_NAME")
 	if err != nil || !ok || v != "merdi" {
 		t.Fatalf("get APP_NAME: %q %v %v", v, ok, err)
+	}
+
+	// sensitive values decrypt with the sensitive key, not the snapshot key
+	if _, _, err := s.Get(testKey, testSensitiveKey, "PASSWORD_SALT"); err != nil {
+		t.Fatalf("get sensitive with sensitive key: %v", err)
+	}
+	if _, _, err := s.Get(nil, testSensitiveKey, "APP_NAME"); err == nil {
+		t.Fatal("non-sensitive value with nil snapshot key should fail")
+	}
+	if _, _, err := s.Get(testKey, nil, "PASSWORD_SALT"); err == nil {
+		t.Fatal("sensitive value with nil sensitive key should fail")
 	}
 
 	dir := t.TempDir()
@@ -55,7 +102,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := loaded.Get(testKey, "APP_NAME")
+	got, _, err := loaded.Get(testKey, testSensitiveKey, "APP_NAME")
 	if err != nil || got != "merdi" {
 		t.Fatalf("loaded get APP_NAME: %q %v", got, err)
 	}
@@ -71,7 +118,7 @@ func TestStoreDiff(t *testing.T) {
 	mustSet(t, b, "K2", "new", nil)
 	mustSet(t, b, "K4", "fresh", nil)
 
-	changes, err := a.Diff(b, testKey)
+	changes, err := a.Diff(b, testKey, testSensitiveKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +153,7 @@ func TestStoreDiffFailsOnDecryptError(t *testing.T) {
 	bad.Enc = "AAAA"
 	b.Items["K1"] = bad
 
-	if _, err := a.Diff(b, testKey); err == nil {
+	if _, err := a.Diff(b, testKey, testSensitiveKey); err == nil {
 		t.Fatal("Diff should fail when a value cannot be decrypted")
 	}
 }
@@ -140,7 +187,7 @@ func TestSnapshotVisibleItemsMaskSensitiveValues(t *testing.T) {
 	mustSet(t, s, "APP_NAME", "merdi", nil)
 	mustSet(t, s, "SECRET_TOKEN", "do-not-expose", nil)
 
-	items, err := s.VisibleItems(testKey)
+	items, err := s.VisibleItems(testKey, testSensitiveKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +263,7 @@ func contains(b []byte, sub string) bool {
 
 func mustSet(t *testing.T, s *Snapshot, k, v string, secret *bool) *Snapshot {
 	t.Helper()
-	if err := s.Set(testKey, k, v, secret); err != nil {
+	if err := s.Set(testKey, testSensitiveKey, k, v, secret); err != nil {
 		t.Fatalf("set %s: %v", k, err)
 	}
 	return s

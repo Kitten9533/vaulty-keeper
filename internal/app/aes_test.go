@@ -6,26 +6,61 @@ import (
 	"testing"
 )
 
-func TestAESConfigRoundTrip(t *testing.T) {
+func TestAESConfigListCRUD(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AI_TOOLS_AES_CONFIG", filepath.Join(dir, "aes.json"))
 
-	c, err := AESConfigLoad()
-	if err != nil || c.Key != "" || c.IV != "" {
-		t.Fatalf("load missing = %#v, %v", c, err)
+	entries, err := AESConfigList()
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("load missing = %#v, %v", entries, err)
 	}
-	if err := AESConfigSave("k", "v"); err != nil {
+	if err := AESConfigAdd("oss", "k1", "v1"); err != nil {
 		t.Fatal(err)
 	}
-	c, err = AESConfigLoad()
-	if err != nil || c.Key != "k" || c.IV != "v" {
-		t.Fatalf("load after save = %#v, %v", c, err)
-	}
-	if err := AESConfigClear(); err != nil {
+	if err := AESConfigAdd("default", "k2", "v2"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "aes.json")); !os.IsNotExist(err) {
-		t.Fatal("file still exists after clear")
+	if err := AESConfigAdd("oss", "k3", "v3"); err == nil {
+		t.Fatal("duplicate name should fail")
+	}
+	entries, err = AESConfigList()
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("after add = %#v, %v", entries, err)
+	}
+	if err := AESConfigRemove("oss"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = AESConfigList()
+	if err != nil || len(entries) != 1 || entries[0].Name != "default" {
+		t.Fatalf("after remove = %#v, %v", entries, err)
+	}
+	e, err := AESConfigGet("default")
+	if err != nil || e == nil || e.SecretKey != "k2" || e.IV != "v2" {
+		t.Fatalf("get = %#v, %v", e, err)
+	}
+	if _, err := AESConfigGet("missing"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAESConfigMigratesLegacyObject(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "aes.json")
+	t.Setenv("AI_TOOLS_AES_CONFIG", path)
+	os.WriteFile(path, []byte(`{"key":"oldk","iv":"oldv"}`), 0o600)
+
+	entries, err := AESConfigList()
+	if err != nil || len(entries) != 1 || entries[0].Name != "default" || entries[0].SecretKey != "oldk" || entries[0].IV != "oldv" {
+		t.Fatalf("migrated = %#v, %v", entries, err)
+	}
+
+	// saving writes the array form
+	if err := AESConfigAdd("extra", "x", "y"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = AESConfigList()
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("after add = %#v, %v", entries, err)
 	}
 }
 

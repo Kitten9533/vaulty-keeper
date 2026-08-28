@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"ai-tools/internal/apollo"
+	"ai-tools/internal/aesx"
 )
 
 func TestSnapshotViewMasksSensitiveValue(t *testing.T) {
@@ -211,16 +213,17 @@ func TestDeleteItem(t *testing.T) {
 
 func newEmptyHandler(t *testing.T) http.Handler {
 	t.Helper()
-	return NewHandler(Config{Dir: t.TempDir(), SnapshotKey: func() ([]byte, error) { return fixedKey(), nil }})
+	return NewHandler(Config{Dir: t.TempDir(), SnapshotKey: func() ([]byte, error) { return fixedKey(), nil }, SensitiveKey: func() ([]byte, error) { return fixedSensitiveKey(), nil }})
 }
 
 func newTestHandler(t *testing.T, kvText string) http.Handler {
 	t.Helper()
 	key := fixedKey()
+	sensitiveKey := fixedSensitiveKey()
 	kvs, _ := apollo.ParseKV(kvText)
 	s := apollo.NewSnapshot("prod", "")
 	for _, kv := range kvs {
-		if err := s.Set(key, kv.Key, kv.Value, nil); err != nil {
+		if err := s.Set(key, sensitiveKey, kv.Key, kv.Value, nil); err != nil {
 			t.Fatalf("set %s: %v", kv.Key, err)
 		}
 	}
@@ -228,29 +231,38 @@ func newTestHandler(t *testing.T, kvText string) http.Handler {
 	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }})
+	return NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
 }
 
 func newCompareHandler(t *testing.T) http.Handler {
 	t.Helper()
 	key := fixedKey()
+	sensitiveKey := fixedSensitiveKey()
 	dir := t.TempDir()
 	for name, secret := range map[string]string{"prod": "prod-secret", "test": "test-secret"} {
 		s := apollo.NewSnapshot(name, "")
-		if err := s.Set(key, "SECRET_TOKEN", secret, nil); err != nil {
+		if err := s.Set(key, sensitiveKey, "SECRET_TOKEN", secret, nil); err != nil {
 			t.Fatalf("set %s: %v", name, err)
 		}
 		if err := s.Save(filepath.Join(dir, name+".json")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }})
+	return NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
 }
 
 func fixedKey() []byte {
 	key := make([]byte, 32)
 	for i := range key {
 		key[i] = byte(i + 1)
+	}
+	return key
+}
+
+func fixedSensitiveKey() []byte {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(200 - i)
 	}
 	return key
 }
@@ -318,7 +330,7 @@ func TestTokenGatesStateChangingRequests(t *testing.T) {
 	}
 
 	// correct token in query param works
-	r = httptest.NewRequest(http.MethodDelete, "/api/aes/config?t=s3cr3t-token", nil)
+	r = httptest.NewRequest(http.MethodDelete, "/api/aes/config?name=x&t=s3cr3t-token", nil)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusNoContent {
@@ -412,6 +424,85 @@ func TestRevealRequiresConfirmation(t *testing.T) {
 	}
 }
 
+func TestRevealWithExplicitKeyIV(t *testing.T) {
+	dir := t.TempDir()
+	key := fixedKey()
+	sensitiveKey := fixedSensitiveKey()
+	aesKey, aesIV := "0123456789abcdef", "abcdefghijklmnop"
+	enc, err := aesx.Encrypt(aesKey, aesIV, "REAL-SECRET")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := apollo.NewSnapshot("prod", "")
+	if err := s.Set(key, sensitiveKey, "imile.fs.oss.secret-key", enc, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
+
+	// the stored value is an external CryptoUtil ciphertext; without overrides
+	// reveal shows the stored ciphertext (decrypted from the snapshot layer),
+	// not the underlying secret
+	r := httptest.NewRequest(http.MethodPost, "/api/snapshots/prod/reveal",
+		strings.NewReader(`{"targets":["imile.fs.oss.secret-key"],"confirm":true}`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status without key/iv = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "REAL-SECRET") {
+		t.Fatalf("reveal leaked external plaintext without key/iv: %s", w.Body.String())
+	}
+
+	// explicit key/iv from the dialog decrypts the value
+	body := fmt.Sprintf(`{"targets":["imile.fs.oss.secret-key"],"confirm":true,"key":%q,"iv":%q}`, aesKey, aesIV)
+	r = httptest.NewRequest(http.MethodPost, "/api/snapshots/prod/reveal", strings.NewReader(body))
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status with key/iv = %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "REAL-SECRET") {
+		t.Fatalf("reveal body missing plaintext: %s", w.Body.String())
+	}
+}
+
+func TestRevealShowsSensitiveValue(t *testing.T) {
+	dir := t.TempDir()
+	key := fixedKey()
+	sensitiveKey := fixedSensitiveKey()
+	s := apollo.NewSnapshot("prod", "")
+	if err := s.Set(key, sensitiveKey, "SECRET_TOKEN", "plain-secret", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
+
+	// masked in the list view
+	r := httptest.NewRequest(http.MethodGet, "/api/snapshots/prod", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if strings.Contains(w.Body.String(), "plain-secret") {
+		t.Fatalf("list view leaked plaintext: %s", w.Body.String())
+	}
+
+	// reveal shows the plaintext via the sensitive key
+	body := `{"targets":["SECRET_TOKEN"],"confirm":true}`
+	r = httptest.NewRequest(http.MethodPost, "/api/snapshots/prod/reveal", strings.NewReader(body))
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "plain-secret") {
+		t.Fatalf("reveal body missing plaintext: %s", w.Body.String())
+	}
+}
+
 func TestEditLoadRequiresConfirmation(t *testing.T) {
 	h := newTestHandler(t, "APP_NAME = merdi\n")
 	r := httptest.NewRequest(http.MethodPost, "/api/snapshots/prod/edit", strings.NewReader(`{"confirm":false}`))
@@ -494,27 +585,60 @@ func TestAESConfigAPI(t *testing.T) {
 
 	get := httptest.NewRecorder()
 	h.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/aes/config", nil))
-	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"key":""`) {
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"entries"`) {
 		t.Fatalf("get empty config = %d %s", get.Code, get.Body.String())
 	}
 
-	put := httptest.NewRecorder()
-	h.ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/api/aes/config",
-		strings.NewReader(`{"key":"kk","iv":"ivv"}`)))
-	if put.Code != http.StatusOK {
-		t.Fatalf("put config = %d %s", put.Code, put.Body.String())
+	// add an entry (replaces the old PUT single-object flow)
+	post := httptest.NewRecorder()
+	h.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/api/aes/config",
+		strings.NewReader(`{"name":"oss","secret-key":"kk","iv":"ivv"}`)))
+	if post.Code != http.StatusCreated {
+		t.Fatalf("post config = %d %s", post.Code, post.Body.String())
 	}
 
 	get2 := httptest.NewRecorder()
 	h.ServeHTTP(get2, httptest.NewRequest(http.MethodGet, "/api/aes/config", nil))
-	if get2.Code != http.StatusOK || !strings.Contains(get2.Body.String(), `"key":"kk"`) {
-		t.Fatalf("get after put = %d %s", get2.Code, get2.Body.String())
+	if get2.Code != http.StatusOK || !strings.Contains(get2.Body.String(), `"name":"oss"`) {
+		t.Fatalf("get after post = %d %s", get2.Code, get2.Body.String())
+	}
+
+	// duplicate name is rejected
+	post2 := httptest.NewRecorder()
+	h.ServeHTTP(post2, httptest.NewRequest(http.MethodPost, "/api/aes/config",
+		strings.NewReader(`{"name":"oss","secret-key":"k2","iv":"iv2"}`)))
+	if post2.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate post = %d %s", post2.Code, post2.Body.String())
 	}
 
 	del := httptest.NewRecorder()
-	h.ServeHTTP(del, httptest.NewRequest(http.MethodDelete, "/api/aes/config", nil))
+	h.ServeHTTP(del, httptest.NewRequest(http.MethodDelete, "/api/aes/config?name=oss", nil))
 	if del.Code != http.StatusNoContent {
 		t.Fatalf("delete config = %d", del.Code)
+	}
+
+	get3 := httptest.NewRecorder()
+	h.ServeHTTP(get3, httptest.NewRequest(http.MethodGet, "/api/aes/config", nil))
+	if get3.Code != http.StatusOK || strings.Contains(get3.Body.String(), `"name":"oss"`) {
+		t.Fatalf("get after delete = %d %s", get3.Code, get3.Body.String())
+	}
+}
+
+func TestSensitiveKeyAPI(t *testing.T) {
+	h := NewHandler(Config{Dir: t.TempDir(), SnapshotKey: func() ([]byte, error) { return make([]byte, 32), nil }, SensitiveKey: func() ([]byte, error) { return make([]byte, 32), nil }})
+	r := httptest.NewRequest(http.MethodGet, "/api/sensitive/key", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"available":true`) {
+		t.Fatalf("sensitive key status = %d %s", w.Code, w.Body.String())
+	}
+
+	// init when a key is already available is rejected
+	r = httptest.NewRequest(http.MethodPost, "/api/sensitive/init", strings.NewReader(`{"force":false}`))
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("init when available = %d, want %d", w.Code, http.StatusConflict)
 	}
 }
 
@@ -734,6 +858,65 @@ func TestCompareKey(t *testing.T) {
 	}
 	if !strings.Contains(w2.Body.String(), "fingerprint") {
 		t.Fatalf("missing fingerprint: %s", w2.Body.String())
+	}
+}
+
+func TestFingerprintIsHMACKeyed(t *testing.T) {
+	k1 := fixedKey()
+	k2 := fixedSensitiveKey()
+	v := "common-weak-password"
+
+	f1 := safeValue(true, v, true, k1)
+	f2 := safeValue(true, v, true, k2)
+	if f1.Fingerprint == "" || f2.Fingerprint == "" {
+		t.Fatal("missing fingerprint")
+	}
+	// different snapshot keys must yield different fingerprints, so an
+	// attacker cannot offline-enumerate weak values against the token-free
+	// GET compare endpoints
+	if f1.Fingerprint == f2.Fingerprint {
+		t.Fatal("fingerprint must differ across keys (offline dictionary attack vector)")
+	}
+	// same key + same value → same fingerprint (cross-env equality still works)
+	f1b := safeValue(true, v, true, k1)
+	if f1.Fingerprint != f1b.Fingerprint {
+		t.Fatal("same key/value must share a fingerprint")
+	}
+	// quoted normalization preserved
+	fq := safeValue(true, `"`+v+`"`, true, k1)
+	if fq.Fingerprint != f1.Fingerprint {
+		t.Fatal("quoted value must share fingerprint")
+	}
+	// non-sensitive values expose plaintext, no fingerprint
+	fs := safeValue(true, v, false, k1)
+	if fs.Fingerprint != "" || fs.Value == nil {
+		t.Fatalf("plain value = %#v", fs)
+	}
+}
+
+func TestTokenFailuresAreThrottled(t *testing.T) {
+	h := NewHandler(Config{Dir: t.TempDir(), Token: "s3cr3t-token", SnapshotKey: func() ([]byte, error) { return fixedKey(), nil }, SensitiveKey: func() ([]byte, error) { return fixedSensitiveKey(), nil }})
+	// consecutive bad tokens are all rejected (throttled with backoff)
+	for i := 0; i < 3; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/api/sensitive/init", strings.NewReader(`{"force":false}`))
+		r.Header.Set("X-Auth-Token", "wrong")
+		w := httptest.NewRecorder()
+		start := time.Now()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("bad token attempt %d = %d, want 401", i, w.Code)
+		}
+		if i > 0 && time.Since(start) < 40*time.Millisecond {
+			t.Fatalf("attempt %d was not throttled", i)
+		}
+	}
+	// a valid token still works and resets the counter
+	r := httptest.NewRequest(http.MethodPost, "/api/sensitive/init", strings.NewReader(`{"force":false}`))
+	r.Header.Set("X-Auth-Token", "s3cr3t-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("valid token after failures = %d, want 409 (key exists)", w.Code)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -13,13 +14,21 @@ import (
 
 const keyCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-// AESConfig is the persisted custom AES key/iv pair (~/.ai-tools/aes.json).
-type AESConfig struct {
-	Key string `json:"key"`
-	IV  string `json:"iv"`
+// AESEntry is one named AES key/iv pair in the config list.
+type AESEntry struct {
+	Name      string `json:"name"`
+	SecretKey string `json:"secret-key"`
+	IV        string `json:"iv"`
 }
 
-// AESConfigPath returns the file holding the custom AES key/iv.
+// AESConfig is the persisted list of named AES key/iv pairs
+// (~/.ai-tools/aes.json), kept as a JSON array of AESEntry.
+type AESConfig struct {
+	Entries []AESEntry `json:"entries"`
+	Path    string     `json:"path"`
+}
+
+// AESConfigPath returns the file holding the AES key/iv list.
 func AESConfigPath() string {
 	if p := os.Getenv("AI_TOOLS_AES_CONFIG"); p != "" {
 		return p
@@ -31,26 +40,44 @@ func AESConfigPath() string {
 	return filepath.Join(home, ".ai-tools", "aes.json")
 }
 
-// AESConfigLoad reads the custom key/iv file. A missing file is not an error;
-// it returns an empty config.
-func AESConfigLoad() (AESConfig, error) {
+// AESConfigList reads the named key/iv list. A missing file is not an error;
+// it returns an empty list. The legacy single-object format
+// {"key":..., "iv":...} is transparently migrated to one "default" entry.
+func AESConfigList() ([]AESEntry, error) {
 	b, err := os.ReadFile(AESConfigPath())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return AESConfig{}, nil
+			return nil, nil
 		}
-		return AESConfig{}, err
+		return nil, err
 	}
-	var c AESConfig
-	if err := json.Unmarshal(b, &c); err != nil {
-		return AESConfig{}, err
+	trimmed := trimSpace(b)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var old struct {
+			Key string `json:"key"`
+			IV  string `json:"iv"`
+		}
+		if err := json.Unmarshal(b, &old); err != nil {
+			return nil, err
+		}
+		if old.Key == "" && old.IV == "" {
+			return nil, nil
+		}
+		return []AESEntry{{Name: "default", SecretKey: old.Key, IV: old.IV}}, nil
 	}
-	return c, nil
+	var entries []AESEntry
+	if err := json.Unmarshal(b, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
-// AESConfigSave writes the custom key/iv file with 0600 permissions.
-func AESConfigSave(key, iv string) error {
-	b, err := json.MarshalIndent(AESConfig{Key: key, IV: iv}, "", "  ")
+// AESConfigSave writes the whole key/iv list with 0600 permissions.
+func AESConfigSave(entries []AESEntry) error {
+	if entries == nil {
+		entries = []AESEntry{}
+	}
+	b, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -61,13 +88,65 @@ func AESConfigSave(key, iv string) error {
 	return os.WriteFile(p, append(b, '\n'), 0o600)
 }
 
-// AESConfigClear removes the custom key/iv file. A missing file is not an
-// error.
-func AESConfigClear() error {
-	if err := os.Remove(AESConfigPath()); err != nil && !os.IsNotExist(err) {
+// AESConfigAdd appends a named entry. The name must be unique.
+func AESConfigAdd(name, key, iv string) error {
+	if name == "" {
+		return errors.New("name is required")
+	}
+	if key == "" || iv == "" {
+		return errors.New("key and iv are required")
+	}
+	entries, err := AESConfigList()
+	if err != nil {
 		return err
 	}
-	return nil
+	for _, e := range entries {
+		if e.Name == name {
+			return fmt.Errorf("entry %q already exists", name)
+		}
+	}
+	entries = append(entries, AESEntry{Name: name, SecretKey: key, IV: iv})
+	return AESConfigSave(entries)
+}
+
+// AESConfigRemove deletes the named entry. A missing name is not an error.
+func AESConfigRemove(name string) error {
+	entries, err := AESConfigList()
+	if err != nil {
+		return err
+	}
+	kept := entries[:0]
+	for _, e := range entries {
+		if e.Name != name {
+			kept = append(kept, e)
+		}
+	}
+	return AESConfigSave(kept)
+}
+
+// AESConfigGet returns the named entry, or nil.
+func AESConfigGet(name string) (*AESEntry, error) {
+	entries, err := AESConfigList()
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].Name == name {
+			return &entries[i], nil
+		}
+	}
+	return nil, nil
+}
+
+func trimSpace(b []byte) []byte {
+	start, end := 0, len(b)
+	for start < end && (b[start] == ' ' || b[start] == '\t' || b[start] == '\n' || b[start] == '\r') {
+		start++
+	}
+	for end > start && (b[end-1] == ' ' || b[end-1] == '\t' || b[end-1] == '\n' || b[end-1] == '\r') {
+		end--
+	}
+	return b[start:end]
 }
 
 // GenKey returns a fresh printable AES key/iv pair.

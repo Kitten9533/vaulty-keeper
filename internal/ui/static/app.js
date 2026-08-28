@@ -146,19 +146,57 @@ function switchView(name) {
   $('breadcrumb').innerHTML = name === 'snapshots'
     ? '<b>配置工作台</b>'
     : `<b>${name === 'aes' ? 'AES 加解密' : '设置'}</b>`;
-  if (name === 'aes') loadAESConfigIntoForm();
+  if (name === 'aes') loadAESEntries();
   if (name === 'settings') loadSettings();
 }
 
 // ---- AES tools ----
 
-let aesConfigCache = null;
+let aesEntries = [];
 
-async function loadAESConfigIntoForm() {
-  if (!aesConfigCache) {
-    try { aesConfigCache = await api('/api/aes/config'); } catch (_) { aesConfigCache = { key: '', iv: '' }; }
+async function loadAESEntries() {
+  try {
+    const data = await api('/api/aes/config');
+    aesEntries = data.entries || [];
+    populateAESSelect($('aes-list-select'));
+    populateAESSelect($('reveal-list-select'));
+    return data.path || '';
+  } catch (err) {
+    aesEntries = [];
+    return '';
   }
-  if (aesConfigCache.key) { $('aes-key').value = aesConfigCache.key; $('aes-iv').value = aesConfigCache.iv; }
+}
+
+function populateAESSelect(sel) {
+  const current = sel.value;
+  sel.textContent = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = '— 选择已保存的 key/iv —';
+  sel.appendChild(none);
+  for (const e of aesEntries) {
+    const opt = document.createElement('option');
+    opt.value = e.name;
+    opt.textContent = e.name;
+    sel.appendChild(opt);
+  }
+  if ([...sel.options].some((o) => o.value === current)) sel.value = current;
+}
+
+async function loadSelectedAESEntry(target) {
+  const name = $(target).value;
+  if (!name) return;
+  const e = aesEntries.find((x) => x.name === name);
+  if (!e) return;
+  $('aes-name').value = e.name;
+  $('aes-key').value = e['secret-key'];
+  $('aes-iv').value = e.iv;
+  setAESInputsLocked(true);
+}
+
+function setAESInputsLocked(locked) {
+  $('aes-key').disabled = locked;
+  $('aes-iv').disabled = locked;
 }
 
 async function runAES(op) {
@@ -179,18 +217,22 @@ async function genAESKey() {
     const data = await api('/api/aes/gen-key', jsonOptions('POST', { bytes: 16, iv_bytes: 12 }));
     $('aes-key').value = data.key;
     $('aes-iv').value = data.iv;
-    showAESError('已生成 key/iv。');
+    setAESInputsLocked(false);
+    showAESError('已生成 key/iv。填写名称后点击「保存到列表」即可存入 aes.json。');
   } catch (err) { showAESError(err.message); }
 }
 
 async function saveAESConfig() {
+  const name = $('aes-name').value.trim();
   const key = $('aes-key').value.trim();
   const iv = $('aes-iv').value.trim();
+  if (!name) { showAESError('请填写名称。'); return; }
   if (!key || !iv) { showAESError('请填写 key 和 iv。'); return; }
   try {
-    await api('/api/aes/config', jsonOptions('PUT', { key, iv }));
-    aesConfigCache = { key, iv };
+    await api('/api/aes/config', jsonOptions('POST', { name, 'secret-key': key, iv }));
     showAESError('已保存到 aes.json。');
+    await loadAESEntries();
+    $('aes-list-select').value = name;
   } catch (err) { showAESError(err.message); }
 }
 
@@ -224,18 +266,82 @@ async function loadSettings() {
     status.className = 'status-line warn';
     initBtn.hidden = false;
   }
+  const sStatus = $('sensitive-key-status');
+  const sInit = $('init-sensitive-btn');
   try {
-    const c = await api('/api/aes/config');
-    const el = $('aes-config-status');
-    if (c.key) {
-      el.textContent = `已保存（${c.path}）。`;
-      el.className = 'status-line ok';
-      $('clear-aes-config-btn').hidden = false;
+    const sk = await api('/api/sensitive/key');
+    if (sk.available) {
+      sStatus.textContent = '敏感值密钥可用（Keychain 或环境变量）。敏感值用它加密，显示时用它解密。';
+      sStatus.className = 'status-line ok';
+      sInit.hidden = true;
     } else {
-      el.textContent = `未保存自定义 key/iv（${c.path}）。`;
-      el.className = 'status-line';
-      $('clear-aes-config-btn').hidden = true;
+      throw new Error('unavailable');
     }
+  } catch (_) {
+    sStatus.textContent = '敏感值密钥不可用。点击下方按钮生成本机密钥。';
+    sStatus.className = 'status-line warn';
+    sInit.hidden = false;
+  }
+  try {
+    const path = await loadAESEntries();
+    const el = $('aes-config-status');
+    el.textContent = aesEntries.length ? `已保存 ${aesEntries.length} 条（${path}）。` : `未保存任何条目（${path}）。`;
+    el.className = aesEntries.length ? 'status-line ok' : 'status-line';
+    renderAESList();
+  } catch (err) { showSettingsError(err.message); }
+}
+
+function renderAESList() {
+  const body = $('aes-list-body');
+  body.textContent = '';
+  if (!aesEntries.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.className = 'empty';
+    td.textContent = '暂无条目';
+    td.colSpan = 3;
+    tr.appendChild(td);
+    body.appendChild(tr);
+    return;
+  }
+  for (const e of aesEntries) {
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td');
+    tdName.textContent = e.name;
+    const tdKey = document.createElement('td');
+    tdKey.className = 'masked';
+    tdKey.textContent = maskSecret(e['secret-key']);
+    const tdIV = document.createElement('td');
+    tdIV.className = 'masked';
+    tdIV.textContent = maskSecret(e.iv);
+    const tdDel = document.createElement('td');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'reveal-btn';
+    btn.textContent = '删除';
+    btn.addEventListener('click', () => deleteAESEntry(e.name));
+    tdDel.appendChild(btn);
+    tr.appendChild(tdName);
+    tr.appendChild(tdKey);
+    tr.appendChild(tdIV);
+    tr.appendChild(tdDel);
+    body.appendChild(tr);
+  }
+}
+
+function maskSecret(s) {
+  if (!s) return '';
+  if (s.length <= 8) return '••••';
+  return `${s.slice(0, 4)}…${s.slice(-4)}`;
+}
+
+async function deleteAESEntry(name) {
+  try {
+    await api(`/api/aes/config?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await loadAESEntries();
+    renderAESList();
+    $('aes-config-status').textContent = aesEntries.length ? `已保存 ${aesEntries.length} 条。` : '未保存任何条目。';
+    $('aes-config-status').className = aesEntries.length ? 'status-line ok' : 'status-line';
   } catch (err) { showSettingsError(err.message); }
 }
 
@@ -248,11 +354,12 @@ async function initKey() {
   } catch (err) { showSettingsError(err.message); }
 }
 
-async function clearAESConfig() {
+async function initSensitiveKey() {
   try {
-    await api('/api/aes/config', { method: 'DELETE' });
-    aesConfigCache = null;
-    loadSettings();
+    await api('/api/sensitive/init', jsonOptions('POST', { force: false }));
+    $('init-sensitive-btn').hidden = true;
+    $('sensitive-key-status').textContent = '敏感值密钥已生成。';
+    $('sensitive-key-status').className = 'status-line ok';
   } catch (err) { showSettingsError(err.message); }
 }
 
@@ -327,7 +434,7 @@ function renderTable() {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'reveal-btn';
-      btn.textContent = '解密显示';
+      btn.textContent = '显示';
       tdVal.appendChild(btn);
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -972,12 +1079,12 @@ function copyMultiCompare() {
     .then(() => {
       const btn = $('multi-copy-btn');
       btn.textContent = '已复制';
-      setTimeout(() => { btn.textContent = '复制对比'; }, 1500);
+      setTimeout(() => { btn.textContent = '复制为表格（Tab 分隔）'; }, 1500);
     })
     .catch(() => {
       const btn = $('multi-copy-btn');
       btn.textContent = '复制失败';
-      setTimeout(() => { btn.textContent = '复制对比'; }, 1500);
+      setTimeout(() => { btn.textContent = '复制为表格（Tab 分隔）'; }, 1500);
     });
 }
 
@@ -1045,12 +1152,12 @@ function copyMultiCSV() {
     .then(() => {
       const btn = $('multi-csv-btn');
       btn.textContent = '已复制';
-      setTimeout(() => { btn.textContent = '复制 CSV'; }, 1500);
+      setTimeout(() => { btn.textContent = '复制 CSV（逗号分隔）'; }, 1500);
     })
     .catch(() => {
       const btn = $('multi-csv-btn');
       btn.textContent = '复制失败';
-      setTimeout(() => { btn.textContent = '复制 CSV'; }, 1500);
+      setTimeout(() => { btn.textContent = '复制 CSV（逗号分隔）'; }, 1500);
     });
 }
 
@@ -1203,22 +1310,41 @@ function openReveal(item) {
   $('reveal-key').textContent = item.key;
   $('reveal-value').textContent = '';
   $('reveal-value').hidden = true;
+  $('reveal-error').hidden = true;
+  $('reveal-advanced').hidden = true;
+  $('reveal-key-input').value = '';
+  $('reveal-iv-input').value = '';
+  $('reveal-list-select').value = '';
   $('reveal-confirm-btn').hidden = false;
+  $('reveal-confirm-btn').textContent = '显示';
+  if (aesEntries.length) populateAESSelect($('reveal-list-select'));
   openDialog('reveal-dialog');
 }
 
 async function confirmReveal() {
   if (!revealItem) return;
   const key = revealItem.key;
+  const aesKey = $('reveal-key-input').value.trim();
+  const aesIV = $('reveal-iv-input').value.trim();
   try {
     const data = await api(`/api/snapshots/${encodeURIComponent(state.active)}/reveal${snapshotQuery()}`,
-      jsonOptions('POST', { targets: [key], confirm: true }));
+      jsonOptions('POST', { targets: [key], confirm: true, key: aesKey, iv: aesIV }));
     $('reveal-value').textContent = data.values[key] != null ? data.values[key] : '(空)';
     $('reveal-value').hidden = false;
     $('reveal-confirm-btn').hidden = true;
   } catch (err) {
-    dialogError('reveal-dialog', `${err.message}\n\n解密显示仅用于 AES 加密的值（如 OSS AK/SK，配合快照内 imile.fs.aes.* 配置）。普通敏感值出于安全不提供明文查看。`);
+    $('reveal-advanced').hidden = false;
+    dialogError('reveal-dialog', err.message);
   }
+}
+
+function loadSelectedRevealEntry() {
+  const name = $('reveal-list-select').value;
+  if (!name) return;
+  const e = aesEntries.find((x) => x.name === name);
+  if (!e) return;
+  $('reveal-key-input').value = e['secret-key'];
+  $('reveal-iv-input').value = e.iv;
 }
 
 // ---- bulk edit ----
@@ -1279,7 +1405,6 @@ function wire() {
       case 'focus-search': switchView('snapshots'); $('search-input').focus(); break;
       case 'summary': openSummary(); break;
       case 'bulk-edit': openBulkEdit(); break;
-      case 'aes-tools': switchView('aes'); break;
       case 'multi-compare': openMultiCompare(); break;
     }
   });
@@ -1290,14 +1415,17 @@ function wire() {
   $('aes-encrypt-btn').addEventListener('click', () => runAES('encrypt'));
   $('aes-decrypt-btn').addEventListener('click', () => runAES('decrypt'));
   $('aes-gen-key').addEventListener('click', genAESKey);
-  $('aes-load-config').addEventListener('click', loadAESConfigIntoForm);
+  $('aes-load-config').addEventListener('click', () => loadSelectedAESEntry('aes-list-select'));
+  $('aes-refresh-list').addEventListener('click', loadAESEntries);
   $('aes-save-config').addEventListener('click', saveAESConfig);
   $('aes-copy').addEventListener('click', copyAESOutput);
+  $('aes-list-new').addEventListener('click', () => switchView('aes'));
 
   $('init-key-btn').addEventListener('click', initKey);
-  $('clear-aes-config-btn').addEventListener('click', clearAESConfig);
+  $('init-sensitive-btn').addEventListener('click', initSensitiveKey);
 
   $('reveal-confirm-btn').addEventListener('click', confirmReveal);
+  $('reveal-load-config').addEventListener('click', loadSelectedRevealEntry);
   $('edit-form').addEventListener('submit', (e) => { e.preventDefault(); saveBulkEdit(); });
 
   $('snap-delete-confirm-btn').addEventListener('click', confirmDeleteSnapshot);

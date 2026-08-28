@@ -5,6 +5,7 @@ package ui
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -21,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -34,6 +36,10 @@ var staticFiles embed.FS
 type Config struct {
 	Dir         string
 	SnapshotKey func() ([]byte, error)
+	// SensitiveKey resolves the key used to encrypt/decrypt sensitive values
+	// (Keychain/env). It is deliberately distinct from SnapshotKey so masked
+	// values cannot be revealed with the snapshot key alone.
+	SensitiveKey func() ([]byte, error)
 	// Token, when non-empty, gates every state-changing /api request
 	// (POST/PUT/DELETE — imports, edits, reveals, exports, deletes).
 	// Start() generates one automatically so a local attacker process
@@ -44,6 +50,9 @@ type Config struct {
 func NewHandler(cfg Config) http.Handler {
 	if cfg.SnapshotKey == nil {
 		cfg.SnapshotKey = apollo.SnapshotKey
+	}
+	if cfg.SensitiveKey == nil {
+		cfg.SensitiveKey = apollo.SensitiveKey
 	}
 	h := &handler{cfg: cfg}
 	mux := http.NewServeMux()
@@ -56,6 +65,8 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("/api/import/preview", h.importPreview)
 	mux.HandleFunc("/api/init", h.initKey)
 	mux.HandleFunc("/api/key", h.keyStatus)
+	mux.HandleFunc("/api/sensitive/init", h.initSensitiveKey)
+	mux.HandleFunc("/api/sensitive/key", h.sensitiveKeyStatus)
 	mux.HandleFunc("/api/aes/gen-key", h.aesGenKey)
 	mux.HandleFunc("/api/aes/transform", h.aesTransform)
 	mux.HandleFunc("/api/aes/config", h.aesConfig)
@@ -66,12 +77,33 @@ func NewHandler(cfg Config) http.Handler {
 // token is configured. Read-only GET endpoints (list/view/compare, all
 // masked) stay open so the frontend can load without a token; the plaintext
 // and mutating endpoints are all POST/PUT/DELETE and are gated.
+//
+// Failed token attempts are throttled with an exponential backoff so an
+// attacker cannot hammer the loopback API with guesses. The token itself is
+// 128 bits of randomness, so online brute force is infeasible; the throttle
+// is defense in depth (and DoS mitigation).
 func checkToken(token string, next http.Handler) http.Handler {
+	var mu sync.Mutex
+	failures := 0
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token != "" && r.Method != http.MethodGet && !validToken(token, r) {
+			mu.Lock()
+			failures++
+			f := failures
+			mu.Unlock()
+			delay := time.Duration(f) * 50 * time.Millisecond
+			if delay > 2*time.Second {
+				delay = 2 * time.Second
+			}
+			if delay > 0 {
+				time.Sleep(delay)
+			}
 			writeAPIError(w, http.StatusUnauthorized, "auth_required", "invalid or missing auth token (open the URL printed by 'ai-tools ui')")
 			return
 		}
+		mu.Lock()
+		failures = 0
+		mu.Unlock()
 		next.ServeHTTP(w, r)
 	})
 }
@@ -245,9 +277,8 @@ func (h *handler) snapshotViewName(w http.ResponseWriter, r *http.Request, name 
 		writeAPIError(w, http.StatusBadRequest, "invalid_snapshot_name", err.Error())
 		return
 	}
-	key, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
 		return
 	}
 	s, err := apollo.Load(apollo.SnapPath(h.cfg.Dir, name, appID))
@@ -259,7 +290,7 @@ func (h *handler) snapshotViewName(w http.ResponseWriter, r *http.Request, name 
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_load_failed", err.Error())
 		return
 	}
-	items, err := s.VisibleItems(key)
+	items, err := s.VisibleItems(snapKey, sensitiveKey)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_decrypt_failed", err.Error())
 		return
@@ -313,7 +344,7 @@ func (h *handler) importPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]previewItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, previewItem{Key: it.Key, Sensitive: apollo.IsSensitive(it.Key)})
+		out = append(out, previewItem{Key: it.Key, Sensitive: apollo.IsSensitiveKeyValue(it.Key, it.Value)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "warnings": warnings})
 }
@@ -345,18 +376,17 @@ func (h *handler) createSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_create_failed", err.Error())
 		return
 	}
-	snapKey, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
 		return
 	}
 	s := apollo.NewSnapshot(req.Name, req.AppID)
 	sensitive := 0
 	for _, it := range items {
-		if apollo.IsSensitive(it.Key) {
+		if apollo.IsSensitiveKeyValue(it.Key, it.Value) {
 			sensitive++
 		}
-		if err := s.Set(snapKey, it.Key, it.Value, nil); err != nil {
+		if err := s.Set(snapKey, sensitiveKey, it.Key, it.Value, nil); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "snapshot_create_failed", err.Error())
 			return
 		}
@@ -368,39 +398,54 @@ func (h *handler) createSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"name": req.Name, "app_id": req.AppID, "total": len(items), "sensitive": sensitive})
 }
 
-func (h *handler) loadSnapshotTarget(w http.ResponseWriter, name, appID string) (*apollo.Snapshot, []byte, bool) {
+func (h *handler) loadSnapshotTarget(w http.ResponseWriter, name, appID string) (*apollo.Snapshot, []byte, []byte, bool) {
 	if err := apollo.ValidateSnapshotName(name); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_snapshot_name", err.Error())
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	snapKey, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
-		return nil, nil, false
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
+		return nil, nil, nil, false
 	}
 	s, err := apollo.Load(apollo.SnapPath(h.cfg.Dir, name, appID))
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("snapshot %q not found", name))
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_load_failed", err.Error())
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return s, snapKey, true
+	return s, snapKey, sensitiveKey, true
 }
 
-func (h *handler) loadItemTarget(w http.ResponseWriter, name, appID, key string) (*apollo.Snapshot, []byte, bool) {
+// keys resolves both the snapshot key and the sensitive-value key, writing an
+// error response and returning ok=false if either is unavailable.
+func (h *handler) keys(w http.ResponseWriter) (snapKey, sensitiveKey []byte, ok bool) {
+	snapKey, err := h.cfg.SnapshotKey()
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+		return nil, nil, false
+	}
+	sensitiveKey, err = h.cfg.SensitiveKey()
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("sensitive key unavailable (%s); run 'ai-tools sensitive init' or set %s", err, apollo.EnvSensitiveKey))
+		return nil, nil, false
+	}
+	return snapKey, sensitiveKey, true
+}
+
+func (h *handler) loadItemTarget(w http.ResponseWriter, name, appID, key string) (*apollo.Snapshot, []byte, []byte, bool) {
 	if err := apollo.ValidateKey(key); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_key", err.Error())
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	return h.loadSnapshotTarget(w, name, appID)
 }
 
 func (h *handler) updateItem(w http.ResponseWriter, r *http.Request, name, itemKey string) {
 	appID := r.URL.Query().Get("appid")
-	s, snapKey, ok := h.loadItemTarget(w, name, appID, itemKey)
+	s, snapKey, sensitiveKey, ok := h.loadItemTarget(w, name, appID, itemKey)
 	if !ok {
 		return
 	}
@@ -409,7 +454,7 @@ func (h *handler) updateItem(w http.ResponseWriter, r *http.Request, name, itemK
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON body")
 		return
 	}
-	if err := s.Set(snapKey, itemKey, req.Value, req.Secret); err != nil {
+	if err := s.Set(snapKey, sensitiveKey, itemKey, req.Value, req.Secret); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "item_update_failed", err.Error())
 		return
 	}
@@ -417,7 +462,7 @@ func (h *handler) updateItem(w http.ResponseWriter, r *http.Request, name, itemK
 		writeAPIError(w, http.StatusInternalServerError, "item_update_failed", err.Error())
 		return
 	}
-	visible, err := s.VisibleItems(snapKey)
+	visible, err := s.VisibleItems(snapKey, sensitiveKey)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_decrypt_failed", err.Error())
 		return
@@ -432,7 +477,7 @@ func (h *handler) updateItem(w http.ResponseWriter, r *http.Request, name, itemK
 
 func (h *handler) deleteItem(w http.ResponseWriter, r *http.Request, name, itemKey string) {
 	appID := r.URL.Query().Get("appid")
-	s, _, ok := h.loadItemTarget(w, name, appID, itemKey)
+	s, _, _, ok := h.loadItemTarget(w, name, appID, itemKey)
 	if !ok {
 		return
 	}
@@ -450,7 +495,7 @@ func (h *handler) deleteItem(w http.ResponseWriter, r *http.Request, name, itemK
 
 func (h *handler) exportSnapshot(w http.ResponseWriter, r *http.Request, name string) {
 	appID := r.URL.Query().Get("appid")
-	s, snapKey, ok := h.loadSnapshotTarget(w, name, appID)
+	s, snapKey, sensitiveKey, ok := h.loadSnapshotTarget(w, name, appID)
 	if !ok {
 		return
 	}
@@ -470,7 +515,7 @@ func (h *handler) exportSnapshot(w http.ResponseWriter, r *http.Request, name st
 	sort.Strings(keys)
 	var buf strings.Builder
 	for _, k := range keys {
-		v, err := s.Items[k].DecryptValue(snapKey)
+		v, err := s.DecryptItem(s.Items[k], snapKey, sensitiveKey)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "snapshot_decrypt_failed", err.Error())
 			return
@@ -527,13 +572,12 @@ func (h *handler) compare(w http.ResponseWriter, r *http.Request) {
 		h.loadError(w, to, err)
 		return
 	}
-	key, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
 		return
 	}
 	changes := make([]SafeChange, 0, len(a.Items)+len(b.Items))
-	diffs, err := a.Diff(b, key)
+	diffs, err := a.Diff(b, snapKey, sensitiveKey)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_decrypt_failed", err.Error())
 		return
@@ -542,12 +586,12 @@ func (h *handler) compare(w http.ResponseWriter, r *http.Request) {
 		sc := SafeChange{Key: c.Key, Kind: c.Kind}
 		switch c.Kind {
 		case "added":
-			sc.New = safeValue(true, c.New, c.Secret)
+			sc.New = safeValue(true, c.New, c.Secret, snapKey)
 		case "removed":
-			sc.Old = safeValue(true, c.Old, c.Secret)
+			sc.Old = safeValue(true, c.Old, c.Secret, snapKey)
 		default:
-			sc.Old = safeValue(true, c.Old, c.Secret)
-			sc.New = safeValue(true, c.New, c.Secret)
+			sc.Old = safeValue(true, c.Old, c.Secret, snapKey)
+			sc.New = safeValue(true, c.New, c.Secret, snapKey)
 		}
 		changes = append(changes, sc)
 	}
@@ -563,16 +607,17 @@ type multiCompareRequest struct {
 }
 
 // compareValue projects one key of a loaded snapshot into a SafeValue.
-func compareValue(s *apollo.Snapshot, key []byte, k string) SafeValue {
+func compareValue(s *apollo.Snapshot, snapKey, sensitiveKey []byte, k string) SafeValue {
 	it, ok := s.Items[k]
 	if !ok {
 		return SafeValue{Present: false}
 	}
-	v, err := it.DecryptValue(key)
+	v, err := s.DecryptItem(it, snapKey, sensitiveKey)
 	if err != nil {
 		return SafeValue{Present: true, Sensitive: it.Secret}
 	}
-	return safeValue(true, v, it.Secret)
+	sensitive := it.Secret || apollo.IsSensitiveKeyValue(k, v)
+	return safeValue(true, v, sensitive, snapKey)
 }
 
 // compareMulti returns a horizontal comparison: one row per key (sorted),
@@ -603,9 +648,8 @@ func (h *handler) compareMulti(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	snapKey, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
 		return
 	}
 	snapshots := make([]*apollo.Snapshot, 0, len(req.Refs))
@@ -640,7 +684,7 @@ func (h *handler) compareMulti(w http.ResponseWriter, r *http.Request) {
 	for _, k := range sorted {
 		values := make([]SafeValue, 0, len(snapshots))
 		for _, s := range snapshots {
-			values = append(values, compareValue(s, snapKey, k))
+			values = append(values, compareValue(s, snapKey, sensitiveKey, k))
 		}
 		rows = append(rows, map[string]any{"key": k, "values": values})
 	}
@@ -667,9 +711,8 @@ func (h *handler) compareKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	snapKey, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
 		return
 	}
 	refs, err := apollo.ListSnapshots(h.cfg.Dir)
@@ -689,7 +732,7 @@ func (h *handler) compareKey(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, map[string]any{
 			"name":   ref.Name,
 			"app_id": ref.AppID,
-			"value":  compareValue(s, snapKey, keyName),
+			"value":  compareValue(s, snapKey, sensitiveKey, keyName),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"key": keyName, "rows": rows})
@@ -726,7 +769,7 @@ func (h *handler) deleteSnapshot(w http.ResponseWriter, r *http.Request, name st
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func safeValue(present bool, plain string, sensitive bool) SafeValue {
+func safeValue(present bool, plain string, sensitive bool, hmacKey []byte) SafeValue {
 	sv := SafeValue{Present: present}
 	if !present {
 		return sv
@@ -734,11 +777,15 @@ func safeValue(present bool, plain string, sensitive bool) SafeValue {
 	sv.Sensitive = sensitive
 	if sensitive {
 		sv.Length = len(plain)
-		// A truncated SHA-256 lets the user tell whether two masked values are
-		// truly identical without exposing the plaintext. Quotes are
-		// normalized so `"abc"` and `abc` share a fingerprint.
-		sum := sha256.Sum256([]byte(apollo.NormValue(plain)))
-		sv.Fingerprint = hex.EncodeToString(sum[:8])
+		// An HMAC-SHA256 fingerprint lets the user tell whether two masked
+		// values are truly identical without exposing the plaintext. Quotes
+		// are normalized so `"abc"` and `abc` share a fingerprint. The HMAC
+		// key is the snapshot key (never handed to clients), so an attacker
+		// cannot offline-enumerate common weak values and match fingerprints
+		// returned by the token-free GET compare endpoints.
+		mac := hmac.New(sha256.New, hmacKey)
+		mac.Write([]byte(apollo.NormValue(plain)))
+		sv.Fingerprint = hex.EncodeToString(mac.Sum(nil)[:8])
 	} else {
 		v := plain
 		sv.Value = &v
@@ -757,6 +804,38 @@ func (h *handler) keyStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err := h.cfg.SnapshotKey()
 	writeJSON(w, http.StatusOK, map[string]any{"available": err == nil})
+}
+
+func (h *handler) sensitiveKeyStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	_, err := h.cfg.SensitiveKey()
+	writeJSON(w, http.StatusOK, map[string]any{"available": err == nil})
+}
+
+func (h *handler) initSensitiveKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	var req initRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON body")
+		return
+	}
+	if !req.Force {
+		if _, err := h.cfg.SensitiveKey(); err == nil {
+			writeAPIError(w, http.StatusConflict, "sensitive_key_exists", "a sensitive key already exists")
+			return
+		}
+	}
+	if err := app.InitSensitiveKey(req.Force); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "sensitive_key_init_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
 
 func (h *handler) initKey(w http.ResponseWriter, r *http.Request) {
@@ -785,6 +864,8 @@ func (h *handler) initKey(w http.ResponseWriter, r *http.Request) {
 type revealRequest struct {
 	Targets []string `json:"targets"`
 	Confirm bool     `json:"confirm"`
+	Key     string   `json:"key"`
+	IV      string   `json:"iv"`
 }
 
 func (h *handler) reveal(w http.ResponseWriter, r *http.Request, name string) {
@@ -806,12 +887,11 @@ func (h *handler) reveal(w http.ResponseWriter, r *http.Request, name string) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_snapshot_name", err.Error())
 		return
 	}
-	snapKey, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
 		return
 	}
-	plain, err := app.Reveal(h.cfg.Dir, name, appID, snapKey, req.Targets, "", "")
+	plain, err := app.Reveal(h.cfg.Dir, name, appID, snapKey, sensitiveKey, req.Targets, req.Key, req.IV)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "decrypt_failed", err.Error())
 		return
@@ -834,12 +914,11 @@ func (h *handler) editLoad(w http.ResponseWriter, r *http.Request, name string) 
 		writeAPIError(w, http.StatusBadRequest, "confirm_required", "confirmation required for plaintext edit")
 		return
 	}
-	snapKey, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
 		return
 	}
-	text, err := app.EditLoad(h.cfg.Dir, name, appID, snapKey)
+	text, err := app.EditLoad(h.cfg.Dir, name, appID, snapKey, sensitiveKey)
 	if err != nil {
 		h.loadError(w, name, err)
 		return
@@ -862,12 +941,11 @@ func (h *handler) editApply(w http.ResponseWriter, r *http.Request, name string)
 		writeAPIError(w, http.StatusBadRequest, "empty_import", "no config items found")
 		return
 	}
-	snapKey, err := h.cfg.SnapshotKey()
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+	snapKey, sensitiveKey, ok := h.keys(w)
+	if !ok {
 		return
 	}
-	n, err := app.EditApply(h.cfg.Dir, name, appID, snapKey, req.Text)
+	n, err := app.EditApply(h.cfg.Dir, name, appID, snapKey, sensitiveKey, req.Text)
 	if err != nil {
 		if strings.Contains(err.Error(), "no key/value entries") {
 			writeAPIError(w, http.StatusBadRequest, "empty_import", err.Error())
@@ -944,36 +1022,38 @@ func (h *handler) aesTransform(w http.ResponseWriter, r *http.Request) {
 }
 
 type aesConfigRequest struct {
-	Key string `json:"key"`
-	IV  string `json:"iv"`
+	Name      string `json:"name"`
+	SecretKey string `json:"secret-key"`
+	IV        string `json:"iv"`
 }
 
 func (h *handler) aesConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		c, err := app.AESConfigLoad()
+		entries, err := app.AESConfigList()
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "aes_config_io", err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"key": c.Key, "iv": c.IV, "path": app.AESConfigPath()})
-	case http.MethodPut:
+		writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "path": app.AESConfigPath()})
+	case http.MethodPost:
 		var req aesConfigRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON body")
 			return
 		}
-		if req.Key == "" || req.IV == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_aes_params", "key and iv are required")
+		if err := app.AESConfigAdd(req.Name, req.SecretKey, req.IV); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "aes_config_add_failed", err.Error())
 			return
 		}
-		if err := app.AESConfigSave(req.Key, req.IV); err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "aes_config_io", err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusCreated, map[string]any{"ok": true})
 	case http.MethodDelete:
-		if err := app.AESConfigClear(); err != nil {
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_aes_params", "name query parameter is required")
+			return
+		}
+		if err := app.AESConfigRemove(name); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "aes_config_io", err.Error())
 			return
 		}

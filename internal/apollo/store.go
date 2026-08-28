@@ -17,8 +17,9 @@ import (
 )
 
 // An encrypted snapshot: values are stored as AES-256-GCM ciphertext with a
-// random per-value nonce, keyed by the snapshot key (Keychain/env). The file
-// never contains plaintext values.
+// random per-value nonce. Sensitive values are keyed by the sensitive key;
+// everything else by the snapshot key (Keychain/env). The file never contains
+// plaintext values.
 
 var snapshotNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
@@ -100,15 +101,20 @@ type VisibleItem struct {
 
 // VisibleItems decrypts every value (for length) but only exposes plaintext
 // for non-sensitive items; sensitive values are masked to their length.
-func (s *Snapshot) VisibleItems(key []byte) (map[string]VisibleItem, error) {
+// Sensitive items decrypt with sensitiveKey, others with snapKey. A value is
+// masked when its item is marked secret or the value carries inline URI
+// credentials (so pre-existing snapshots imported before that rule still hide
+// e.g. mongodb://user:pw@host).
+func (s *Snapshot) VisibleItems(snapKey, sensitiveKey []byte) (map[string]VisibleItem, error) {
 	items := make(map[string]VisibleItem, len(s.Items))
 	for name, item := range s.Items {
-		value, err := item.DecryptValue(key)
+		value, err := s.DecryptItem(item, snapKey, sensitiveKey)
 		if err != nil {
 			return nil, err
 		}
-		view := VisibleItem{Key: name, Sensitive: item.Secret}
-		if item.Secret {
+		sensitive := item.Secret || IsSensitiveKeyValue(name, value)
+		view := VisibleItem{Key: name, Sensitive: sensitive}
+		if sensitive {
 			view.Length = len(value)
 		} else {
 			view.Value = &value
@@ -118,10 +124,17 @@ func (s *Snapshot) VisibleItems(key []byte) (map[string]VisibleItem, error) {
 	return items, nil
 }
 
-func (s *Snapshot) Set(key []byte, k, v string, secret *bool) error {
-	secretVal := IsSensitive(k)
+func (s *Snapshot) Set(snapKey, sensitiveKey []byte, k, v string, secret *bool) error {
+	secretVal := IsSensitiveKeyValue(k, v)
 	if secret != nil {
 		secretVal = *secret
+	}
+	key := snapKey
+	if secretVal {
+		key = sensitiveKey
+	}
+	if key == nil {
+		return errors.New("snapshot key not available")
 	}
 	it, err := encryptValue(key, v)
 	if err != nil {
@@ -138,16 +151,50 @@ func (s *Snapshot) Delete(k string) bool {
 	return ok
 }
 
-func (s *Snapshot) Get(key []byte, k string) (string, bool, error) {
+func (s *Snapshot) Get(snapKey, sensitiveKey []byte, k string) (string, bool, error) {
 	it, ok := s.Items[k]
 	if !ok {
 		return "", false, nil
 	}
-	v, err := it.DecryptValue(key)
+	v, err := s.DecryptItem(it, snapKey, sensitiveKey)
 	if err != nil {
 		return "", true, err
 	}
 	return v, true, nil
+}
+
+// keyFor picks the key used to encrypt/decrypt an item: the sensitive key for
+// sensitive items, the snapshot key otherwise.
+func (s *Snapshot) keyFor(item Item, snapKey, sensitiveKey []byte) ([]byte, error) {
+	if item.Secret {
+		if sensitiveKey == nil {
+			return nil, errors.New("sensitive key not available")
+		}
+		return sensitiveKey, nil
+	}
+	if snapKey == nil {
+		return nil, errors.New("snapshot key not available")
+	}
+	return snapKey, nil
+}
+
+// DecryptItem decrypts an item with its own key, falling back to the snapshot
+// key for sensitive items so pre-sensitive-key (old-format) snapshots remain
+// readable. New snapshots always decrypt with the sensitive key; the fallback
+// never weakens them because their ciphertext fails with the snapshot key.
+func (s *Snapshot) DecryptItem(item Item, snapKey, sensitiveKey []byte) (string, error) {
+	key, err := s.keyFor(item, snapKey, sensitiveKey)
+	if err != nil {
+		return "", err
+	}
+	v, err := item.DecryptValue(key)
+	if err == nil || !item.Secret {
+		return v, err
+	}
+	if v2, err2 := item.DecryptValue(snapKey); err2 == nil {
+		return v2, nil
+	}
+	return v, err
 }
 
 type Change struct {
@@ -158,10 +205,10 @@ type Change struct {
 	Secret bool
 }
 
-// Diff compares two snapshots (both encrypted with key). Missing values are
-// empty strings. It returns an error if any value fails to decrypt, so a
-// compare never silently glosses over corrupted data.
-func (a *Snapshot) Diff(b *Snapshot, key []byte) ([]Change, error) {
+// Diff compares two snapshots. Missing values are empty strings. It returns
+// an error if any value fails to decrypt, so a compare never silently glosses
+// over corrupted data. Sensitive items decrypt with sensitiveKey.
+func (a *Snapshot) Diff(b *Snapshot, snapKey, sensitiveKey []byte) ([]Change, error) {
 	keys := map[string]bool{}
 	for k := range a.Items {
 		keys[k] = true
@@ -176,7 +223,7 @@ func (a *Snapshot) Diff(b *Snapshot, key []byte) ([]Change, error) {
 	sort.Strings(sorted)
 
 	plain := func(it Item) (string, error) {
-		v, err := it.DecryptValue(key)
+		v, err := a.DecryptItem(it, snapKey, sensitiveKey)
 		if err != nil {
 			return "", err
 		}

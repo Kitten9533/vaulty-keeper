@@ -34,20 +34,24 @@ func isCancel(s string) bool {
 }
 
 type interactive struct {
-	in     *bufio.Reader
-	dir    string
-	exit   bool
-	raw    bool
-	aesKey string
-	aesIV  string
+	in         *bufio.Reader
+	dir        string
+	exit       bool
+	raw        bool
+	aesKey     string
+	aesIV      string
+	aesEntries []app.AESEntry
 }
 
 func (it *interactive) loadAesConfig() {
-	c, err := app.AESConfigLoad()
+	entries, err := app.AESConfigList()
 	if err != nil {
 		return
 	}
-	it.aesKey, it.aesIV = c.Key, c.IV
+	it.aesEntries = entries
+	if len(entries) > 0 {
+		it.aesKey, it.aesIV = entries[0].SecretKey, entries[0].IV
+	}
 }
 
 func runInteractive() int {
@@ -65,7 +69,7 @@ func runInteractive() int {
 	}
 	fmt.Println(bold(cyan(fmt.Sprintf("ai-tools %s — 交互模式", Version))))
 	if it.aesKey != "" {
-		fmt.Println(dim("已加载自定义 key/iv，AES 加密/解密/一键解密默认使用"))
+		fmt.Println(dim(fmt.Sprintf("已加载 %d 条 AES key/iv 条目（%s），AES 加密/解密可选择使用", len(it.aesEntries), app.AESConfigPath())))
 	}
 	fmt.Println(dim("操作: ↑/↓ 或 k(上)/j(下) 移动 · 回车/数字选择 · h 帮助 · ESC/q/Ctrl-C 退出 · cancel 取消"))
 	for {
@@ -80,13 +84,13 @@ func runInteractive() int {
 			"设置值 (set)",
 			"删除值 (unset)",
 			"对比两个快照 (compare)",
-			"一键解密 (reveal)",
+			"显示值 (reveal)",
 			"编辑快照 (edit)",
 			"导出快照 (export)",
 			"AES 加密 (aes encrypt)",
 			"AES 解密 (aes decrypt)",
 			"生成 key/iv (aes gen-key)",
-			"自定义 key/iv (设置 AES key/iv)",
+			"管理 AES key/iv 列表",
 			"帮助 (help)",
 		}
 		fmt.Println()
@@ -931,12 +935,6 @@ func (it *interactive) cmdReveal() {
 	if appID != "" {
 		args = append(args, "--appid", appID)
 	}
-	if it.aesKey != "" {
-		args = append(args, "--key", it.aesKey)
-	}
-	if it.aesIV != "" {
-		args = append(args, "--iv", it.aesIV)
-	}
 	Run(args)
 }
 
@@ -974,6 +972,26 @@ func (it *interactive) cmdExport() {
 }
 
 func (it *interactive) aesKeyIv() (string, string, bool) {
+	if len(it.aesEntries) > 0 {
+		fmt.Println("已保存的 AES key/iv 条目：")
+		for i, e := range it.aesEntries {
+			fmt.Printf("  %d. %s\n", i+1, e.Name)
+		}
+		choice, cancel := it.prompt("选择条目编号（回车手输）", "")
+		if cancel {
+			return "", "", true
+		}
+		choice = strings.TrimSpace(choice)
+		if choice != "" {
+			n, err := strconv.Atoi(choice)
+			if err == nil && n >= 1 && n <= len(it.aesEntries) {
+				e := it.aesEntries[n-1]
+				it.aesKey, it.aesIV = e.SecretKey, e.IV
+				return e.SecretKey, e.IV, false
+			}
+			return "", "", true
+		}
+	}
 	key, cancel := it.prompt("AES secret key", it.aesKey)
 	if cancel {
 		return "", "", true
@@ -986,6 +1004,7 @@ func (it *interactive) aesKeyIv() (string, string, bool) {
 		fmt.Println("key 和 iv 都不能为空，已取消")
 		return "", "", true
 	}
+	it.aesKey, it.aesIV = key, iv
 	return key, iv, false
 }
 
@@ -1037,14 +1056,48 @@ func (it *interactive) cmdGenKey() {
 	Run([]string{"aes", "gen-key"})
 }
 
-// cmdCustomKeyIv lets the user set a custom AES key/iv that is saved and used
-// as the default by AES encrypt/decrypt and reveal.
+// cmdCustomKeyIv manages the named AES key/iv list: list, add, delete.
 func (it *interactive) cmdCustomKeyIv() {
-	key, cancel := it.prompt("AES secret key", it.aesKey)
+	path := app.AESConfigPath()
+	for {
+		fmt.Println()
+		if len(it.aesEntries) == 0 {
+			fmt.Println("AES key/iv 列表为空")
+		} else {
+			fmt.Println("AES key/iv 列表：")
+			for i, e := range it.aesEntries {
+				fmt.Printf("  %d. %s\n", i+1, e.Name)
+			}
+		}
+		fmt.Printf("（文件：%s）\n", path)
+		opts := []string{"新增条目", "删除条目", "返回"}
+		fmt.Println()
+		switch choice := it.choose(opts, "选择操作"); choice {
+		case 0:
+			return
+		case 1:
+			it.addAESEntry()
+		case 2:
+			it.delAESEntry()
+		}
+	}
+}
+
+func (it *interactive) addAESEntry() {
+	name, cancel := it.prompt("条目名称", "")
 	if cancel {
 		return
 	}
-	iv, cancel := it.prompt("AES iv", it.aesIV)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		fmt.Println("名称不能为空，已取消")
+		return
+	}
+	key, cancel := it.prompt("AES secret key", "")
+	if cancel {
+		return
+	}
+	iv, cancel := it.prompt("AES iv", "")
 	if cancel {
 		return
 	}
@@ -1052,10 +1105,33 @@ func (it *interactive) cmdCustomKeyIv() {
 		fmt.Println("key 和 iv 都不能为空，已取消")
 		return
 	}
-	it.aesKey, it.aesIV = key, iv
-	if err := app.AESConfigSave(it.aesKey, it.aesIV); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: 保存自定义 key/iv 失败: %v\n", err)
+	if err := app.AESConfigAdd(name, key, iv); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return
 	}
-	fmt.Println(green(fmt.Sprintf("已设置自定义 key/iv（%s）", app.AESConfigPath())))
+	it.aesEntries = append(it.aesEntries, app.AESEntry{Name: name, SecretKey: key, IV: iv})
+	it.aesKey, it.aesIV = key, iv
+	fmt.Println(green(fmt.Sprintf("已添加条目 %q", name)))
+}
+
+func (it *interactive) delAESEntry() {
+	if len(it.aesEntries) == 0 {
+		fmt.Println("列表为空")
+		return
+	}
+	opts := make([]string, 0, len(it.aesEntries))
+	for _, e := range it.aesEntries {
+		opts = append(opts, e.Name)
+	}
+	idx := it.chooseLine(opts, "选择要删除的条目（Esc 取消）")
+	if idx < 0 || idx >= len(it.aesEntries) {
+		return
+	}
+	name := it.aesEntries[idx].Name
+	if err := app.AESConfigRemove(name); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return
+	}
+	it.aesEntries = append(it.aesEntries[:idx], it.aesEntries[idx+1:]...)
+	fmt.Println(green(fmt.Sprintf("已删除条目 %q", name)))
 }
