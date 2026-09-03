@@ -11,7 +11,7 @@ import (
 // StoreName returns the human-readable name of the platform secret store.
 func StoreName() string { return "Windows Credential Manager" }
 
-// targetName maps an ai-tools account to a Windows Credential Manager target.
+// targetName maps an vaulty-keeper account to a Windows Credential Manager target.
 func targetName(account string) string { return KeychainService + ":" + account }
 
 // keyStoreGet reads a secret from Windows Credential Manager.
@@ -25,7 +25,7 @@ func keyStoreGetImpl(account string) (string, error) {
 
 func keyStoreSetImpl(account, pass string) error {
 	cred := wincred.NewGenericCredential(targetName(account))
-	cred.UserName = "ai-tools"
+	cred.UserName = "vaulty-keeper"
 	cred.CredentialBlob = []byte(pass)
 	if err := cred.Write(); err != nil {
 		return fmt.Errorf("凭据写入失败：%w", err)

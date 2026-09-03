@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ai-tools DB 隧道端到端测试（macOS + Docker Desktop）
+# vaulty-keeper DB 隧道端到端测试（macOS + Docker Desktop）
 #
 # 启动 postgres + MySQL(8.4，含模拟 shop 业务库) + redis 三个容器 + 注册连接 + 起
 # serve，然后从容器内经 host.docker.internal 走隧道验证原生客户端查询（token 门控）。
@@ -9,15 +9,15 @@
 #   scripts/dbtest.sh          # 启动并测试，测完保持运行，打印连接方式
 #   scripts/dbtest.sh --clean  # 停掉 serve 并删除容器/临时目录
 #
-# 环境依赖: docker、python3、bin/ai-tools（先 make build）
+# 环境依赖: docker、python3、bin/vaulty-keeper（先 make build）
 set -euo pipefail
 
-BIN="${BIN:-$(pwd)/bin/ai-tools}"
+BIN="${BIN:-$(pwd)/bin/vaulty-keeper}"
 [ -x "$BIN" ] || { echo "未找到 $BIN，请先 make build"; exit 1; }
 command -v docker >/dev/null || { echo "需要 docker"; exit 1; }
 
-DBDIR=/tmp/ai-tools-dbtest
-SNAPDIR=/tmp/ai-tools-dbtest-snap
+DBDIR=/tmp/vaulty-keeper-dbtest
+SNAPDIR=/tmp/vaulty-keeper-dbtest-snap
 DBKEY="$(python3 -c 'import base64;print(base64.b64encode(b"D"*32).decode())')"
 BRIDGE_ADDR=0.0.0.0:8972
 
@@ -35,9 +35,9 @@ PGP="$(free_port)"; MYP="$(free_port)"; RDP="$(free_port)"
 TUN_PG=15432; TUN_MY=15435; TUN_NATIVE=15436; TUN_RD=15434  # 隧道端口
 
 cleanup() {
-  pkill -f 'bin/ai-tools serve' 2>/dev/null || true
+  pkill -f 'bin/vaulty-keeper serve' 2>/dev/null || true
   docker rm -f aipg aimysql8 aimariadb airedis 2>/dev/null || true
-  rm -rf "$DBDIR" "$SNAPDIR" /tmp/ai-tools-dbtest-serve.log
+  rm -rf "$DBDIR" "$SNAPDIR" /tmp/vaulty-keeper-dbtest-serve.log
 }
 
 if [ "${1:-}" = "--clean" ]; then
@@ -127,7 +127,7 @@ fi
 echo "种子数据就绪（pg: t 表；MySQL: shop 库 customers/products/orders）"
 
 # ---- 注册连接 ----
-export AI_TOOLS_DB_DIR="$DBDIR" AI_TOOLS_DB_KEY="$DBKEY"
+export VAULTY_KEEPER_DB_DIR="$DBDIR" VAULTY_KEEPER_DB_KEY="$DBKEY"
 mkdir -p "$DBDIR" "$SNAPDIR"
 printf 'postgres://app:pgpass@127.0.0.1:%s/appdb' "$PGP" | "$BIN" db add pgdb --dir "$DBDIR" --port $TUN_PG
 printf 'redis://:redispass@127.0.0.1:%s/0' "$RDP"    | "$BIN" db add cache --dir "$DBDIR" --port $TUN_RD
@@ -140,11 +140,11 @@ fi
 echo "连接已注册："; "$BIN" db list --dir "$DBDIR"
 
 # ---- 起 serve（掩码桥 + 隧道）----
-nohup "$BIN" serve --addr "$BRIDGE_ADDR" --dir "$SNAPDIR" >/tmp/ai-tools-dbtest-serve.log 2>&1 &
+nohup "$BIN" serve --addr "$BRIDGE_ADDR" --dir "$SNAPDIR" >/tmp/vaulty-keeper-dbtest-serve.log 2>&1 &
 sleep 1
-TOKEN="$(cat ~/.ai-tools/bridge-token)"
-grep -q "listening" /tmp/ai-tools-dbtest-serve.log || { echo "serve 启动失败:"; cat /tmp/ai-tools-dbtest-serve.log; exit 1; }
-echo "serve 已启动（日志 /tmp/ai-tools-dbtest-serve.log）"
+TOKEN="$(cat ~/.vaulty/bridge-token)"
+grep -q "listening" /tmp/vaulty-keeper-dbtest-serve.log || { echo "serve 启动失败:"; cat /tmp/vaulty-keeper-dbtest-serve.log; exit 1; }
+echo "serve 已启动（日志 /tmp/vaulty-keeper-dbtest-serve.log）"
 
 # ---- 容器内经 host.docker.internal 走隧道验证 ----
 echo
@@ -184,12 +184,12 @@ docker run --rm "$MY_IMG" ${MY_FLAVOR} -h host.docker.internal -P $TUN_MY -u WRO
 # ---- 掩码桥：容器内 AI 视角（不配 DB 密钥）----
 echo
 echo "================ 掩码桥（AI 视角，无 DB 密钥）================"
-export AI_TOOLS_BRIDGE_ADDR=http://127.0.0.1:8972 AI_TOOLS_BRIDGE_TOKEN="$TOKEN"
+export VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8972 VAULTY_KEEPER_BRIDGE_TOKEN="$TOKEN"
 echo "-- host 侧模拟：remote dblist / db list 走桥"
-env -u AI_TOOLS_DB_KEY -u AI_TOOLS_DB_DIR HOME=/tmp/none "$BIN" remote dblist
+env -u VAULTY_KEEPER_DB_KEY -u VAULTY_KEEPER_DB_DIR HOME=/tmp/none "$BIN" remote dblist
 echo "-- 容器内视角（真实走 host.docker.internal）"
-docker run --rm -e AI_TOOLS_BRIDGE_ADDR=http://host.docker.internal:8972 -e AI_TOOLS_BRIDGE_TOKEN="$TOKEN" \
-  -e HOME=/tmp -e AI_TOOLS_DB_DIR=/tmp/none "$MY_IMG" sh -c \
+docker run --rm -e VAULTY_KEEPER_BRIDGE_ADDR=http://host.docker.internal:8972 -e VAULTY_KEEPER_BRIDGE_TOKEN="$TOKEN" \
+  -e HOME=/tmp -e VAULTY_KEEPER_DB_DIR=/tmp/none "$MY_IMG" sh -c \
   'echo "（容器内已就绪：连接名见 host 侧 remote dblist 输出）"'
 
 echo
@@ -201,7 +201,7 @@ echo "  在容器/隔离域里:"
 echo "    psql     \"postgresql://\$TOKEN@host.docker.internal:${TUN_PG}/appdb\""
 echo "    mysql    -h host.docker.internal -P $TUN_MY -u \$TOKEN -pxxx --ssl-mode=DISABLED shop"
 echo "    redis-cli -h host.docker.internal -p $TUN_RD -a \$TOKEN"
-echo "  本地 db list:  AI_TOOLS_DB_DIR=$DBDIR AI_TOOLS_DB_KEY=... $BIN db list"
+echo "  本地 db list:  VAULTY_KEEPER_DB_DIR=$DBDIR VAULTY_KEEPER_DB_KEY=... $BIN db list"
 echo "  掩码桥:        http://host.docker.internal:8972  (remote list/dblist)"
 echo "  结束:          scripts/dbtest.sh --clean"
 echo "============================================================"

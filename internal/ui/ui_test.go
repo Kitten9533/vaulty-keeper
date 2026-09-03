@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"ai-tools/internal/aesx"
-	"ai-tools/internal/apollo"
+	"vaulty-keeper/internal/aesx"
+	"vaulty-keeper/internal/apollo"
 )
 
 func TestSnapshotViewMasksSensitiveValue(t *testing.T) {
@@ -370,7 +370,7 @@ func TestStartPrintsTokenizedURL(t *testing.T) {
 	}()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if strings.Contains(buf.String(), "ai-tools UI available at") {
+		if strings.Contains(buf.String(), "vaulty-keeper UI available at") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -384,7 +384,7 @@ func TestStartPrintsTokenizedURL(t *testing.T) {
 	}
 	// the token from the printed URL actually gates state-changing requests
 	tok := strings.TrimSpace(strings.SplitN(strings.SplitN(url, "?t=", 2)[1], "\n", 2)[0])
-	addr := strings.TrimPrefix(strings.SplitN(url, "://", 2)[1], "ai-tools UI available at ")
+	addr := strings.TrimPrefix(strings.SplitN(url, "://", 2)[1], "vaulty-keeper UI available at ")
 	base := "http://" + strings.TrimSpace(strings.Split(addr, "?t=")[0])
 
 	// POST without the token is rejected
@@ -587,7 +587,7 @@ func TestAESTransformRoundTrip(t *testing.T) {
 
 func TestAESConfigAPI(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AI_TOOLS_AES_CONFIG", filepath.Join(dir, "aes.json"))
+	t.Setenv("VAULTY_KEEPER_AES_CONFIG", filepath.Join(dir, "aes.json"))
 	h := NewHandler(Config{Dir: dir, AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return make([]byte, 32), nil }})
 
 	get := httptest.NewRecorder()
@@ -725,7 +725,7 @@ func TestStartRollsForwardOnBusyPort(t *testing.T) {
 	}()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if strings.Contains(buf.String(), "ai-tools UI available at") {
+		if strings.Contains(buf.String(), "vaulty-keeper UI available at") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -1085,7 +1085,7 @@ func newDBHandler(t *testing.T, allowPlain bool) http.Handler {
 	t.Helper()
 	key := fixedKey()
 	store := filepath.Join(t.TempDir(), "db.json")
-	t.Setenv("AI_TOOLS_BRIDGE_TOKEN", "bridge-tok")
+	t.Setenv("VAULTY_KEEPER_BRIDGE_TOKEN", "bridge-tok")
 	return NewHandler(Config{
 		Dir:            t.TempDir(),
 		SnapshotKey:    func() ([]byte, error) { return key, nil },

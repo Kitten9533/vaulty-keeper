@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 给 ai-tools 增加"数据库隧道代理"：URL 加密存 host（独立 DB 密钥 + `~/.ai-tools/db.json`），`serve` 同时起 TCP 隧道，容器内 AI 用原生客户端（psql/mysql/redis-cli）连代理端口，代理在握手阶段注入真实凭据；AI 永远看不到 DSN。
+**Goal:** 给 vaulty-keeper 增加"数据库隧道代理"：URL 加密存 host（独立 DB 密钥 + `~/.vaulty/db.json`），`serve` 同时起 TCP 隧道，容器内 AI 用原生客户端（psql/mysql/redis-cli）连代理端口，代理在握手阶段注入真实凭据；AI 永远看不到 DSN。
 
-**Architecture:** 扩展 `ai-tools serve` 一个守护进程：HTTP 掩码桥（已有）+ 每连接一个 TCP 隧道。隧道按库实现认证注入：PG（假 server 要 cleartext + 真实 client 完成认证，pgproto3）、MySQL（手写 handshake 双端 + 认证应答替换，go-mysql 参考）、Redis（代发 AUTH + 转发，手写 RESP）。token 门控：PG 的 user 字段 / MySQL 的 username 字段 / Redis 的 AUTH 首命令。
+**Architecture:** 扩展 `vaulty-keeper serve` 一个守护进程：HTTP 掩码桥（已有）+ 每连接一个 TCP 隧道。隧道按库实现认证注入：PG（假 server 要 cleartext + 真实 client 完成认证，pgproto3）、MySQL（手写 handshake 双端 + 认证应答替换，go-mysql 参考）、Redis（代发 AUTH + 转发，手写 RESP）。token 门控：PG 的 user 字段 / MySQL 的 username 字段 / Redis 的 AUTH 首命令。
 
 **Tech Stack:** Go，新增依赖 `github.com/jackc/pgx/v5`（pgproto3）、`github.com/xdg-go/scram`（PG SCRAM）、`github.com/go-mysql-org/go-mysql`（仅参考/客户端，见任务6）。Redis 手写 RESP 零依赖。
 
@@ -34,7 +34,7 @@
 
 **Files:** Modify `internal/apollo/keyring.go`, `internal/apollo/key_test.go`
 
-- [ ] 在 keyring.go 加常量 `DBKeychainAccount = "db-key"`、`EnvDBKey = "AI_TOOLS_DB_KEY"`，函数 `DBKey()`（env 优先→keyring，32 字节 base64 校验）、`GenerateAndStoreDBKey(force bool)`——镜像 `SnapshotKey`/`GenerateAndStoreKey` 的实现
+- [ ] 在 keyring.go 加常量 `DBKeychainAccount = "db-key"`、`EnvDBKey = "VAULTY_KEEPER_DB_KEY"`，函数 `DBKey()`（env 优先→keyring，32 字节 base64 校验）、`GenerateAndStoreDBKey(force bool)`——镜像 `SnapshotKey`/`GenerateAndStoreKey` 的实现
 - [ ] key_test.go 加测试：`DBKey` env 覆盖读取、`GenerateAndStoreDBKey` 幂等拒绝
 - [ ] `go test ./internal/apollo/...` 通过
 
@@ -94,7 +94,7 @@
 
 - [ ] bridge.Config 加 `DBDir string`；`/api/db/list` 端点（token 门控已有）返回 `[{name,type,port}]`
 - [ ] `runServe`：生成 token（与 bridge 同款）→ 先起 dbproxy.StartTunnels(ctx,...) → 再 bridge.Start(ctx, cfg.Token=...)
-- [ ] `remote` 加 `dblist` 子命令：读 `AI_TOOLS_BRIDGE_ADDR/TOKEN` → GET `/api/db/list`
+- [ ] `remote` 加 `dblist` 子命令：读 `VAULTY_KEEPER_BRIDGE_ADDR/TOKEN` → GET `/api/db/list`
 - [ ] 测试：bridge handler 单测 db/list；端到端本地 serve + redis 隧道 + remote dblist
 
 ## Task 8: 文档与收尾

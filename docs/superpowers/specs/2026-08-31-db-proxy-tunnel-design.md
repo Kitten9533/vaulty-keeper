@@ -5,7 +5,7 @@
 
 ## 目标
 
-让容器/隔离域里的 AI 能通过**原生数据库客户端**（psql / mysql / redis-cli 等）查询数据库并拿到数据，但数据库连接 URL（地址、账号、密码）**绝不暴露给 AI**。URL 只以密文形式存在 host 的 ai-tools 里。
+让容器/隔离域里的 AI 能通过**原生数据库客户端**（psql / mysql / redis-cli 等）查询数据库并拿到数据，但数据库连接 URL（地址、账号、密码）**绝不暴露给 AI**。URL 只以密文形式存在 host 的 vaulty-keeper 里。
 
 一句话：**只加密链接 URL + 做一个懂协议的隧道代理，在握手阶段注入真实凭据**。不做数据库数据加密，代理层不强制只读。
 
@@ -24,7 +24,7 @@
   mysql -h host.docker.internal -P 15434 -u "$TOKEN" -p任意
         │   TCP（带 token 门控）
         ▼
-[Host: ai-tools serve --addr 0.0.0.0:8970]
+[Host: vaulty-keeper serve --addr 0.0.0.0:8970]
   HTTP 桥（原有 /api/*，db list 走这里）＋ DB 隧道监听（每连接一个 TCP 端口）
   隧道：校验 token → 用 db.json 里的真实 URL 连真实库（含 TLS 配置）
         → 握手注入真实凭据 → 之后纯字节转发
@@ -33,13 +33,13 @@
 ```
 
 - 容器侧只拿到查询结果，从不接触 DSN/凭据
-- 连接名（`prod`、`cache`）不保密，AI 用 `ai-tools db list` 经 HTTP 桥可见（返回连接名、类型、隧道端口；host 部分与 `AI_TOOLS_BRIDGE_ADDR` 的 host 一致，容器内即 `host.docker.internal`）
+- 连接名（`prod`、`cache`）不保密，AI 用 `vaulty-keeper db list` 经 HTTP 桥可见（返回连接名、类型、隧道端口；host 部分与 `VAULTY_KEEPER_BRIDGE_ADDR` 的 host 一致，容器内即 `host.docker.internal`）
 - 复用现有 serve 的 token 门控 + 限速 + 失败 backoff 体系；`internal/dbproxy` 包承载实现，TCP 隧道监听地址跟随 `--addr`
 
 ## 存储与密钥
 
-- `ai-tools db init`：创建独立 DB 密钥（macOS Keychain / Windows 凭据管理器，env 兜底 `AI_TOOLS_DB_KEY`）——与快照密钥、敏感值密钥独立：快照密钥泄露也解不开 DSN
-- `~/.ai-tools/db.json`（0600，每连接 URL 用 AES-256-GCM 单独加密）：
+- `vaulty-keeper db init`：创建独立 DB 密钥（macOS Keychain / Windows 凭据管理器，env 兜底 `VAULTY_KEEPER_DB_KEY`）——与快照密钥、敏感值密钥独立：快照密钥泄露也解不开 DSN
+- `~/.vaulty/db.json`（0600，每连接 URL 用 AES-256-GCM 单独加密）：
 
 ```json
 {
@@ -56,12 +56,12 @@
 ## 命令面（本地与容器内同形）
 
 ```sh
-ai-tools db init                                        # 建 DB 密钥
+vaulty-keeper db init                                        # 建 DB 密钥
 printf 'postgres://u:p@db.example.com:5432/mydb' \
-  | ai-tools db add prod [--port 15432]                 # DSN 走 stdin，不进 argv/shell history
-ai-tools db list [--json]                               # 连接名 + 类型 + 代理地址
-ai-tools db rm <name> --yes
-ai-tools db shell <name>                                # host 上用解密后的 URL 拉起原生客户端（TTY-only）
+  | vaulty-keeper db add prod [--port 15432]                 # DSN 走 stdin，不进 argv/shell history
+vaulty-keeper db list [--json]                               # 连接名 + 类型 + 代理地址
+vaulty-keeper db rm <name> --yes
+vaulty-keeper db shell <name>                                # host 上用解密后的 URL 拉起原生客户端（TTY-only）
 ```
 
 - `db add` 的 DSN 只从 stdin 读取；非 TTY 下无 stdin 输入则报错提示用法

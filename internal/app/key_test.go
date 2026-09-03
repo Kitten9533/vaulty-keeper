@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"ai-tools/internal/apollo"
+	"vaulty-keeper/internal/apollo"
 )
 
 func TestKeyAvailableWithEnvKey(t *testing.T) {

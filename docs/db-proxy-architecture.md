@@ -1,4 +1,4 @@
-# ai-tools 数据库隧道代理 · 图解
+# vaulty-keeper 数据库隧道代理 · 图解
 
 > 用图说话：Docker 里是什么、凭据存在哪、隧道怎么工作、安全边界在哪。
 > 配合 `scripts/dbtest.sh` 一起看，跑一遍再对照图，就全通了。
@@ -17,7 +17,7 @@
        │ TCP（容器内用 host 访问时，host 部分写 host.docker.internal）
        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Host：ai-tools serve --addr 0.0.0.0:8972   （一个进程，两层服务）      │
+│ Host：vaulty-keeper serve --addr 0.0.0.0:8972   （一个进程，两层服务）      │
 │                                                                     │
 │  ① HTTP 掩码桥 :8972            ② DB 隧道（每连接一个 TCP 端口）       │
 │    /api/* 全部要 token              pgdb       :15432 (postgres)     │
@@ -31,7 +31,7 @@
 │        │                                  │                          │
 │        │    ┌─────────────────────────────┘                          │
 │        │    ▼                                                       │
-│        │  DB Key（系统密钥库 / env AI_TOOLS_DB_KEY 兜底）              │
+│        │  DB Key（系统密钥库 / env VAULTY_KEEPER_DB_KEY 兜底）              │
 └───────┼──────────────────────────────────────────────────────────────┘
         │ TCP（真实凭据只在 host 进程内存里出现，绝不出 host）
         ▼
@@ -59,7 +59,7 @@
 │ airedis   │ redis:7          │ 127.0.0.1:59920│ :redispass / 0       │
 └───────────┴──────────────────┴────────────────┴──────────────────────┘
 
-这些 URL 被 ai-tools 加密后注册成"连接"（存 db.json）：
+这些 URL 被 vaulty-keeper 加密后注册成"连接"（存 db.json）：
   pgdb      ← postgres://app:pgpass@127.0.0.1:59918/appdb
   mysqltest ← mysql://sha2user:sha2pass@127.0.0.1:59919/shop
   mysqlnative← mysql://nativeuser:nativepass@127.0.0.1:59919/shop
@@ -79,7 +79,7 @@ serve 为每个连接开一个隧道端口，AI 侧拿到的"地址"：
 ## 图 3 · 真实账号密码存在哪（存储链路）
 
 ```
-① 注册连接：echo 'postgres://app:pgpass@...' | ai-tools db add pgdb
+① 注册连接：echo 'postgres://app:pgpass@...' | vaulty-keeper db add pgdb
              │  URL 从 stdin 读，不进命令行参数 → 不进 shell history / ps
              ▼
 真实 URL（含账号密码）
@@ -87,7 +87,7 @@ serve 为每个连接开一个隧道端口，AI 侧拿到的"地址"：
    ▼
 db.json（磁盘密文，权限 0600，无任何明文）◄── 快照密钥/敏感值密钥泄露也解不开
    │
-   │  serve 启动时：Keychain(或 env AI_TOOLS_DB_KEY) 取 DB Key → 解密 URL
+   │  serve 启动时：Keychain(或 env VAULTY_KEEPER_DB_KEY) 取 DB Key → 解密 URL
    ▼
 进程内存中的 URL（只存在于 host 的 serve 进程）
    │  每个连接：token 校验 → 用真实凭据连真实库 → 握手注入 → 纯字节转发
@@ -148,7 +148,7 @@ AI / 容器内能看到                                    AI 永远看不到
 ✔ 隧道端口用原生客户端自由查询                ✘ serve 之外的任何明文中间态
 
 防御链条（层层兜底，防"故意对抗的 AI"）：
-  ① 容器隔离：AI 进 Docker，摸不到 ~/.ai-tools、系统密钥库、真实凭据
+  ① 容器隔离：AI 进 Docker，摸不到 ~/.vaulty、系统密钥库、真实凭据
   ② token 门控：无 token 的第三方连隧道端口即被断
   ③ 凭据不出 host：真实账号密码只在 serve 进程内存
   ④ 审计：每次成功/拒绝都记（时间、来源 IP、连接名）
@@ -193,7 +193,7 @@ DBeaver                     serve(host)                   真实 PG
 ### 流程 1 · 真实凭据的一生（注册 → 存储 → 运行 → 消亡）
 
 ```
-① 注册：echo 'postgres://app:pgpass@...' | ai-tools db add pgdb
+① 注册：echo 'postgres://app:pgpass@...' | vaulty-keeper db add pgdb
    │ URL 走 stdin，不进命令行 → 不进 ps / shell history
    ▼
 ② 加密落盘：AES-256-GCM 加密（密钥 = DB Key）◄── DB Key 独立于快照/敏感值密钥
@@ -262,7 +262,7 @@ serve
    │
    ├─ apollo 快照密钥 ────────── 加密 → Apollo 快照的「非敏感值」
    ├─ sensitive 敏感值密钥 ───── 加密 → 快照里的「敏感值」
-   └─ db 数据库密钥(AI_TOOLS_DB_KEY) ─ 加密 → db.json 里的「真实数据库 URL」
+   └─ db 数据库密钥(VAULTY_KEEPER_DB_KEY) ─ 加密 → db.json 里的「真实数据库 URL」
         │
         ▼ 单独泄露的影响
    apollo 密钥泄露   → 能解非敏感快照值，但解不开敏感值、解不开 db.json
@@ -273,8 +273,8 @@ serve
 ### 流程 5 · serve 启动时序
 
 ```
-ai-tools serve --addr 0.0.0.0:8972
-   │ ① 生成 128 位随机 token → 写 ~/.ai-tools/bridge-token（0600）+ 打印
+vaulty-keeper serve --addr 0.0.0.0:8972
+   │ ① 生成 128 位随机 token → 写 ~/.vaulty/bridge-token（0600）+ 打印
    ▼
    │ ② 读 db.json（DB Key 解密）→ 每个连接开一个 TCP 隧道
    │    pgdb :15432 / mysqltest :15435 / mysqlnative :15436 / cache :15434
@@ -291,17 +291,17 @@ Ctrl-C / 退出 → 隧道与桥关闭，内存中的真实 URL 消亡
 
 ```
 Host 侧（先准备好，AI 看不到这些）：
-  ai-tools apollo init / sensitive init    ← 快照密钥 + 敏感值密钥进 Keychain
-  ai-tools apollo import prod.txt --app-id xx
+  vaulty-keeper apollo init / sensitive init    ← 快照密钥 + 敏感值密钥进 Keychain
+  vaulty-keeper apollo import prod.txt --app-id xx
        │ 明文只在"你手动导入"这一刻出现，之后全部加密落盘
        ▼
-  ~/.ai-tools/apollo/prod__xx.json（0600 密文）◄── 磁盘无明文，容器未挂载
+  ~/.vaulty/apollo/prod__xx.json（0600 密文）◄── 磁盘无明文，容器未挂载
        ▼
-  ai-tools serve --addr 0.0.0.0:8970        ← host 持有密钥，永远只回掩码
+  vaulty-keeper serve --addr 0.0.0.0:8970        ← host 持有密钥，永远只回掩码
        │
        ▼
 容器侧（AI 视角，每次操作都经桥）：
-  ai-tools remote list prod --appid xx
+  vaulty-keeper remote list prod --appid xx
        │ ① AI 问 serve："prod 有哪些 key？"（带 token）
        ▼
   serve
@@ -312,7 +312,7 @@ Host 侧（先准备好，AI 看不到这些）：
        │ 看不到明文，但长度 + 指纹够用
        ▼
 对比判断（AI 的核心工作）：
-  ai-tools remote compare prod test --appid xx --appid-to xx
+  vaulty-keeper remote compare prod test --appid xx --appid-to xx
        ▼
   ~ DB_PASSWORD: *** (11 chars) [afd76e19] -> *** (11 chars) [b5a112e5]
        │ 指纹不同 = 内容不同（即使长度一样）
@@ -331,30 +331,30 @@ Host 侧（先准备好，AI 看不到这些）：
 项目里的 Docker 文件是**两种独立用途**，别混在一起：
 
 ### 角色 A：测试数据库（`scripts/dbtest.sh`）
-起 PG/MySQL/Redis **数据库容器**给隧道当靶子。只服务于本地验证，不参与任何 ai-tools 逻辑；serve 把它们当普通远端 DB 连。
+起 PG/MySQL/Redis **数据库容器**给隧道当靶子。只服务于本地验证，不参与任何 vaulty-keeper 逻辑；serve 把它们当普通远端 DB 连。
 
 ### 角色 B：隔离 AI agent（`Dockerfile` + `docker-compose.yml` + `docker/agent-entrypoint.sh`）
 把 **AI 本身**关进容器，让 AI 摸不到 host 的密钥/密文——这是防"故意对抗的 AI"的唯一可靠办法。
 
 ```
 Dockerfile（两阶段）
-  阶段1 golang → go build 出 ai-tools 二进制
+  阶段1 golang → go build 出 vaulty-keeper 二进制
   阶段2 node（agent CLI 是 npm 包）+ git + 非 root 用户 agent
 
 docker-compose.yml（隔离要点）
   cap_drop: ALL             容器无内核特权
   no-new-privileges         无法提权
-  volumes: 只挂项目目录      不挂 ~/.ai-tools / Keychain / ~/.ssh / docker.sock
+  volumes: 只挂项目目录      不挂 ~/.vaulty / Keychain / ~/.ssh / docker.sock
   env: 只有 BRIDGE_ADDR/TOKEN（没有密钥）
   extra_hosts: host.docker.internal:host-gateway   Linux 兼容（Docker Desktop 无影响）
   volumes: agent-home:/home/agent                   持久化 CLI/历史（重建不丢）
 
 agent-entrypoint.sh
-  按 AI_TOOLS_INSTALL_AGENTS 自动 npm 装 codex/claude/opencode，再开 shell
+  按 VAULTY_KEEPER_INSTALL_AGENTS 自动 npm 装 codex/claude/opencode，再开 shell
 ```
 
 容器里同时具备两种能力（都经 host 的 serve）：
-- **Apollo 掩码读**：`ai-tools remote list|get|compare` → 只有 `*** (n chars)` + 指纹
+- **Apollo 掩码读**：`vaulty-keeper remote list|get|compare` → 只有 `*** (n chars)` + 指纹
 - **DB 隧道**：`db list` 拿隧道端口 → psql/mysql/redis-cli 连 `host.docker.internal:端口`，token 当用户名/AUTH
 
 **边界提醒**：Docker 是"防绝大多数 AI 主动拿密钥"的强隔离，但不是绝对隔离（daemon 是 root 服务，容器逃逸是真实攻击面）。极高威胁等级应升级到独立账号 / VM / 云沙箱（README「不用 Docker 的替代用法」）。
@@ -373,7 +373,7 @@ agent-entrypoint.sh
 ### 两个角色怎么串起来
 
 ```
-host: ai-tools serve（掩码桥 + DB 隧道）  ← 裸跑，与 Docker 无关
+host: vaulty-keeper serve（掩码桥 + DB 隧道）  ← 裸跑，与 Docker 无关
 Docker 里：[角色B agent容器: AI] --db list--> [隧道端口] --token--> 真实 DB
                                      （真实 DB = 角色A 的容器 / 内网 / 云 RDS 均可）
 ```
@@ -400,5 +400,5 @@ INSERT INTO t ...                → permission denied for table t             �
 SELECT count(*) FROM t           → 2                （正常查询不受影响）
 ```
 
-**结论**：密码（明文）在任何情况下都不出 host；哈希/写权限等能否拿到，完全由你注册的账号决定。所以安全使用的**前置条件**是：`ai-tools db add` 时注册一个**专用只读、最小权限**的账号，而不是拿高权账号去注册。
+**结论**：密码（明文）在任何情况下都不出 host；哈希/写权限等能否拿到，完全由你注册的账号决定。所以安全使用的**前置条件**是：`vaulty-keeper db add` 时注册一个**专用只读、最小权限**的账号，而不是拿高权账号去注册。
 

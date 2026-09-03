@@ -14,18 +14,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ai-tools/internal/apollo"
-	"ai-tools/internal/bridge"
-	"ai-tools/internal/dbproxy"
+	"vaulty-keeper/internal/apollo"
+	"vaulty-keeper/internal/bridge"
+	"vaulty-keeper/internal/dbproxy"
 )
 
-// dbPath resolves the store file: --dir overrides, else AI_TOOLS_DB_DIR, else
-// the default ~/.ai-tools/db.json.
+// dbPath resolves the store file: --dir overrides, else VAULTY_KEEPER_DB_DIR, else
+// the default ~/.vaulty/db.json.
 func dbPath(flagDir string) (string, error) {
 	if flagDir != "" {
 		return filepath.Join(flagDir, dbproxy.FileName), nil
 	}
-	if d := os.Getenv("AI_TOOLS_DB_DIR"); d != "" {
+	if d := os.Getenv("VAULTY_KEEPER_DB_DIR"); d != "" {
 		return filepath.Join(d, dbproxy.FileName), nil
 	}
 	home, err := os.UserHomeDir()
@@ -64,7 +64,7 @@ func runDB(args []string) int {
 		dbUsage(os.Stdout)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "ai-tools db: unknown subcommand %q\n\n", sub)
+		fmt.Fprintf(os.Stderr, "vaulty-keeper db: unknown subcommand %q\n\n", sub)
 		dbUsage(os.Stderr)
 		return 2
 	}
@@ -74,7 +74,7 @@ func dbUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	printDomainUsage(w, "db")
 	fmt.Fprintf(w, `
-数据库 URL 加密落盘（独立 DB 密钥），永不向脚本/AI 显示。'ai-tools serve'
+数据库 URL 加密落盘（独立 DB 密钥），永不向脚本/AI 显示。'vaulty-keeper serve'
 为每个连接起一条 TCP 隧道；隔离容器内用原生客户端（psql/mysql/redis-cli）
 连隧道端口，token 作用户名/AUTH 密码——token 不是真实数据库密码。
 'db test' 验证注册的 URL 可认证（不打印它）；'db show' 只在你自己的终端打印。
@@ -126,12 +126,12 @@ func dbAdd(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db add: 用法：echo '<url>' | ai-tools db add <name> [--port <port>] [--test]")
+		return fail("db add: 用法：echo '<url>' | vaulty-keeper db add <name> [--port <port>] [--test]")
 	}
 	name := fs.Arg(0)
 	raw := readDSN()
 	if raw == "" {
-		return fail("db add: 请通过 stdin 提供数据库 URL（printf 'postgres://u:p@host:5432/db' | ai-tools db add %s）", name)
+		return fail("db add: 请通过 stdin 提供数据库 URL（printf 'postgres://u:p@host:5432/db' | vaulty-keeper db add %s）", name)
 	}
 	typ, err := dbproxy.ConnTypeFromURL(raw)
 	if err != nil {
@@ -186,7 +186,7 @@ func dbList(args []string) int {
 		if remote := remoteDBList(); remote != nil {
 			conns = remote
 		} else {
-			return fail("db list: %s（且未配置掩码代理 AI_TOOLS_BRIDGE_ADDR/TOKEN）", dbListHint(path, localErr))
+			return fail("db list: %s（且未配置掩码代理 VAULTY_KEEPER_BRIDGE_ADDR/TOKEN）", dbListHint(path, localErr))
 		}
 	}
 	if *jsonOut {
@@ -217,19 +217,19 @@ func localConns(path string) ([]dbproxy.Conn, error) {
 func dbListHint(path string, err error) string {
 	base := fmt.Sprintf("本地读取失败：%v", err)
 	if _, serr := os.Stat(path); os.IsNotExist(serr) {
-		return fmt.Sprintf("%s 不存在，请先 'ai-tools db add <name>' 注册，或 --dir / AI_TOOLS_DB_DIR 指向已有环境", path)
+		return fmt.Sprintf("%s 不存在，请先 'vaulty-keeper db add <name>' 注册，或 --dir / VAULTY_KEEPER_DB_DIR 指向已有环境", path)
 	}
 	if strings.Contains(err.Error(), "未找到数据库密钥") {
-		return base + "：请先运行 'ai-tools db init'（或设置 AI_TOOLS_DB_KEY）"
+		return base + "：请先运行 'vaulty-keeper db init'（或设置 VAULTY_KEEPER_DB_KEY）"
 	}
 	if strings.Contains(err.Error(), "解密") || strings.Contains(err.Error(), "cipher") {
-		return fmt.Sprintf("%s 存在但解密失败（密钥不匹配）：该文件是用不同的 AI_TOOLS_DB_KEY / Keychain 密钥创建的；请检查环境变量，或换用 --dir / AI_TOOLS_DB_DIR 指向正确的 store", path)
+		return fmt.Sprintf("%s 存在但解密失败（密钥不匹配）：该文件是用不同的 VAULTY_KEEPER_DB_KEY / Keychain 密钥创建的；请检查环境变量，或换用 --dir / VAULTY_KEEPER_DB_DIR 指向正确的 store", path)
 	}
 	return base
 }
 
 // remoteDBList fetches the connection list through the masked bridge
-// (AI_TOOLS_BRIDGE_ADDR/TOKEN). Returns nil when the bridge is unreachable or
+// (VAULTY_KEEPER_BRIDGE_ADDR/TOKEN). Returns nil when the bridge is unreachable or
 // not configured.
 func remoteDBList() []dbproxy.Conn {
 	base, token, err := remoteConfig()
@@ -265,7 +265,7 @@ func dbRM(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db rm: 用法：ai-tools db rm <name> [--yes]")
+		return fail("db rm: 用法：vaulty-keeper db rm <name> [--yes]")
 	}
 	if !isTTY(os.Stdin.Fd()) && !*yes {
 		return fail("db rm: 非 TTY 下需要确认（用 --yes）")
@@ -296,7 +296,7 @@ func dbTest(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db test: 用法：ai-tools db test <name>")
+		return fail("db test: 用法：vaulty-keeper db test <name>")
 	}
 	name := fs.Arg(0)
 	path, err := dbPath(*dir)
@@ -313,7 +313,7 @@ func dbTest(args []string) int {
 	}
 	if err := dbproxy.TestConn(conn); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: %s: %v\n", name, err)
-		fmt.Fprintf(os.Stderr, "修复：printf '<正确URL>' | ai-tools db add %s（端口保持不变）\n", name)
+		fmt.Fprintf(os.Stderr, "修复：printf '<正确URL>' | vaulty-keeper db add %s（端口保持不变）\n", name)
 		return 1
 	}
 	user := ""
@@ -348,7 +348,7 @@ func dbShow(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db show: 用法：ai-tools db show <name>")
+		return fail("db show: 用法：vaulty-keeper db show <name>")
 	}
 	if !isTTY(os.Stdin.Fd()) {
 		return fail("db show: 仅可在交互式终端使用（真实连接信息只在你的终端里显示）")
@@ -388,7 +388,7 @@ func dbConnect(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db connect: 用法：ai-tools db connect <name> [--container] [--cmd]")
+		return fail("db connect: 用法：vaulty-keeper db connect <name> [--container] [--cmd]")
 	}
 	name := fs.Arg(0)
 	path, err := dbPath(*dir)
@@ -481,7 +481,7 @@ func printConnCommand(typ, token, host string, port int, db string) {
 	}
 }
 
-// bridgeToken resolves the bridge token: env first, then ~/.ai-tools/bridge-token.
+// bridgeToken resolves the bridge token: env first, then ~/.vaulty/bridge-token.
 func bridgeToken() (string, error) {
 	if t := os.Getenv(bridge.EnvToken); t != "" {
 		return t, nil
@@ -492,7 +492,7 @@ func bridgeToken() (string, error) {
 	}
 	b, err := os.ReadFile(bridge.TokenPath(home))
 	if err != nil {
-		return "", errors.New("未找到 bridge token（请先运行 'ai-tools serve'，或导出 " + bridge.EnvToken + "）")
+		return "", errors.New("未找到 bridge token（请先运行 'vaulty-keeper serve'，或导出 " + bridge.EnvToken + "）")
 	}
 	return strings.TrimSpace(string(b)), nil
 }
@@ -508,7 +508,7 @@ func dbShell(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db shell: 用法：ai-tools db shell <name>")
+		return fail("db shell: 用法：vaulty-keeper db shell <name>")
 	}
 	if !isTTY(os.Stdin.Fd()) {
 		return fail("db shell: 仅可在交互式终端使用（连接信息只在你的终端里可见）")

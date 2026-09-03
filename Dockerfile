@@ -1,10 +1,10 @@
-# ai-tools agent container: runs agent CLIs (codex / claude / opencode / pi)
-# isolated from the host. The host runs 'ai-tools serve' and holds the
+# vaulty-keeper agent container: runs agent CLIs (codex / claude / opencode / pi)
+# isolated from the host. The host runs 'vaulty-keeper serve' and holds the
 # snapshot keys; this container only ever receives masked values through the
 # bridge token. Keys and ciphertext never enter the container.
 #
 # Build:
-#   docker build -t ai-tools-agent:local .
+#   docker build -t vaulty-keeper-agent:local .
 #
 # The Go binary is built from source in the first stage, so the host does not
 # need to build anything beforehand.
@@ -13,7 +13,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/ai-tools .
+RUN CGO_ENABLED=0 go build -o /out/vaulty-keeper .
 
 FROM node:22-bookworm-slim
 RUN apt-get update \
@@ -22,7 +22,7 @@ RUN apt-get update \
 
 WORKDIR /workspace
 
-COPY --from=build /out/ai-tools /usr/local/bin/ai-tools
+COPY --from=build /out/vaulty-keeper /usr/local/bin/vaulty-keeper
 COPY docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint
 RUN chmod +x /usr/local/bin/agent-entrypoint \
     && useradd --create-home --shell /bin/bash agent

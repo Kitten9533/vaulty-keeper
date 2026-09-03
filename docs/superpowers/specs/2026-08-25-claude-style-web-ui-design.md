@@ -103,7 +103,7 @@ model. The browser talks to JSON endpoints on the same loopback origin.
 
 ### Open and browse a snapshot
 
-1. User runs `ai-tools ui`.
+1. User runs `vaulty-keeper ui`.
 2. The browser opens the workspace and the rail lists snapshots.
 3. Selecting a snapshot opens its context on the canvas.
 4. The canvas shows metadata, a searchable key/value list, and masked sensitive
@@ -155,7 +155,7 @@ model. The browser talks to JSON endpoints on the same loopback origin.
 - HTTP handler tests verify loopback-only defaults, input validation, error
   responses, and that sensitive plaintext is absent from list and compare JSON.
 - Existing Apollo storage, parser, AES, and CLI tests remain green.
-- A focused manual check opens `ai-tools ui`, imports a sample, edits a normal
+- A focused manual check opens `vaulty-keeper ui`, imports a sample, edits a normal
   and sensitive key, compares snapshots, and verifies the export confirmation.
 
 ## Non-Goals and Follow-Up Work

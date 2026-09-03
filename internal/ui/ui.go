@@ -27,8 +27,8 @@ import (
 	"syscall"
 	"time"
 
-	"ai-tools/internal/apollo"
-	"ai-tools/internal/app"
+	"vaulty-keeper/internal/apollo"
+	"vaulty-keeper/internal/app"
 )
 
 //go:embed static/index.html static/app.css static/app.js
@@ -53,8 +53,8 @@ type Config struct {
 	// allowed.
 	AllowPlaintext bool
 	// DBStore is the path to the encrypted database-connection store
-	// (~/.ai-tools/db.json). When set, the UI serves /api/db/* endpoints
-	// mirroring the `ai-tools db` CLI.
+	// (~/.vaulty/db.json). When set, the UI serves /api/db/* endpoints
+	// mirroring the `vaulty-keeper db` CLI.
 	DBStore string
 	// DBKey resolves the database encryption key (defaults to apollo.DBKey).
 	DBKey func() ([]byte, error)
@@ -151,7 +151,7 @@ func checkToken(token string, next http.Handler) http.Handler {
 			if delay > 0 {
 				time.Sleep(delay)
 			}
-			writeAPIError(w, http.StatusUnauthorized, "auth_required", "访问令牌无效或缺失（请打开 'ai-tools ui' 打印的 URL）")
+			writeAPIError(w, http.StatusUnauthorized, "auth_required", "访问令牌无效或缺失（请打开 'vaulty-keeper ui' 打印的 URL）")
 			return
 		}
 		mu.Lock()
@@ -482,12 +482,12 @@ func (h *handler) loadSnapshotTarget(w http.ResponseWriter, name, appID string) 
 func (h *handler) keys(w http.ResponseWriter) (snapKey, sensitiveKey []byte, ok bool) {
 	snapKey, err := h.cfg.SnapshotKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("快照密钥不可用（%s）；请运行 'ai-tools apollo init' 或设置 %s", err, apollo.EnvKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("快照密钥不可用（%s）；请运行 'vaulty-keeper apollo init' 或设置 %s", err, apollo.EnvKey))
 		return nil, nil, false
 	}
 	sensitiveKey, err = h.cfg.SensitiveKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("敏感值密钥不可用（%s）；请运行 'ai-tools sensitive init' 或设置 %s", err, apollo.EnvSensitiveKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("敏感值密钥不可用（%s）；请运行 'vaulty-keeper sensitive init' 或设置 %s", err, apollo.EnvSensitiveKey))
 		return nil, nil, false
 	}
 	return snapKey, sensitiveKey, true
@@ -1180,7 +1180,7 @@ func Start(ctx context.Context, cfg Config, port int, openBrowser bool, out io.W
 	}
 
 	url := "http://" + listener.Addr().String() + "/?t=" + cfg.Token
-	fmt.Fprintf(out, "ai-tools UI available at %s\n", url)
+	fmt.Fprintf(out, "vaulty-keeper UI available at %s\n", url)
 	if !cfg.AllowPlaintext {
 		fmt.Fprintln(out, "提示：明文接口（导出/解密/明文编辑/AES 密钥列表）当前已禁用；需要时用 --allow-plaintext 重启 UI 开启")
 	}
@@ -1207,7 +1207,7 @@ func Start(ctx context.Context, cfg Config, port int, openBrowser bool, out io.W
 }
 
 // listenLoopback binds 127.0.0.1. A fixed port that is already in use rolls
-// forward to the next free port so repeated `ai-tools ui` runs keep working;
+// forward to the next free port so repeated `vaulty-keeper ui` runs keep working;
 // port 0 requests an ephemeral port.
 func listenLoopback(port int) (net.Listener, error) {
 	if port == 0 {

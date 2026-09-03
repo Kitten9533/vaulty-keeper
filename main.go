@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"ai-tools/internal/cli"
+	"vaulty-keeper/internal/cli"
 )
 
 func main() {

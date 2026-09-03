@@ -2,8 +2,8 @@
 // exposes them through credential-injecting TCP tunnels (see tunnel.go).
 //
 // A connection is a name plus the raw URL (DSN) the user registered with
-// `ai-tools db add`. The URL is encrypted at rest with AES-256-GCM using the
-// dedicated database key (apollo.DBKey / AI_TOOLS_DB_KEY) and only decrypted
+// `vaulty-keeper db add`. The URL is encrypted at rest with AES-256-GCM using the
+// dedicated database key (apollo.DBKey / VAULTY_KEEPER_DB_KEY) and only decrypted
 // inside the host process — it never appears in db.json, logs, or any reply
 // to a tunnel client. The tunnel binds a local TCP port per connection; a
 // client connecting there authenticates with the bridge token (PG/MySQL
@@ -33,7 +33,7 @@ const (
 	// user does not pin one with --port.
 	DefaultPortBase = 15432
 
-	// FileName is the store file inside the ai-tools home directory.
+	// FileName is the store file inside the vaulty-keeper home directory.
 	FileName = "db.json"
 )
 
@@ -70,9 +70,9 @@ type store struct {
 	Conns map[string]storedConn `json:"connections"`
 }
 
-// DefaultPath returns the store file under <home>/.ai-tools.
+// DefaultPath returns the store file under <home>/.vaulty.
 func DefaultPath(home string) string {
-	return filepath.Join(home, ".ai-tools", FileName)
+	return filepath.Join(home, ".vaulty", FileName)
 }
 
 // ValidateConnName checks a connection name: same charset as snapshot names.
@@ -304,7 +304,7 @@ func Resolve(path string, key []byte, name string) (Conn, error) {
 	}
 	sc, ok := s.Conns[name]
 	if !ok {
-		return Conn{}, fmt.Errorf("连接 %q 不存在（用 'ai-tools db add' 注册）", name)
+		return Conn{}, fmt.Errorf("连接 %q 不存在（用 'vaulty-keeper db add' 注册）", name)
 	}
 	raw, err := sc.decryptConn(key)
 	if err != nil {
@@ -323,7 +323,7 @@ func Resolve(path string, key []byte, name string) (Conn, error) {
 // message.
 func keyMismatchErr(name string, sc storedConn, key []byte, err error) error {
 	if sc.KeyID != "" && sc.KeyID != keyID(key) {
-		return fmt.Errorf("密钥不匹配：连接 %q 是用 key_id=%s 加密的，当前密钥 key_id=%s（Keychain 密钥可能被换过；用 'ai-tools db add %s' 重新注册即可）", name, sc.KeyID, keyID(key), name)
+		return fmt.Errorf("密钥不匹配：连接 %q 是用 key_id=%s 加密的，当前密钥 key_id=%s（Keychain 密钥可能被换过；用 'vaulty-keeper db add %s' 重新注册即可）", name, sc.KeyID, keyID(key), name)
 	}
-	return fmt.Errorf("连接 %q 无法解密（%v）；可能用旧密钥注册——重新注册：'ai-tools db add %s'，或删除：'ai-tools db rm %s --yes'", name, err, name, name)
+	return fmt.Errorf("连接 %q 无法解密（%v）；可能用旧密钥注册——重新注册：'vaulty-keeper db add %s'，或删除：'vaulty-keeper db rm %s --yes'", name, err, name, name)
 }

@@ -2,7 +2,7 @@
 // UI. It never formats output; callers own presentation.
 package app
 
-import "ai-tools/internal/apollo"
+import "vaulty-keeper/internal/apollo"
 
 // InitKey generates and stores a fresh snapshot key. force=true regenerates
 // even when a key already exists.

@@ -24,19 +24,19 @@ import (
 // keyring_darwin.go, keyring_windows.go, keyring_linux.go).
 
 const (
-	KeychainService = "ai-tools"
+	KeychainService = "vaulty-keeper"
 	KeychainAccount = "apollo-snapshot-key"
-	EnvKey          = "AI_TOOLS_APOLLO_KEY"
+	EnvKey          = "VAULTY_KEEPER_APOLLO_KEY"
 
 	SensitiveKeychainAccount = "sensitive-key"
-	EnvSensitiveKey          = "AI_TOOLS_SENSITIVE_KEY"
+	EnvSensitiveKey          = "VAULTY_KEEPER_SENSITIVE_KEY"
 
 	// DBKeychainAccount is the key encrypting database connection URLs in
-	// ~/.ai-tools/db.json (internal/dbproxy). It is independent from the
+	// ~/.vaulty/db.json (internal/dbproxy). It is independent from the
 	// snapshot and sensitive keys so a compromised snapshot key cannot decrypt
 	// connection strings.
 	DBKeychainAccount = "db-key"
-	EnvDBKey          = "AI_TOOLS_DB_KEY"
+	EnvDBKey          = "VAULTY_KEEPER_DB_KEY"
 )
 
 // keyStoreGet/keyStoreSet are overridable so tests never touch the real
@@ -55,7 +55,7 @@ func SnapshotKey() ([]byte, error) {
 	}
 	v, err := keyStoreGet(KeychainAccount)
 	if err != nil {
-		return nil, fmt.Errorf("未找到快照密钥（运行 'ai-tools apollo init' 或设置 %s）：%w", EnvKey, err)
+		return nil, fmt.Errorf("未找到快照密钥（运行 'vaulty-keeper apollo init' 或设置 %s）：%w", EnvKey, err)
 	}
 	return decodeKey(v)
 }
@@ -69,7 +69,7 @@ func SensitiveKey() ([]byte, error) {
 	}
 	v, err := keyStoreGet(SensitiveKeychainAccount)
 	if err != nil {
-		return nil, fmt.Errorf("未找到敏感值密钥（运行 'ai-tools sensitive init' 或设置 %s）：%w", EnvSensitiveKey, err)
+		return nil, fmt.Errorf("未找到敏感值密钥（运行 'vaulty-keeper sensitive init' 或设置 %s）：%w", EnvSensitiveKey, err)
 	}
 	return decodeKey(v)
 }
@@ -112,7 +112,7 @@ func DBKey() ([]byte, error) {
 	}
 	v, err := keyStoreGet(DBKeychainAccount)
 	if err != nil {
-		return nil, fmt.Errorf("未找到数据库密钥（运行 'ai-tools db init' 或设置 %s）：%w", EnvDBKey, err)
+		return nil, fmt.Errorf("未找到数据库密钥（运行 'vaulty-keeper db init' 或设置 %s）：%w", EnvDBKey, err)
 	}
 	return decodeKey(v)
 }

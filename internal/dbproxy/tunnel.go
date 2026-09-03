@@ -31,7 +31,7 @@ type Tunnel struct {
 
 // Start runs the per-connection listeners until ctx is done. It watches
 // db.json and auto-starts/stops tunnels as connections are added or removed,
-// so 'ai-tools db add'/'db rm' take effect without restarting serve. It
+// so 'vaulty-keeper db add'/'db rm' take effect without restarting serve. It
 // returns only when ctx is cancelled.
 func (t *Tunnel) Start(ctx context.Context) error {
 	type running struct {
@@ -88,7 +88,7 @@ func (t *Tunnel) Start(ctx context.Context) error {
 
 	sync()
 	if len(active) == 0 {
-		fmt.Fprintln(t.Log, "dbproxy: no database connections yet (use 'ai-tools db add <name>', tunnels auto-start)")
+		fmt.Fprintln(t.Log, "dbproxy: no database connections yet (use 'vaulty-keeper db add <name>', tunnels auto-start)")
 	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()

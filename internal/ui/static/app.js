@@ -299,7 +299,7 @@ function renderDBTable() {
   const empty = $('db-empty');
   if (!dbConns.length) {
     empty.hidden = false;
-    empty.textContent = '暂无连接，在左侧填写名称与数据库 URL 并注册；注册后 host 上的 ai-tools serve 会自动为它开启一条本地隧道';
+    empty.textContent = '暂无连接，在左侧填写名称与数据库 URL 并注册；注册后 host 上的 vaulty-keeper serve 会自动为它开启一条本地隧道';
   } else {
     empty.hidden = true;
   }

@@ -14,9 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ai-tools/internal/apollo"
-	"ai-tools/internal/bridge"
-	"ai-tools/internal/dbproxy"
+	"vaulty-keeper/internal/apollo"
+	"vaulty-keeper/internal/bridge"
+	"vaulty-keeper/internal/dbproxy"
 )
 
 // ---- serve ----
@@ -24,7 +24,7 @@ import (
 // runServe starts the masked-only bridge on the host that holds the keys, and
 // (when a database store exists) one TCP tunnel per registered database
 // connection. It blocks until interrupted. A per-run token is printed and
-// written to ~/.ai-tools/bridge-token so wrapper scripts can hand it to an
+// written to ~/.vaulty/bridge-token so wrapper scripts can hand it to an
 // isolated agent; the same token gates the database tunnels.
 func runServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
@@ -44,7 +44,7 @@ func runServe(args []string) int {
 	if err != nil {
 		return fail("serve: %v", err)
 	}
-	tokenDir := filepath.Join(home, ".ai-tools")
+	tokenDir := filepath.Join(home, ".vaulty")
 	token := bridge.NewToken()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -93,7 +93,7 @@ func hostOnly(addr string) string {
 // ---- remote ----
 
 // remoteConfig resolves the bridge base URL and token: env first, then the
-// host token file (~/.ai-tools/bridge-token) so local dogfooding works without
+// host token file (~/.vaulty/bridge-token) so local dogfooding works without
 // exporting anything.
 func remoteConfig() (base, token string, err error) {
 	base = os.Getenv(bridge.EnvAddr)
@@ -109,7 +109,7 @@ func remoteConfig() (base, token string, err error) {
 		}
 	}
 	if token == "" {
-		return "", "", errors.New("未设置 bridge token（请导出 " + bridge.EnvToken + " 或先运行 'ai-tools serve'）")
+		return "", "", errors.New("未设置 bridge token（请导出 " + bridge.EnvToken + " 或先运行 'vaulty-keeper serve'）")
 	}
 	return base, token, nil
 }
@@ -166,7 +166,7 @@ func runRemote(args []string) int {
 		remoteUsage(os.Stdout)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "ai-tools remote: unknown subcommand %q\n\n", sub)
+		fmt.Fprintf(os.Stderr, "vaulty-keeper remote: unknown subcommand %q\n\n", sub)
 		remoteUsage(os.Stderr)
 		return 2
 	}
@@ -176,7 +176,7 @@ func remoteUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	printDomainUsage(w, "remote")
 	fmt.Fprintf(w, `
-掩码代理（'ai-tools serve'，在持有密钥的主机运行）只回掩码值，永不回明文，
+掩码代理（'vaulty-keeper serve'，在持有密钥的主机运行）只回掩码值，永不回明文，
 即使 key 被标记安全也一样。remote 客户端供隔离域（Docker 容器/独立账号/VM）
 内的 AI 使用，经 %s / %s 访问桥。remote dblist 列出正在监听的数据库隧道，
 供原生客户端用 token 作为用户名（PG/MySQL）或 AUTH 密码（Redis）连接。
@@ -199,7 +199,7 @@ func remoteList(args []string) int {
 		return code
 	}
 	if fs.NArg() > 1 {
-		return fail("remote list: 用法：ai-tools remote list [name] [--appid <id>]")
+		return fail("remote list: 用法：vaulty-keeper remote list [name] [--appid <id>]")
 	}
 	base, token, err := remoteConfig()
 	if err != nil {
@@ -270,7 +270,7 @@ func remoteGet(args []string) int {
 		return code
 	}
 	if fs.NArg() != 2 {
-		return fail("remote get: 用法：ai-tools remote get <name> <key> [--appid <id>]")
+		return fail("remote get: 用法：vaulty-keeper remote get <name> <key> [--appid <id>]")
 	}
 	base, token, err := remoteConfig()
 	if err != nil {
@@ -304,7 +304,7 @@ func remoteCompare(args []string) int {
 		return code
 	}
 	if fs.NArg() != 2 {
-		return fail("remote compare: 用法：ai-tools remote compare <nameA> <nameB>")
+		return fail("remote compare: 用法：vaulty-keeper remote compare <nameA> <nameB>")
 	}
 	base, token, err := remoteConfig()
 	if err != nil {

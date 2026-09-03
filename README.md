@@ -1,31 +1,31 @@
-# ai-tools
+# vaulty-keeper
 
-个人 AI 工具箱（Go 单二进制，无运行时依赖）。所有值在本地磁盘上都是加密存储，密钥不进配置中心、不进明文文件。`ai-tools ui` 提供本地 Web UI 覆盖全部快照与 AES 工具（仅本机监听）。
+个人 AI 工具箱（Go 单二进制，无运行时依赖）。所有值在本地磁盘上都是加密存储，密钥不进配置中心、不进明文文件。`vaulty-keeper ui` 提供本地 Web UI 覆盖全部快照与 AES 工具（仅本机监听）。
 
 ## 安装
 
 ```sh
-make build          # → bin/ai-tools
-make install        # 软链到 ~/.local/bin/ai-tools（已在 PATH）
+make build          # → bin/vaulty-keeper
+make install        # 软链到 ~/.local/bin/vaulty-keeper（已在 PATH）
 make test           # 单测（含 Java↔Go 互操作向量）
 ```
 
 ## 手动操作
 
-直接运行 `ai-tools`（无参数）显示全部命令与用法；需要手动增删改时推荐用 `ai-tools ui`（本地 Web UI，覆盖全部快照与 AES 功能），或直接敲下面的子命令。
+直接运行 `vaulty-keeper`（无参数）显示全部命令与用法；需要手动增删改时推荐用 `vaulty-keeper ui`（本地 Web UI，覆盖全部快照与 AES 功能），或直接敲下面的子命令。
 
 ```sh
-ai-tools            # 显示完整命令树
-ai-tools <cmd> -h   # 每个子命令的完整帮助（语法 + 参数）
+vaulty-keeper            # 显示完整命令树
+vaulty-keeper <cmd> -h   # 每个子命令的完整帮助（语法 + 参数）
 ```
 
 ## 本地 Web UI
 
 ```sh
-ai-tools ui
-ai-tools ui --dir /path/to/snapshots --port 8080
-ai-tools ui --no-open
-ai-tools ui --allow-plaintext    # 显式开启明文接口（见下）
+vaulty-keeper ui
+vaulty-keeper ui --dir /path/to/snapshots --port 8080
+vaulty-keeper ui --no-open
+vaulty-keeper ui --allow-plaintext    # 显式开启明文接口（见下）
 ```
 
 - 仅监听 `127.0.0.1`，不会暴露到局域网。
@@ -36,32 +36,32 @@ ai-tools ui --allow-plaintext    # 显式开启明文接口（见下）
 - 明文出口（显示 / 明文编辑 / 导出 / AES 解密）均需二次确认后才显示，响应 `Cache-Control: no-store`，浏览器不持久化明文。
 - 浏览器端不持久化快照内容。
 
-## ai-tools apollo — Apollo 快照工具
+## vaulty-keeper apollo — Apollo 快照工具
 
-Apollo Open API 不可用时的替代方案：从 Apollo 门户**复制键值对**，导入加密快照，AI/脚本安全地读取、对比、修改。快照默认存 `~/.ai-tools/apollo/<name>.json`（`--dir` 或环境变量 `AI_TOOLS_APOLLO_DIR` 覆盖）。
+Apollo Open API 不可用时的替代方案：从 Apollo 门户**复制键值对**，导入加密快照，AI/脚本安全地读取、对比、修改。快照默认存 `~/.vaulty/apollo/<name>.json`（`--dir` 或环境变量 `VAULTY_KEEPER_APOLLO_DIR` 覆盖）。
 
 ```sh
-ai-tools apollo init                          # 首次：生成快照密钥（系统密钥库，如 macOS Keychain / Windows 凭据管理器）
-ai-tools sensitive init                       # 首次：生成敏感值密钥（独立于快照密钥）
-ai-tools apollo import prod.txt --appid xx    # 解析粘贴内容；--appid 必填；--name 省略时自动取文件名；已存在时需 --force 覆盖
-ai-tools apollo import - --name prod --appid xx   # 从 stdin 读（旧写法 --app-id 仍兼容）
- ai-tools apollo list                          # 列出快照（环境 + AppID）
- ai-tools apollo list prod --appid xx          # 默认全部掩码 *** (长度)；--reveal 显示明文（仅 TTY）
- ai-tools apollo list prod --appid xx --json   # JSON 输出（AI 友好）
- ai-tools apollo get prod --appid xx SOME_KEY  # 非 TTY 下只对标记为安全的 key 输出明文，其余掩码
- ai-tools apollo set prod --appid xx SOME_KEY value
- ai-tools apollo set prod --appid xx SOME_KEY value --plain    # 显式标记为安全：AI/脚本可读明文
- ai-tools apollo set prod --appid xx SOME_KEY value --secret   # 显式标记为敏感：始终掩码
- ai-tools apollo mark prod --appid xx SOME_KEY --plain|--secret  # 不改值，只翻转安全/敏感标记
- ai-tools apollo unset prod --appid xx SOME_KEY
- ai-tools apollo compare prod test --appid xx --appid-to yy   # added/removed/changed，默认全部掩码
- ai-tools apollo compare prod test --json
- ai-tools apollo reveal prod --appid xx SECRET_TOKEN          # 显示敏感值明文（仅 TTY）
- ai-tools apollo reveal prod --appid xx imile.fs.oss.secret-key --key <aes> --iv <aes>   # 解密外部 AES 密文（仅 TTY）
- ai-tools apollo edit prod --appid xx         # $EDITOR 打开明文编辑，保存后自动重新加密（仅 TTY）
- ai-tools apollo export prod --appid xx       # 解密全量输出，供粘贴回 Apollo（仅 TTY）
- ai-tools apollo export prod --appid xx --copy # 直接复制到剪贴板（pbcopy）（仅 TTY）
- ai-tools apollo rm prod --appid xx           # 删除快照（TTY 确认；非 TTY 需 --yes）
+vaulty-keeper apollo init                          # 首次：生成快照密钥（系统密钥库，如 macOS Keychain / Windows 凭据管理器）
+vaulty-keeper sensitive init                       # 首次：生成敏感值密钥（独立于快照密钥）
+vaulty-keeper apollo import prod.txt --appid xx    # 解析粘贴内容；--appid 必填；--name 省略时自动取文件名；已存在时需 --force 覆盖
+vaulty-keeper apollo import - --name prod --appid xx   # 从 stdin 读（旧写法 --app-id 仍兼容）
+ vaulty-keeper apollo list                          # 列出快照（环境 + AppID）
+ vaulty-keeper apollo list prod --appid xx          # 默认全部掩码 *** (长度)；--reveal 显示明文（仅 TTY）
+ vaulty-keeper apollo list prod --appid xx --json   # JSON 输出（AI 友好）
+ vaulty-keeper apollo get prod --appid xx SOME_KEY  # 非 TTY 下只对标记为安全的 key 输出明文，其余掩码
+ vaulty-keeper apollo set prod --appid xx SOME_KEY value
+ vaulty-keeper apollo set prod --appid xx SOME_KEY value --plain    # 显式标记为安全：AI/脚本可读明文
+ vaulty-keeper apollo set prod --appid xx SOME_KEY value --secret   # 显式标记为敏感：始终掩码
+ vaulty-keeper apollo mark prod --appid xx SOME_KEY --plain|--secret  # 不改值，只翻转安全/敏感标记
+ vaulty-keeper apollo unset prod --appid xx SOME_KEY
+ vaulty-keeper apollo compare prod test --appid xx --appid-to yy   # added/removed/changed，默认全部掩码
+ vaulty-keeper apollo compare prod test --json
+ vaulty-keeper apollo reveal prod --appid xx SECRET_TOKEN          # 显示敏感值明文（仅 TTY）
+ vaulty-keeper apollo reveal prod --appid xx imile.fs.oss.secret-key --key <aes> --iv <aes>   # 解密外部 AES 密文（仅 TTY）
+ vaulty-keeper apollo edit prod --appid xx         # $EDITOR 打开明文编辑，保存后自动重新加密（仅 TTY）
+ vaulty-keeper apollo export prod --appid xx       # 解密全量输出，供粘贴回 Apollo（仅 TTY）
+ vaulty-keeper apollo export prod --appid xx --copy # 直接复制到剪贴板（pbcopy）（仅 TTY）
+ vaulty-keeper apollo rm prod --appid xx           # 删除快照（TTY 确认；非 TTY 需 --yes）
  ```
 
 > 明文命令（`reveal`/`export`/`edit`/`list|compare --reveal`/`aes decrypt`）**只在交互式终端可用**；AI/脚本环境一律拒绝，加 `--yes` 也无法放行。
@@ -79,8 +79,8 @@ ai-tools apollo import - --name prod --appid xx   # 从 stdin 读（旧写法 --
 
 两把密钥（都在 Keychain，均可环境变量覆盖，均不进明文文件）：
 
-- **快照密钥**（`AI_TOOLS_APOLLO_KEY`，`apollo init` 创建）：加密所有非敏感值。
-- **敏感值密钥**（`AI_TOOLS_SENSITIVE_KEY`，`sensitive init` 创建）：加密所有敏感值（password/token/secret/...）。敏感值只有这把密钥能解开，`reveal`/`--reveal` 显示明文靠它，AI 进程拿不到它就无法读取敏感值明文。文件权限 0600，值为 AES-256-GCM + 每条独立随机 nonce。
+- **快照密钥**（`VAULTY_KEEPER_APOLLO_KEY`，`apollo init` 创建）：加密所有非敏感值。
+- **敏感值密钥**（`VAULTY_KEEPER_SENSITIVE_KEY`，`sensitive init` 创建）：加密所有敏感值（password/token/secret/...）。敏感值只有这把密钥能解开，`reveal`/`--reveal` 显示明文靠它，AI 进程拿不到它就无法读取敏感值明文。文件权限 0600，值为 AES-256-GCM + 每条独立随机 nonce。
 
 敏感识别（默认掩码，`--reveal` 显示；`--reveal` 仅 TTY 可用）：
 
@@ -90,28 +90,28 @@ ai-tools apollo import - --name prod --appid xx   # 从 stdin 读（旧写法 --
 
 宁多掩不漏掩，TTY 下 `--reveal` 可补救。
 
-## ai-tools aes — AES 加解密（Java CryptoUtil 兼容）
+## vaulty-keeper aes — AES 加解密（Java CryptoUtil 兼容）
 
 用于解密 Apollo 里 OSS AK/SK 这类**值本身就是 CryptoUtil 密文**的配置。算法对齐 `CryptoUtil.java`：AES/GCM/NoPadding、tag 128 bits、key 为 UTF-8 字节（16/24/32）、iv 为 UTF-8 字节直接作 GCM IV、密文为 Base64。
 
-key/iv 统一存在 `~/.ai-tools/aes.json`（0600）的**命名列表**里，格式为数组 `[{name, secret-key, iv}, ...]`（旧版单对象 `{key, iv}` 自动迁移为 `default` 条目）。CLI 用 `--name` 引用，Web UI 里从列表选择/新增/删除。
+key/iv 统一存在 `~/.vaulty/aes.json`（0600）的**命名列表**里，格式为数组 `[{name, secret-key, iv}, ...]`（旧版单对象 `{key, iv}` 自动迁移为 `default` 条目）。CLI 用 `--name` 引用，Web UI 里从列表选择/新增/删除。
 
 ```sh
 # 列出 / 新增 / 删除条目
-ai-tools aes list
-ai-tools aes gen-key --name oss              # 生成并保存到 aes.json
-ai-tools aes add --name oss --key <k> --iv <i>   # 手动保存条目
+vaulty-keeper aes list
+vaulty-keeper aes gen-key --name oss              # 生成并保存到 aes.json
+vaulty-keeper aes add --name oss --key <k> --iv <i>   # 手动保存条目
 
 # 用列表条目加解密（decrypt 仅 TTY 输出明文）
-ai-tools aes encrypt --name oss 'hello'
-ai-tools aes decrypt --name oss '<base64>'
+vaulty-keeper aes encrypt --name oss 'hello'
+vaulty-keeper aes decrypt --name oss '<base64>'
 
 # 或手动指定 / 环境变量（避免进 shell history）
-ai-tools aes encrypt --key <k> --iv <i> 'hello'
-AI_TOOLS_AES_KEY=<k> AI_TOOLS_AES_IV=<i> ai-tools aes decrypt '<base64>'
+vaulty-keeper aes encrypt --key <k> --iv <i> 'hello'
+VAULTY_KEEPER_AES_KEY=<k> VAULTY_KEEPER_AES_IV=<i> vaulty-keeper aes decrypt '<base64>'
 
 # 解密外部 AES 密文值（仅 TTY）
-ai-tools apollo reveal prod imile.fs.oss.secret-key --key <k> --iv <i>
+vaulty-keeper apollo reveal prod imile.fs.oss.secret-key --key <k> --iv <i>
 ```
 
 输入可走 `--file`、参数或 stdin。`decrypt` 输出明文，**仅交互式终端可用**（脚本/AI 环境一律拒绝）。
@@ -119,12 +119,12 @@ ai-tools apollo reveal prod imile.fs.oss.secret-key --key <k> --iv <i>
 ## 其他
 
 ```sh
-ai-tools ui                              # 启动本地 Web UI（默认 127.0.0.1:8080，占用时自动顺延）
-ai-tools serve --addr 0.0.0.0:8970       # 掩码代理（host 持有密钥时对容器/隔离域开放）
-ai-tools remote list|get|compare ...     # 通过掩码代理读（形态与 apollo 子命令一致）
-ai-tools db <init|add|list|connect|rm|shell> ... # 加密数据库连接 + 隧道（见「数据库隧道代理」）
-ai-tools completion zsh | source /dev/stdin   # 或 bash / fish，加到 shell 配置
-ai-tools version
+vaulty-keeper ui                              # 启动本地 Web UI（默认 127.0.0.1:8080，占用时自动顺延）
+vaulty-keeper serve --addr 0.0.0.0:8970       # 掩码代理（host 持有密钥时对容器/隔离域开放）
+vaulty-keeper remote list|get|compare ...     # 通过掩码代理读（形态与 apollo 子命令一致）
+vaulty-keeper db <init|add|list|connect|rm|shell> ... # 加密数据库连接 + 隧道（见「数据库隧道代理」）
+vaulty-keeper completion zsh | source /dev/stdin   # 或 bash / fish，加到 shell 配置
+vaulty-keeper version
 ```
 
 ## 容器隔离部署（防"故意对抗"AI，跨 macOS / Windows）
@@ -133,50 +133,50 @@ ai-tools version
 
 ```
 [Docker 容器：codex / claude / opencode / pi]
-      │  ai-tools remote list|get|compare（只拿掩码）
+      │  vaulty-keeper remote list|get|compare（只拿掩码）
       ▼
 [Host：持有密钥]
-      ai-tools serve --addr 0.0.0.0:8970   ← 掩码代理，永不回明文
+      vaulty-keeper serve --addr 0.0.0.0:8970   ← 掩码代理，永不回明文
       ▼
-      系统密钥库 + ~/.ai-tools/（容器永远看不到）
+      系统密钥库 + ~/.vaulty/（容器永远看不到）
 ```
 
 ### Host 侧：启动掩码代理
 
 ```sh
-ai-tools serve --addr 0.0.0.0:8970     # 打印 token 并写入 ~/.ai-tools/bridge-token
+vaulty-keeper serve --addr 0.0.0.0:8970     # 打印 token 并写入 ~/.vaulty/bridge-token
 ```
 
 - 只输出掩码：`*** (n chars)` + 长度 + 指纹，**即使 `set --plain` 标记为安全的 key 也不回明文**
-- 所有 `/api` 端点都要 token（0600 写入 `~/.ai-tools/bridge-token`），失败限速（指数退避）
+- 所有 `/api` 端点都要 token（0600 写入 `~/.vaulty/bridge-token`），失败限速（指数退避）
 - `0.0.0.0` 是为了让 Docker VM 能通过 `host.docker.internal` 访问；token 门控 + 只回掩码，暴露到局域网也可接受（只想本机用就绑 `127.0.0.1`，但容器将连不上）
 
 ### 容器侧：agent 隔离域
 
 ```sh
 # 构建镜像（host 先 make build，二进制会被拷进镜像）
-docker build -t ai-tools-agent:local .
+docker build -t vaulty-keeper-agent:local .
 
 # 启动（token 从 host 读，只值掩码）
-export AI_TOOLS_BRIDGE_TOKEN="$(cat ~/.ai-tools/bridge-token)"
-export AI_TOOLS_PROJECT_DIR=/path/to/your/project   # 只挂载项目目录
+export VAULTY_KEEPER_BRIDGE_TOKEN="$(cat ~/.vaulty/bridge-token)"
+export VAULTY_KEEPER_PROJECT_DIR=/path/to/your/project   # 只挂载项目目录
 docker compose up -d
 
-# 进容器跑 agent；读配置用 ai-tools remote（命令形态与本地一致）
+# 进容器跑 agent；读配置用 vaulty-keeper remote（命令形态与本地一致）
 docker compose exec agent codex
-docker compose exec agent ai-tools remote list prod --appid xx
+docker compose exec agent vaulty-keeper remote list prod --appid xx
 
 # 容器里同样可以用 DB 隧道（见「数据库隧道代理」）：连 host.docker.internal 的隧道端口
-docker compose exec agent bash -c 'psql "postgresql://$AI_TOOLS_BRIDGE_TOKEN@host.docker.internal:15432/appdb" -c "SELECT 1;"'
+docker compose exec agent bash -c 'psql "postgresql://$VAULTY_KEEPER_BRIDGE_TOKEN@host.docker.internal:15432/appdb" -c "SELECT 1;"'
 ```
 
 隔离要点（`docker-compose.yml` 已内置）：
 
-- **不挂载** `~/.ai-tools`、系统密钥库、`~/.ssh`、docker socket → 容器拿不到密钥和密文
+- **不挂载** `~/.vaulty`、系统密钥库、`~/.ssh`、docker socket → 容器拿不到密钥和密文
 - 非 root 用户 + `cap_drop: ALL` + `no-new-privileges`
-- 容器只通过 `AI_TOOLS_BRIDGE_ADDR` / `AI_TOOLS_BRIDGE_TOKEN` 连掩码代理
-- 装 agent CLI：`AI_TOOLS_INSTALL_AGENTS='@openai/codex @anthropic-ai/claude-code opencode-ai'`（进容器时自动 npm 安装到用户目录）
-- **持久化**：`agent-home` 命名卷挂到 `/home/agent`，已装的 CLI 与 agent 会话历史跨容器重建保留；想完全重置就 `docker volume rm ai-tools_agent-home`
+- 容器只通过 `VAULTY_KEEPER_BRIDGE_ADDR` / `VAULTY_KEEPER_BRIDGE_TOKEN` 连掩码代理
+- 装 agent CLI：`VAULTY_KEEPER_INSTALL_AGENTS='@openai/codex @anthropic-ai/claude-code opencode-ai'`（进容器时自动 npm 安装到用户目录）
+- **持久化**：`agent-home` 命名卷挂到 `/home/agent`，已装的 CLI 与 agent 会话历史跨容器重建保留；想完全重置就 `docker volume rm vaulty-keeper_agent-home`
 - **Linux 兼容**：compose 已加 `extra_hosts: host.docker.internal:host-gateway`（macOS/Windows 的 Docker Desktop 本就提供，无影响）
 
 ### 为什么这样能防住"故意对抗"AI
@@ -188,7 +188,7 @@ docker compose exec agent bash -c 'psql "postgresql://$AI_TOOLS_BRIDGE_TOKEN@hos
 ### Windows 用户
 
 - 同一套 compose/镜像；Windows 版 Docker Desktop 底层是 WSL2，`host.docker.internal` 同样可用
-- 密钥存 **Windows 凭据管理器**（`ai-tools apollo init` / `sensitive init` 自动适配，无需 `security` 命令）
+- 密钥存 **Windows 凭据管理器**（`vaulty-keeper apollo init` / `sensitive init` 自动适配，无需 `security` 命令）
 - 交互式菜单 / 明文命令需要真实控制台 TTY（`isTTY` 按 `GetConsoleMode` 检测）；脚本 / 代理环境自动掩码
 
 ### 不用 Docker 的替代用法
@@ -198,9 +198,9 @@ docker compose exec agent bash -c 'psql "postgresql://$AI_TOOLS_BRIDGE_TOKEN@hos
 **① 本机直接跑（无隔离，防"守规矩"的 AI）**
 
 ```sh
-ai-tools serve --addr 127.0.0.1:8970    # 终端1：host 起代理（持有密钥）
-export AI_TOOLS_BRIDGE_ADDR=http://127.0.0.1:8970
-ai-tools remote list prod --appid xx    # 终端2：只拿掩码
+vaulty-keeper serve --addr 127.0.0.1:8970    # 终端1：host 起代理（持有密钥）
+export VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8970
+vaulty-keeper remote list prod --appid xx    # 终端2：只拿掩码
 ```
 
 AI 与你在同一账号下时，靠的是掩码 + TTY 门禁；对会主动读密钥的 AI 不设防。
@@ -210,22 +210,22 @@ AI 与你在同一账号下时，靠的是掩码 + TTY 门禁；对会主动读�
 ```sh
 sudo sysadminctl -addUser ai -password '<pw>' -admin no   # 一次性创建
 # 启动 agent（token 只值掩码，进 ai 会话无害）：
-sudo -u ai env AI_TOOLS_BRIDGE_ADDR=http://127.0.0.1:8970 \
-  AI_TOOLS_BRIDGE_TOKEN="$(cat ~/.ai-tools/bridge-token)" codex
+sudo -u ai env VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8970 \
+  VAULTY_KEEPER_BRIDGE_TOKEN="$(cat ~/.vaulty/bridge-token)" codex
 ```
 
-`ai` 账号的 Keychain 里没有你的密钥、读不了 `~/.ai-tools/`（0700），隔离效果与 Docker 相当；代价是要管理账号、git 凭据与文件权限。
+`ai` 账号的 Keychain 里没有你的密钥、读不了 `~/.vaulty/`（0700），隔离效果与 Docker 相当；代价是要管理账号、git 凭据与文件权限。
 
 **③ 远程机器 / WSL2**
 
-agent 放另一台机器或 Windows WSL2，host 的 `ai-tools serve --addr 0.0.0.0:8970` 走网络可达（token 门控 + 只回掩码）。
+agent 放另一台机器或 Windows WSL2，host 的 `vaulty-keeper serve --addr 0.0.0.0:8970` 走网络可达（token 门控 + 只回掩码）。
 
 ## 数据库隧道代理（AI 查库，DSN 不暴露）
 
 > 完整的 ASCII 图解（Docker 里是什么 / 凭据存哪 / 三库认证注入 / 安全边界 / 时序）见 **[`docs/db-proxy-architecture.md`](docs/db-proxy-architecture.md)**。
 > 大量实测过的用法示例（多连接/各客户端/容器 AI/权限/脚本）见 **[`docs/db-proxy-examples.md`](docs/db-proxy-examples.md)**。
 
-让容器/隔离域里的 AI 用**原生客户端**（psql / mysql / redis-cli）查询数据库并拿到数据，但数据库连接 URL（地址/账号/密码）**绝不暴露给 AI**。URL 只以密文形式存在 host 的 ai-tools 里（独立 DB 密钥，`AI_TOOLS_DB_KEY` / 系统密钥库），`serve` 为每条连接起一个 TCP 隧道，在握手阶段注入真实凭据后纯字节转发。
+让容器/隔离域里的 AI 用**原生客户端**（psql / mysql / redis-cli）查询数据库并拿到数据，但数据库连接 URL（地址/账号/密码）**绝不暴露给 AI**。URL 只以密文形式存在 host 的 vaulty-keeper 里（独立 DB 密钥，`VAULTY_KEEPER_DB_KEY` / 系统密钥库），`serve` 为每条连接起一个 TCP 隧道，在握手阶段注入真实凭据后纯字节转发。
 
 ```
 [Docker 容器：AI agent]
@@ -233,7 +233,7 @@ agent 放另一台机器或 Windows WSL2，host 的 `ai-tools serve --addr 0.0.0
   mysql -h host.docker.internal -P 15433 -u "$TOKEN" -px         # token 放 username 字段
   redis-cli -a "$TOKEN" -p 15434                                  # token 放 AUTH
         ▼ TCP
-[Host: ai-tools serve --addr 0.0.0.0:8970]
+[Host: vaulty-keeper serve --addr 0.0.0.0:8970]
   HTTP 掩码桥（原有）+ 每连接一个 TCP 隧道（校验 token → 用解密 URL 连真实库 → 注入真实凭据 → 转发）
         ▼
   真实数据库
@@ -242,23 +242,23 @@ agent 放另一台机器或 Windows WSL2，host 的 `ai-tools serve --addr 0.0.0
 **用法**
 
 ```sh
-ai-tools db init                                                          # 首次：生成 DB 密钥
+vaulty-keeper db init                                                          # 首次：生成 DB 密钥
 printf 'postgres://app:pass@db.example.com:5432/orders' \
-  | ai-tools db add orders [--port 15432]                                 # URL 走 stdin，不进 argv/history
-ai-tools db list                                                          # orders (postgres) :15432
-ai-tools serve --addr 0.0.0.0:8970                                        # 同时起掩码桥 + 隧道
+  | vaulty-keeper db add orders [--port 15432]                                 # URL 走 stdin，不进 argv/history
+vaulty-keeper db list                                                          # orders (postgres) :15432
+vaulty-keeper serve --addr 0.0.0.0:8970                                        # 同时起掩码桥 + 隧道
 ```
 
 - 类型从 URL scheme 自动识别：`postgres://`/`postgresql://`、`mysql://`、`redis://`/`rediss://`
 - **同类可配多个**：每个连接一个名字 + 一个独立隧道端口，数量不限（如 3 个 MySQL：`mysql-orders`/`mysql-billing`/`mysql-reporting`，`db add` 时各指定/自动分配端口），`db connect <name>` 逐个取命令
-- 容器/隔离域内用 `ai-tools db list`（无本地 store 时自动经桥读取）或 `ai-tools remote dblist` 查隧道端口，再用原生客户端连（`$TOKEN` 即 `AI_TOOLS_BRIDGE_TOKEN`）
+- 容器/隔离域内用 `vaulty-keeper db list`（无本地 store 时自动经桥读取）或 `vaulty-keeper remote dblist` 查隧道端口，再用原生客户端连（`$TOKEN` 即 `VAULTY_KEEPER_BRIDGE_TOKEN`）
 - **热加载**：`serve` 每 2 秒同步 `db.json`——`db add`/`db rm` 后隧道自动开/关，**不用重启 serve**
-- `ai-tools db connect <name>` 直接打印**带 token 的完整客户端命令**（psql/mysql/redis-cli，token 已填好），`--container` 换成 `host.docker.internal`
+- `vaulty-keeper db connect <name>` 直接打印**带 token 的完整客户端命令**（psql/mysql/redis-cli，token 已填好），`--container` 换成 `host.docker.internal`
 - **凭据注入**：PG 假 server 直接放行（trust 风格，token 在 user 字段）；MySQL 握手时把真实密码的认证应答换进去（支持 `mysql_native_password` / `caching_sha2_password`）；Redis 代理代发真实 `AUTH`。客户端永远不需要真实密码
 - **TLS**：PG 按 URL 的 `sslmode`（require/verify-ca/verify-full/prefer）、MySQL 用 `?tls=true`、Redis 用 `rediss://` 连接真实库；客户端↔代理为本机/局域网明文
 - **只读控制**：代理层不强制只读，用只读账号的 URL 注册即天然只读
-- `ai-tools db shell <name>` 可在 host 上直接打开原生客户端（TTY-only，凭据走环境变量不进 argv）
-- Mongo 未支持（无成熟 Go 代理库；host 上用 `ai-tools db shell` 或直接 mongosh 自用）
+- `vaulty-keeper db shell <name>` 可在 host 上直接打开原生客户端（TTY-only，凭据走环境变量不进 argv）
+- Mongo 未支持（无成熟 Go 代理库；host 上用 `vaulty-keeper db shell` 或直接 mongosh 自用）
 
 **安全边界**
 
@@ -279,7 +279,7 @@ make build
 也可以手动分步验（环境就绪后）：
 
 ```sh
-TOKEN=$(cat ~/.ai-tools/bridge-token)   # serve 每次重启会换 token，先取
+TOKEN=$(cat ~/.vaulty/bridge-token)   # serve 每次重启会换 token，先取
 
 # ① 本机直接测 Redis（token 放 AUTH，不碰真实密码）
 redis-cli -p 15434 -a "$TOKEN" --no-auth-warning ping
@@ -294,14 +294,14 @@ docker run --rm mysql:8.4 mysql -h host.docker.internal -P 15435 -u "$TOKEN" -px
 redis-cli -p 15434 -a WRONG --no-auth-warning ping        # → ERR authentication required
 
 # ④ 隧道信息 / 掩码桥（不配 DB 密钥也能读）
-export AI_TOOLS_BRIDGE_ADDR=http://127.0.0.1:8972 AI_TOOLS_BRIDGE_TOKEN="$TOKEN"
-ai-tools remote dblist      # 连接名/类型/端口
+export VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8972 VAULTY_KEEPER_BRIDGE_TOKEN="$TOKEN"
+vaulty-keeper remote dblist      # 连接名/类型/端口
 
 # ⑤ 交互式 db shell（TTY-only；redis 本机即用，PG/MySQL 需装 psql/mysql）
-ai-tools db shell cache
+vaulty-keeper db shell cache
 
 # ⑥ 审计日志（成功 authenticated / 拒绝 invalid bridge token；无 DSN）
-cat /tmp/ai-tools-dbtest-serve.log | grep dbproxy:
+cat /tmp/vaulty-keeper-dbtest-serve.log | grep dbproxy:
 ```
 
 ## AI / 脚本使用安全指引
@@ -314,15 +314,15 @@ cat /tmp/ai-tools-dbtest-serve.log | grep dbproxy:
 |---|---|
 | 静态加密 | 快照所有值 AES-256-GCM 落盘（0600，无明文）；两把独立密钥：快照密钥（非敏感值）+ 敏感值密钥（敏感值），都在系统密钥库（macOS Keychain / Windows 凭据管理器） |
 | 信任边界 | 系统密钥库**不防同用户进程**（实测：同 UID 进程可无弹窗 `security find-generic-password -w` 读出两把密钥）；它防的是其他用户/其他机器/意外明文。对**故意对抗**的同用户 AI，用「容器隔离部署」把 AI 放进摸不到密钥的隔离域 |
-| 掩码代理 | `ai-tools serve`（host 持有密钥）+ `ai-tools remote`（容器/隔离域内）——容器侧只拿到 `*** (n chars)` + 长度 + 指纹，**即使 `set --plain` 标记安全的 key 也不回明文**；token 门控 + 限速 |
+| 掩码代理 | `vaulty-keeper serve`（host 持有密钥）+ `vaulty-keeper remote`（容器/隔离域内）——容器侧只拿到 `*** (n chars)` + 长度 + 指纹，**即使 `set --plain` 标记安全的 key 也不回明文**；token 门控 + 限速 |
 | AI 读 | **反转默认**：`get`/`list`/`compare` 非 TTY 下默认全部掩码 `*** (n chars)`，不靠 key 名猜测；只有 `set --plain` / `mark --plain` 显式标记为安全的 key 才输出明文。明文出口（reveal、export、edit、`--reveal`、`aes decrypt`）**非交互终端一律拒绝，即使 `--yes`**——只在用户本人 TTY 可用 |
 | AI 写 | `set`/`unset`/`mark`/`import` 安全（写入即加密），无需 `--yes` |
-| DB 隧道 | `ai-tools db add` 只加密 URL（独立 DB 密钥 + `~/.ai-tools/db.json`，0600）；`serve` 起 TCP 隧道在握手注入真实凭据，客户端只需 bridge token（PG/MySQL username 字段 / Redis AUTH）；DSN 永不离开 host、不进日志/回包 |
+| DB 隧道 | `vaulty-keeper db add` 只加密 URL（独立 DB 密钥 + `~/.vaulty/db.json`，0600）；`serve` 起 TCP 隧道在握手注入真实凭据，客户端只需 bridge token（PG/MySQL username 字段 / Redis AUTH）；DSN 永不离开 host、不进日志/回包 |
 | Web UI | 仅 127.0.0.1 + 随机 token 门控写操作/明文出口，GET 只返回掩码（未标记安全的 key 一律掩码）；**明文接口（reveal/export/明文编辑/AES 解密）默认禁用**，需 `--allow-plaintext` 显式开启，否则带 token 也返回 403；token 失败限速（指数退避） |
 | 防破解 | 指纹为 HMAC-SHA256（密钥为快照密钥），密钥不泄露时无法离线枚举弱值匹配掩码指纹；token 为 128 位随机 |
 | 判断一致性 | 用 `compare`（掩码 + 长度 + 指纹），不要 `get` 明文 |
 
-ai-tools 的所有子命令在非 TTY（脚本 / AI agent）下均可正常使用，且 `--json` 输出为 AI 友好格式。但明文一旦出现在 stdout，就会进入对话上下文、会话日志（如 `~/.codex`、终端 scrollback），可能被持久化或同步。请区分安全与危险命令：
+vaulty-keeper 的所有子命令在非 TTY（脚本 / AI agent）下均可正常使用，且 `--json` 输出为 AI 友好格式。但明文一旦出现在 stdout，就会进入对话上下文、会话日志（如 `~/.codex`、终端 scrollback），可能被持久化或同步。请区分安全与危险命令：
 
 **安全（默认掩码，放心给 AI/脚本用）**
 - `apollo list <env> --appid xx [--json]` — 未标记安全的 key 显示 `*** (n chars)`，不靠 key 名猜测
@@ -348,7 +348,7 @@ ai-tools 的所有子命令在非 TTY（脚本 / AI agent）下均可正常使�
 明文命令在非交互终端（脚本 / AI agent）下**无条件拒绝**，即使显式加 `--yes` 也不输出——AI 被诱导要求也无法拿到明文。明文只在用户本人终端（TTY）可见，且会进入终端会话记录，用完注意清理。
 
 其他注意事项：
-- **密钥不进 AI 环境**：快照密钥走 macOS Keychain（`ai-tools apollo init`），敏感值密钥走 Keychain（`ai-tools sensitive init`），不要在 AI 会话里 `export AI_TOOLS_APOLLO_KEY` / `AI_TOOLS_SENSITIVE_KEY`——AI 拿到快照密钥能解非敏感值，拿到敏感值密钥能解全部敏感值。`AI_TOOLS_AES_KEY` / `AI_TOOLS_AES_IV` 同理，不要作为 `--key`/`--iv` 命令行参数传（会出现在 `ps` 与 shell history）。注意：与 AI 同权限的进程可以读取 `~/.ai-tools/aes.json`（明文 AES key/iv）与 Keychain 项（`security find-generic-password -w`），真正的隔离是把密钥放在 AI 进程读不到的地方（不同账号/沙箱）。
+- **密钥不进 AI 环境**：快照密钥走 macOS Keychain（`vaulty-keeper apollo init`），敏感值密钥走 Keychain（`vaulty-keeper sensitive init`），不要在 AI 会话里 `export VAULTY_KEEPER_APOLLO_KEY` / `VAULTY_KEEPER_SENSITIVE_KEY`——AI 拿到快照密钥能解非敏感值，拿到敏感值密钥能解全部敏感值。`VAULTY_KEEPER_AES_KEY` / `VAULTY_KEEPER_AES_IV` 同理，不要作为 `--key`/`--iv` 命令行参数传（会出现在 `ps` 与 shell history）。注意：与 AI 同权限的进程可以读取 `~/.vaulty/aes.json`（明文 AES key/iv）与 Keychain 项（`security find-generic-password -w`），真正的隔离是把密钥放在 AI 进程读不到的地方（不同账号/沙箱）。
 - `import` 在快照已存在时会拒绝覆盖（TTY 下询问确认）；脚本 / AI 需要覆盖时显式加 `--force`，避免静默丢失旧快照。
 - 需要判断两个环境某 key 是否一致时用 `compare`（掩码 + 长度即可判断），不要 get 明文。
 

@@ -1,4 +1,4 @@
-BIN := bin/ai-tools
+BIN := bin/vaulty-keeper
 
 .PHONY: build test install clean
 
@@ -10,7 +10,7 @@ test:
 
 install: build
 	mkdir -p $(HOME)/.local/bin
-	ln -sf $(CURDIR)/$(BIN) $(HOME)/.local/bin/ai-tools
+	ln -sf $(CURDIR)/$(BIN) $(HOME)/.local/bin/vaulty-keeper
 
 clean:
 	rm -rf bin

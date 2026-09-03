@@ -1,7 +1,7 @@
 #!/bin/sh
-# Entry point for the ai-tools agent container.
+# Entry point for the vaulty-keeper agent container.
 #
-# - Optionally installs agent CLIs listed in AI_TOOLS_INSTALL_AGENTS
+# - Optionally installs agent CLIs listed in VAULTY_KEEPER_INSTALL_AGENTS
 #   (space-separated npm package names, e.g.
 #   "@openai/codex @anthropic-ai/claude-code opencode-ai"). Global installs go
 #   to a user-local prefix so they work without root.
@@ -11,16 +11,16 @@ set -e
 export npm_config_prefix="$HOME/.npm-global"
 export PATH="$HOME/.npm-global/bin:$PATH"
 
-if [ -n "$AI_TOOLS_INSTALL_AGENTS" ]; then
-  echo ">> installing agent CLIs: $AI_TOOLS_INSTALL_AGENTS"
+if [ -n "$VAULTY_KEEPER_INSTALL_AGENTS" ]; then
+  echo ">> installing agent CLIs: $VAULTY_KEEPER_INSTALL_AGENTS"
   # shellcheck disable=SC2086
-  npm install -g $AI_TOOLS_INSTALL_AGENTS
+  npm install -g $VAULTY_KEEPER_INSTALL_AGENTS
 fi
 
-echo ">> ai-tools agent container ready"
-echo "   bridge:     ${AI_TOOLS_BRIDGE_ADDR:-<unset>}"
-echo "   token:      ${AI_TOOLS_BRIDGE_TOKEN:+<set>}${AI_TOOLS_BRIDGE_TOKEN:-<unset>}"
+echo ">> vaulty-keeper agent container ready"
+echo "   bridge:     ${VAULTY_KEEPER_BRIDGE_ADDR:-<unset>}"
+echo "   token:      ${VAULTY_KEEPER_BRIDGE_TOKEN:+<set>}${VAULTY_KEEPER_BRIDGE_TOKEN:-<unset>}"
 echo "   workspace:  /workspace"
-echo "   read config via: ai-tools remote list|get|compare (masked only)"
+echo "   read config via: vaulty-keeper remote list|get|compare (masked only)"
 
 exec "$@"

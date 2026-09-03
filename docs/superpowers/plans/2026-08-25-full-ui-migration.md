@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate all ai-tools functionality (apollo + aes + key management) into the loopback-only Web UI, with a shared `internal/app` domain layer that both the UI and the preserved CLI call, keeping every CLI command, flag, and output format byte-identical.
+**Goal:** Migrate all vaulty-keeper functionality (apollo + aes + key management) into the loopback-only Web UI, with a shared `internal/app` domain layer that both the UI and the preserved CLI call, keeping every CLI command, flag, and output format byte-identical.
 
 **Architecture:** Create `internal/app` as the single domain-logic layer (snapshot ops, aes ops, aes.json config, key init). Refactor `internal/cli` into a thin adapter that keeps its exact output contract, and extend `internal/ui`'s handler + embedded frontend with new APIs (init, reveal, edit, aes) and two new rail sections (AES tools, settings). Plaintext exits (reveal, edit-load, export) require explicit `confirm: true` and are never persisted by the browser.
 
@@ -55,7 +55,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"ai-tools/internal/apollo"
+	"vaulty-keeper/internal/apollo"
 )
 
 func TestKeyAvailableWithEnvKey(t *testing.T) {
@@ -88,7 +88,7 @@ func TestSnapshotKeyFromEnv(t *testing.T) {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./internal/app -run 'TestKeyAvailableWithEnvKey|TestSnapshotKeyFromEnv' -v`
-Expected: build failure — package `ai-tools/internal/app` does not exist.
+Expected: build failure — package `vaulty-keeper/internal/app` does not exist.
 
 - [ ] **Step 3: Implement the key operations**
 
@@ -99,7 +99,7 @@ Create `internal/app/key.go`:
 // UI. It never formats output; callers own presentation.
 package app
 
-import "ai-tools/internal/apollo"
+import "vaulty-keeper/internal/apollo"
 
 // InitKey generates and stores a fresh snapshot key. force=true regenerates
 // even when a key already exists.
@@ -152,7 +152,7 @@ import (
 
 func TestAESConfigRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AI_TOOLS_AES_CONFIG", filepath.Join(dir, "aes.json"))
+	t.Setenv("VAULTY_KEEPER_AES_CONFIG", filepath.Join(dir, "aes.json"))
 
 	c, err := AESConfigLoad()
 	if err != nil || c.Key != "" || c.IV != "" {
@@ -219,12 +219,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"ai-tools/internal/aesx"
+	"vaulty-keeper/internal/aesx"
 )
 
 const keyCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-// AESConfig is the persisted custom AES key/iv pair (~/.ai-tools/aes.json).
+// AESConfig is the persisted custom AES key/iv pair (~/.vaulty/aes.json).
 type AESConfig struct {
 	Key string `json:"key"`
 	IV  string `json:"iv"`
@@ -232,14 +232,14 @@ type AESConfig struct {
 
 // AESConfigPath returns the file holding the custom AES key/iv.
 func AESConfigPath() string {
-	if p := os.Getenv("AI_TOOLS_AES_CONFIG"); p != "" {
+	if p := os.Getenv("VAULTY_KEEPER_AES_CONFIG"); p != "" {
 		return p
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".ai-tools", "aes.json")
+		return filepath.Join(".", ".vaulty", "aes.json")
 	}
-	return filepath.Join(home, ".ai-tools", "aes.json")
+	return filepath.Join(home, ".vaulty", "aes.json")
 }
 
 // AESConfigLoad reads the custom key/iv file. A missing file is not an error;
@@ -347,8 +347,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ai-tools/internal/aesx"
-	"ai-tools/internal/apollo"
+	"vaulty-keeper/internal/aesx"
+	"vaulty-keeper/internal/apollo"
 )
 
 func testSnapshot(t *testing.T, dir, name string, entries map[string]string) []byte {
@@ -438,8 +438,8 @@ func TestExportAndEditRoundTrip(t *testing.T) {
 }
 
 func TestReveal(t *testing.T) {
-	t.Setenv("AI_TOOLS_AES_KEY", "")
-	t.Setenv("AI_TOOLS_AES_IV", "")
+	t.Setenv("VAULTY_KEEPER_AES_KEY", "")
+	t.Setenv("VAULTY_KEEPER_AES_IV", "")
 	dir := t.TempDir()
 	key := make([]byte, 32)
 	aesKey, aesIV := "0123456789abcdef", "abcdefghijklmnop"
@@ -509,8 +509,8 @@ import (
 	"sort"
 	"strings"
 
-	"ai-tools/internal/aesx"
-	"ai-tools/internal/apollo"
+	"vaulty-keeper/internal/aesx"
+	"vaulty-keeper/internal/apollo"
 )
 
 // Import parses Apollo key/value text and writes a new encrypted snapshot.
@@ -674,7 +674,7 @@ func Reveal(dir, name string, snapKey []byte, targets []string, aesKeyOverride, 
 	}
 	aesKey := aesKeyOverride
 	if aesKey == "" {
-		aesKey = os.Getenv("AI_TOOLS_AES_KEY")
+		aesKey = os.Getenv("VAULTY_KEEPER_AES_KEY")
 	}
 	if aesKey == "" {
 		if v, ok, err := s.Get(snapKey, "imile.fs.aes.secret-key"); err != nil {
@@ -685,7 +685,7 @@ func Reveal(dir, name string, snapKey []byte, targets []string, aesKeyOverride, 
 	}
 	aesIV := aesIVOverride
 	if aesIV == "" {
-		aesIV = os.Getenv("AI_TOOLS_AES_IV")
+		aesIV = os.Getenv("VAULTY_KEEPER_AES_IV")
 	}
 	if aesIV == "" {
 		if v, ok, err := s.Get(snapKey, "imile.fs.aes.iv"); err != nil {
@@ -695,7 +695,7 @@ func Reveal(dir, name string, snapKey []byte, targets []string, aesKeyOverride, 
 		}
 	}
 	if aesKey == "" || aesIV == "" {
-		return nil, errors.New("AES key/iv not found (pass --key/--iv, set AI_TOOLS_AES_KEY/IV, or keep imile.fs.aes.secret-key / imile.fs.aes.iv in the snapshot)")
+		return nil, errors.New("AES key/iv not found (pass --key/--iv, set VAULTY_KEEPER_AES_KEY/IV, or keep imile.fs.aes.secret-key / imile.fs.aes.iv in the snapshot)")
 	}
 	plain := map[string]string{}
 	for _, k := range targets {
@@ -747,7 +747,7 @@ Expected: no output from gofmt, vet exits 0.
 
 - [ ] **Step 1: Add the `app` import to `internal/cli/cli.go`**
 
-In the import block of `internal/cli/cli.go`, add `"ai-tools/internal/app"` (next to the existing `"ai-tools/internal/aesx"` import).
+In the import block of `internal/cli/cli.go`, add `"vaulty-keeper/internal/app"` (next to the existing `"vaulty-keeper/internal/aesx"` import).
 
 - [ ] **Step 2: Refactor `aesGenKey` to use `app.GenKey`**
 
@@ -786,13 +786,13 @@ In `aesOp`, keep all input handling (flags, env fallback, --file/args/stdin) exa
 	return 0
 ```
 
-Keep the `"ai-tools/internal/aesx"` import for now — `apolloReveal` still uses it until Task 6 removes it (see Task 6 Step 3).
+Keep the `"vaulty-keeper/internal/aesx"` import for now — `apolloReveal` still uses it until Task 6 removes it (see Task 6 Step 3).
 
 - [ ] **Step 4: Refactor `interactive.go` to use `app.AESConfig`**
 
 In `internal/cli/interactive.go`:
 
-1. Add `"ai-tools/internal/app"` to the imports.
+1. Add `"vaulty-keeper/internal/app"` to the imports.
 2. Delete the local `aesConfigPath`, `loadAesConfig`, and `saveAesConfig` functions (and the `interactive` fields they read/write if they become unused — see Step 5).
 3. Replace `it.loadAesConfig()` in `runInteractive` with:
 
@@ -982,7 +982,7 @@ Keep flag parsing, argument checks, `dirPath`/`snapKey` resolution. Replace the 
 		return fail("apollo edit: %v", err)
 	}
 
-	tmp, err := os.CreateTemp("", "ai-tools-edit-*.txt")
+	tmp, err := os.CreateTemp("", "vaulty-keeper-edit-*.txt")
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
@@ -1030,7 +1030,7 @@ Keep flag parsing, argument checks, `dirPath`/`snapKey` resolution. Replace the 
 - [ ] **Step 3: Run gofmt and the existing CLI tests**
 
 Run: `gofmt -l internal/cli && go test ./internal/cli -v`
-Expected: gofmt clean; all existing CLI tests PASS. Verify the reveal/edit behavior tests (fake-editor script, multi-key reveal JSON) still pass. After this task `apolloReveal` no longer calls `aesx` directly — if `"ai-tools/internal/aesx"` is now unreferenced in `internal/cli/cli.go`, remove that import.
+Expected: gofmt clean; all existing CLI tests PASS. Verify the reveal/edit behavior tests (fake-editor script, multi-key reveal JSON) still pass. After this task `apolloReveal` no longer calls `aesx` directly — if `"vaulty-keeper/internal/aesx"` is now unreferenced in `internal/cli/cli.go`, remove that import.
 
 - [ ] **Step 4: Run the whole test suite**
 
@@ -1138,7 +1138,7 @@ func TestAESTransformRoundTrip(t *testing.T) {
 
 func TestAESConfigAPI(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AI_TOOLS_AES_CONFIG", filepath.Join(dir, "aes.json"))
+	t.Setenv("VAULTY_KEEPER_AES_CONFIG", filepath.Join(dir, "aes.json"))
 	h := NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return make([]byte, 32), nil }})
 
 	get := httptest.NewRecorder()
@@ -1198,7 +1198,7 @@ Expected: FAIL — routes not registered (404).
 - [ ] **Step 3: Add the `app` import and new routes to `ui.go`**
 
 In `internal/ui/ui.go`:
-1. Add `"ai-tools/internal/app"` to imports.
+1. Add `"vaulty-keeper/internal/app"` to imports.
 2. In `NewHandler`, register:
 
 ```go
@@ -1287,7 +1287,7 @@ func (h *handler) reveal(w http.ResponseWriter, r *http.Request, name string) {
 	}
 	snapKey, err := h.cfg.SnapshotKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'vaulty-keeper apollo init' or set %s", err, apollo.EnvKey))
 		return
 	}
 	plain, err := app.Reveal(h.cfg.Dir, name, snapKey, req.Targets, "", "")
@@ -1314,7 +1314,7 @@ func (h *handler) editLoad(w http.ResponseWriter, r *http.Request, name string) 
 	}
 	snapKey, err := h.cfg.SnapshotKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'vaulty-keeper apollo init' or set %s", err, apollo.EnvKey))
 		return
 	}
 	text, err := app.EditLoad(h.cfg.Dir, name, snapKey)
@@ -1341,7 +1341,7 @@ func (h *handler) editApply(w http.ResponseWriter, r *http.Request, name string)
 	}
 	snapKey, err := h.cfg.SnapshotKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'ai-tools apollo init' or set %s", err, apollo.EnvKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'vaulty-keeper apollo init' or set %s", err, apollo.EnvKey))
 		return
 	}
 	n, err := app.EditApply(h.cfg.Dir, name, snapKey, req.Text)
@@ -1521,14 +1521,14 @@ Replace the whole file with:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>ai-tools · 配置工作台</title>
+<title>vaulty-keeper · 配置工作台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <div class="app">
   <aside>
-    <div class="brand"><span class="mark">✦</span> ai-tools</div>
+    <div class="brand"><span class="mark">✦</span> vaulty-keeper</div>
     <button class="new" type="button" data-action="import"><b>+</b> 导入配置快照</button>
     <div class="group">最近工作</div>
     <div id="recent-work"></div>
@@ -2139,16 +2139,16 @@ Expected: PASS.
 Run:
 
 ```sh
-go build -o /tmp/ai-tools-ui .
+go build -o /tmp/vaulty-keeper-ui .
 D=$(mktemp -d)
-/tmp/ai-tools-ui ui --dir "$D" --no-open --port 0 > /tmp/ui.log 2>&1 &
+/tmp/vaulty-keeper-ui ui --dir "$D" --no-open --port 0 > /tmp/ui.log 2>&1 &
 sleep 1
 URL=$(grep -o 'http://127.0.0.1:[0-9]*' /tmp/ui.log | head -1)
 curl -s -o /dev/null -w "GET / -> %{http_code}\n" "$URL/"
 curl -s -X POST "$URL/api/aes/gen-key" -d '{"bytes":16,"iv_bytes":12}'
 curl -s -X POST "$URL/api/init" -d '{"force":false}'
 kill %1
-rm -f /tmp/ai-tools-ui
+rm -f /tmp/vaulty-keeper-ui
 ```
 
 Expected: `GET / -> 200`; gen-key returns `{"key":"...","iv":"..."}`; init either succeeds (201, first run) or returns `409 key_exists` (if a Keychain key already exists — acceptable on a dev machine).
@@ -2168,9 +2168,9 @@ Replace the `## 本地 Web UI` section with:
 ## 本地 Web UI
 
 ```sh
-ai-tools ui
-ai-tools ui --dir /path/to/snapshots --port 8080
-ai-tools ui --no-open
+vaulty-keeper ui
+vaulty-keeper ui --dir /path/to/snapshots --port 8080
+vaulty-keeper ui --no-open
 ```
 
 - 仅监听 `127.0.0.1`，不会暴露到局域网。
@@ -2179,7 +2179,7 @@ ai-tools ui --no-open
 - 浏览器端不持久化快照内容。
 ```
 
-Also update the opening paragraph (README line 3): change `ai-tools ui` 提供本地 Web UI 浏览快照（仅本机监听）` to state that the UI covers all snapshot and AES tools (still loopback-only). The `## 其他` command list entry for `ai-tools ui` stays as-is.
+Also update the opening paragraph (README line 3): change `vaulty-keeper ui` 提供本地 Web UI 浏览快照（仅本机监听）` to state that the UI covers all snapshot and AES tools (still loopback-only). The `## 其他` command list entry for `vaulty-keeper ui` stays as-is.
 
 - [ ] **Step 2: Run gofmt on all Go files**
 
@@ -2198,7 +2198,7 @@ Expected: exits 0.
 
 - [ ] **Step 5: Perform the focused manual safety check**
 
-Run `ai-tools ui` against temporary snapshots whose sensitive values are distinctive strings, then verify in the browser (or via curl):
+Run `vaulty-keeper ui` against temporary snapshots whose sensitive values are distinctive strings, then verify in the browser (or via curl):
 
 1. `GET /api/snapshots/prod` contains neither sensitive plaintext nor ciphertext.
 2. `GET /api/compare?from=prod&to=test` contains neither old nor new sensitive plaintext.

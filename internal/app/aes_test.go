@@ -8,7 +8,7 @@ import (
 
 func TestAESConfigListCRUD(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AI_TOOLS_AES_CONFIG", filepath.Join(dir, "aes.json"))
+	t.Setenv("VAULTY_KEEPER_AES_CONFIG", filepath.Join(dir, "aes.json"))
 
 	entries, err := AESConfigList()
 	if err != nil || len(entries) != 0 {
@@ -46,7 +46,7 @@ func TestAESConfigListCRUD(t *testing.T) {
 func TestAESConfigMigratesLegacyObject(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "aes.json")
-	t.Setenv("AI_TOOLS_AES_CONFIG", path)
+	t.Setenv("VAULTY_KEEPER_AES_CONFIG", path)
 	os.WriteFile(path, []byte(`{"key":"oldk","iv":"oldv"}`), 0o600)
 
 	entries, err := AESConfigList()

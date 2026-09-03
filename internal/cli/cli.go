@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"strings"
 
-	"ai-tools/internal/apollo"
-	"ai-tools/internal/app"
-	"ai-tools/internal/ui"
+	"vaulty-keeper/internal/apollo"
+	"vaulty-keeper/internal/app"
+	"vaulty-keeper/internal/ui"
 )
 
 const Version = "0.5.0"
@@ -57,21 +57,21 @@ func Run(args []string) int {
 	case "completion":
 		return runCompletion(args[1:])
 	case "version", "--version", "-v":
-		fmt.Println("ai-tools", Version)
+		fmt.Println("vaulty-keeper", Version)
 		return 0
 	case "help", "-h", "--help":
 		usage(os.Stdout)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "ai-tools: unknown command %q\n\n", args[0])
+		fmt.Fprintf(os.Stderr, "vaulty-keeper: unknown command %q\n\n", args[0])
 		usage(os.Stderr)
 		return 2
 	}
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintf(w, "ai-tools %s - personal AI toolbox\n\n", Version)
-	fmt.Fprintln(w, "Usage: ai-tools <command> [args] [flags]")
+	fmt.Fprintf(w, "vaulty-keeper %s - personal AI toolbox\n\n", Version)
+	fmt.Fprintln(w, "Usage: vaulty-keeper <command> [args] [flags]")
 	fmt.Fprintln(w)
 	printCommandTree(w)
 }
@@ -84,7 +84,7 @@ var isTerminalFunc = func() bool {
 func isTerminal() bool { return isTerminalFunc() }
 
 func fail(format string, a ...any) int {
-	fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "ai-tools: "+fmt.Sprintf(format, a...)))
+	fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: "+fmt.Sprintf(format, a...)))
 	return 1
 }
 
@@ -167,14 +167,14 @@ func snapDir(flagDir string) (string, error) {
 	if flagDir != "" {
 		return flagDir, nil
 	}
-	if d := os.Getenv("AI_TOOLS_APOLLO_DIR"); d != "" {
+	if d := os.Getenv("VAULTY_KEEPER_APOLLO_DIR"); d != "" {
 		return d, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".ai-tools", "apollo"), nil
+	return filepath.Join(home, ".vaulty", "apollo"), nil
 }
 
 func snapPath(dir, name, appID string) (string, error) {
@@ -229,7 +229,7 @@ func runApollo(args []string) int {
 		apolloUsage(os.Stdout)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "ai-tools apollo: unknown subcommand %q\n\n", sub)
+		fmt.Fprintf(os.Stderr, "vaulty-keeper apollo: unknown subcommand %q\n\n", sub)
 		apolloUsage(os.Stderr)
 		return 2
 	}
@@ -240,8 +240,8 @@ func apolloUsage(w io.Writer) {
 	printDomainUsage(w, "apollo")
 	fmt.Fprintf(w, `
 <env> 是环境名，与 --appid <id> 一起寻址 {env}__{appid}.json；
-不带 --appid 时读写旧版 {env}.json。快照默认存 ~/.ai-tools/apollo/
-（--dir 或 AI_TOOLS_APOLLO_DIR 覆盖）。
+不带 --appid 时读写旧版 {env}.json。快照默认存 ~/.vaulty/apollo/
+（--dir 或 VAULTY_KEEPER_APOLLO_DIR 覆盖）。
 
 明文命令（list/compare --reveal、reveal、export、edit）只在交互式终端可用；
 脚本/AI 环境一律拒绝，加 --yes 也无法放行。非 TTY 下 get/list/compare 默认
@@ -458,7 +458,7 @@ func apolloGet(args []string) int {
 	}
 	_ = *yes
 	if fs.NArg() != 2 {
-		return fail("apollo get: 用法：ai-tools apollo get <name> <key>")
+		return fail("apollo get: 用法：vaulty-keeper apollo get <name> <key>")
 	}
 	name, k := fs.Arg(0), fs.Arg(1)
 	dirPath, err := snapDir(*dir)
@@ -497,7 +497,7 @@ func apolloSet(args []string) int {
 		return code
 	}
 	if fs.NArg() != 3 {
-		return fail("apollo set: 用法：ai-tools apollo set <name> <key> <value>")
+		return fail("apollo set: 用法：vaulty-keeper apollo set <name> <key> <value>")
 	}
 	name, k, v := fs.Arg(0), fs.Arg(1), fs.Arg(2)
 	dirPath, err := snapDir(*dir)
@@ -556,7 +556,7 @@ func apolloUnset(args []string) int {
 		return code
 	}
 	if fs.NArg() != 2 {
-		return fail("apollo unset: 用法：ai-tools apollo unset <name> <key>")
+		return fail("apollo unset: 用法：vaulty-keeper apollo unset <name> <key>")
 	}
 	name, k := fs.Arg(0), fs.Arg(1)
 	dirPath, err := snapDir(*dir)
@@ -587,7 +587,7 @@ func apolloMark(args []string) int {
 		return fail("apollo mark: 必须且只能指定 --plain 或 --secret 之一")
 	}
 	if fs.NArg() != 2 {
-		return fail("apollo mark: 用法：ai-tools apollo mark <name> <key> --plain|--secret")
+		return fail("apollo mark: 用法：vaulty-keeper apollo mark <name> <key> --plain|--secret")
 	}
 	name, k := fs.Arg(0), fs.Arg(1)
 	dirPath, err := snapDir(*dir)
@@ -640,7 +640,7 @@ func apolloCompare(args []string) int {
 		return fail("apollo compare: 明文输出仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
 	}
 	if fs.NArg() != 2 {
-		return fail("apollo compare: 用法：ai-tools apollo compare <nameA> <nameB>")
+		return fail("apollo compare: 用法：vaulty-keeper apollo compare <nameA> <nameB>")
 	}
 	nameA, nameB := fs.Arg(0), fs.Arg(1)
 	dirPath, err := snapDir(*dir)
@@ -734,7 +734,7 @@ func apolloExport(args []string) int {
 		return fail("apollo export: 明文输出仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
 	}
 	if fs.NArg() != 1 {
-		return fail("apollo export: 用法：ai-tools apollo export <name>")
+		return fail("apollo export: 用法：vaulty-keeper apollo export <name>")
 	}
 	name := fs.Arg(0)
 	dirPath, err := snapDir(*dir)
@@ -773,7 +773,7 @@ func apolloRm(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("apollo rm: 用法：ai-tools apollo rm <name> --appid <id>")
+		return fail("apollo rm: 用法：vaulty-keeper apollo rm <name> --appid <id>")
 	}
 	name := fs.Arg(0)
 	if err := apollo.ValidateAppID(*appID); err != nil {
@@ -813,8 +813,8 @@ func apolloReveal(args []string) int {
 	dir := fs.String("dir", "", "snapshot directory")
 	jsonOut := fs.Bool("json", false, "output JSON")
 	appID := fs.String("appid", "", "app id (default: legacy {env}.json)")
-	keyFlag := fs.String("key", "", "AES secret key override (env AI_TOOLS_AES_KEY)")
-	ivFlag := fs.String("iv", "", "AES iv override (env AI_TOOLS_AES_IV)")
+	keyFlag := fs.String("key", "", "AES secret key override (env VAULTY_KEEPER_AES_KEY)")
+	ivFlag := fs.String("iv", "", "AES iv override (env VAULTY_KEEPER_AES_IV)")
 	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	if code, helped := parseFlags(fs, args); helped || code != 0 {
 		return code
@@ -824,7 +824,7 @@ func apolloReveal(args []string) int {
 		return fail("apollo reveal: 明文输出仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
 	}
 	if fs.NArg() < 2 {
-		return fail("apollo reveal: 用法：ai-tools apollo reveal <name> <key...>")
+		return fail("apollo reveal: 用法：vaulty-keeper apollo reveal <name> <key...>")
 	}
 	name := fs.Arg(0)
 	targets := fs.Args()[1:]
@@ -878,7 +878,7 @@ func apolloEdit(args []string) int {
 		return fail("apollo edit: 明文仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
 	}
 	if fs.NArg() != 1 {
-		return fail("apollo edit: 用法：ai-tools apollo edit <name>")
+		return fail("apollo edit: 用法：vaulty-keeper apollo edit <name>")
 	}
 	name := fs.Arg(0)
 	dirPath, err := snapDir(*dir)
@@ -894,7 +894,7 @@ func apolloEdit(args []string) int {
 		return fail("apollo edit: %v", err)
 	}
 
-	tmp, err := os.CreateTemp("", "ai-tools-edit-*.txt")
+	tmp, err := os.CreateTemp("", "vaulty-keeper-edit-*.txt")
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
@@ -954,7 +954,7 @@ func runSensitive(args []string) int {
 		sensitiveUsage(os.Stdout)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "ai-tools sensitive: unknown subcommand %q\n\n", sub)
+		fmt.Fprintf(os.Stderr, "vaulty-keeper sensitive: unknown subcommand %q\n\n", sub)
 		sensitiveUsage(os.Stderr)
 		return 2
 	}
@@ -965,7 +965,7 @@ func sensitiveUsage(w io.Writer) {
 	printDomainUsage(w, "sensitive")
 	fmt.Fprintf(w, `
 敏感值密钥加密快照中的敏感值（独立于快照密钥），掩码值只能靠它解开
-（env 覆盖：AI_TOOLS_SENSITIVE_KEY）。
+（env 覆盖：VAULTY_KEEPER_SENSITIVE_KEY）。
 `)
 }
 
@@ -1005,7 +1005,7 @@ func runAES(args []string) int {
 		aesUsage(os.Stdout)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "ai-tools aes: unknown subcommand %q\n\n", sub)
+		fmt.Fprintf(os.Stderr, "vaulty-keeper aes: unknown subcommand %q\n\n", sub)
 		aesUsage(os.Stderr)
 		return 2
 	}
@@ -1015,8 +1015,8 @@ func aesUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	printDomainUsage(w, "aes")
 	fmt.Fprintf(w, `
-key/iv 条目存于 ~/.ai-tools/aes.json（{name, secret-key, iv} 数组）。
-解析顺序：--key/--iv → --name（查 aes.json）→ AI_TOOLS_AES_KEY / AI_TOOLS_AES_IV。
+key/iv 条目存于 ~/.vaulty/aes.json（{name, secret-key, iv} 数组）。
+解析顺序：--key/--iv → --name（查 aes.json）→ VAULTY_KEEPER_AES_KEY / VAULTY_KEEPER_AES_IV。
 算法：AES/GCM/NoPadding，tag 128 bits，key 16/24/32 字节（UTF-8），iv 为
 UTF-8 字节（Java CryptoUtil 兼容）。decrypt 输出明文，仅交互式终端可用
 （脚本/AI 环境一律拒绝）。
@@ -1101,8 +1101,8 @@ func aesOp(args []string, encrypt bool) int {
 		fsName = "aes decrypt"
 	}
 	fs := flag.NewFlagSet(fsName, flag.ContinueOnError)
-	key := fs.String("key", "", "secret key (UTF-8, 16/24/32 bytes); env AI_TOOLS_AES_KEY")
-	iv := fs.String("iv", "", "iv string (UTF-8); env AI_TOOLS_AES_IV")
+	key := fs.String("key", "", "secret key (UTF-8, 16/24/32 bytes); env VAULTY_KEEPER_AES_KEY")
+	iv := fs.String("iv", "", "iv string (UTF-8); env VAULTY_KEEPER_AES_IV")
 	name := fs.String("name", "", "use key/iv from the named aes.json entry")
 	file := fs.String("file", "", "read input from file (supports multi-line)")
 	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
@@ -1132,13 +1132,13 @@ func aesOp(args []string, encrypt bool) int {
 		}
 	}
 	if k == "" {
-		k = os.Getenv("AI_TOOLS_AES_KEY")
+		k = os.Getenv("VAULTY_KEEPER_AES_KEY")
 	}
 	if i == "" {
-		i = os.Getenv("AI_TOOLS_AES_IV")
+		i = os.Getenv("VAULTY_KEEPER_AES_IV")
 	}
 	if k == "" || i == "" {
-		return fail("aes: --key/--iv（或 --name，或 AI_TOOLS_AES_KEY/AI_TOOLS_AES_IV）必填")
+		return fail("aes: --key/--iv（或 --name，或 VAULTY_KEEPER_AES_KEY/VAULTY_KEEPER_AES_IV）必填")
 	}
 
 	var input string
@@ -1219,8 +1219,8 @@ func runUI(args []string) int {
 
 // ---- completion ----
 
-const completionZsh = `#compdef ai-tools
-_ai-tools() {
+const completionZsh = `#compdef vaulty-keeper
+_vaulty_keeper() {
   local -a commands
   commands=(
     'apollo:Apollo snapshot tool (encrypted at rest)'
@@ -1277,10 +1277,10 @@ _ai-tools() {
       ;;
   esac
 }
-compdef _ai-tools ai-tools
+compdef _vaulty_keeper vaulty-keeper
 `
 
-const completionBash = `_ai-tools() {
+const completionBash = `_vaulty_keeper() {
   local cur
   cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -1315,31 +1315,31 @@ const completionBash = `_ai-tools() {
       ;;
   esac
 }
-complete -F _ai-tools ai-tools
+complete -F _vaulty_keeper vaulty-keeper
 `
 
-const completionFish = `complete -c ai-tools -f -n '__fish_use_subcommand' -a apollo -d 'Apollo snapshot tool'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a aes -d 'AES/GCM encrypt/decrypt'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a sensitive -d 'sensitive-value key management'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a ui -d 'local web UI'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a serve -d 'masked-only bridge for isolated agents'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a remote -d 'masked reads via the bridge'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a db -d 'encrypted database connections + tunnels'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a completion -d 'print shell completion'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a version -d 'show version'
-complete -c ai-tools -f -n '__fish_use_subcommand' -a help -d 'show help'
-complete -c ai-tools -f -n '__fish_seen_subcommand_from apollo' -a 'init import list get set unset mark compare reveal edit export help'
-complete -c ai-tools -f -n '__fish_seen_subcommand_from aes' -a 'encrypt decrypt gen-key list add help'
-complete -c ai-tools -f -n '__fish_seen_subcommand_from sensitive' -a 'init help'
-complete -c ai-tools -f -n '__fish_seen_subcommand_from remote' -a 'list get compare dblist help'
-complete -c ai-tools -f -n '__fish_seen_subcommand_from db' -a 'init add list test connect show rm shell help'
+const completionFish = `complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a apollo -d 'Apollo snapshot tool'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a aes -d 'AES/GCM encrypt/decrypt'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a sensitive -d 'sensitive-value key management'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a ui -d 'local web UI'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a serve -d 'masked-only bridge for isolated agents'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a remote -d 'masked reads via the bridge'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a db -d 'encrypted database connections + tunnels'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a completion -d 'print shell completion'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a version -d 'show version'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a help -d 'show help'
+complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from apollo' -a 'init import list get set unset mark compare reveal edit export help'
+complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from aes' -a 'encrypt decrypt gen-key list add help'
+complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from sensitive' -a 'init help'
+complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from remote' -a 'list get compare dblist help'
+complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from db' -a 'init add list test connect show rm shell help'
 `
 
 func runCompletion(args []string) int {
 	if len(args) != 1 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprintln(os.Stderr, "usage: ai-tools completion <zsh|bash|fish>")
+		fmt.Fprintln(os.Stderr, "usage: vaulty-keeper completion <zsh|bash|fish>")
 		fmt.Fprintln(os.Stderr, "print a shell completion script; add it to your shell config, e.g.:")
-		fmt.Fprintln(os.Stderr, "  ai-tools completion zsh | source /dev/stdin")
+		fmt.Fprintln(os.Stderr, "  vaulty-keeper completion zsh | source /dev/stdin")
 		if len(args) == 0 {
 			return 2
 		}

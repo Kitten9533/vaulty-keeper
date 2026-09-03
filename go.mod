@@ -1,4 +1,4 @@
-module ai-tools
+module vaulty-keeper
 
 go 1.26.6
 

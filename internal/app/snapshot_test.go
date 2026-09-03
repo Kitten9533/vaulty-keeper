@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"ai-tools/internal/aesx"
-	"ai-tools/internal/apollo"
+	"vaulty-keeper/internal/aesx"
+	"vaulty-keeper/internal/apollo"
 )
 
 func testSnapshot(t *testing.T, dir, name, appID string, entries map[string]string) ([]byte, []byte) {

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"ai-tools/internal/apollo"
-	"ai-tools/internal/dbproxy"
+	"vaulty-keeper/internal/apollo"
+	"vaulty-keeper/internal/dbproxy"
 )
 
 func fixedKey() []byte {

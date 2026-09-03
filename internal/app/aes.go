@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"ai-tools/internal/aesx"
+	"vaulty-keeper/internal/aesx"
 )
 
 const keyCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -22,7 +22,7 @@ type AESEntry struct {
 }
 
 // AESConfig is the persisted list of named AES key/iv pairs
-// (~/.ai-tools/aes.json), kept as a JSON array of AESEntry.
+// (~/.vaulty/aes.json), kept as a JSON array of AESEntry.
 type AESConfig struct {
 	Entries []AESEntry `json:"entries"`
 	Path    string     `json:"path"`
@@ -30,14 +30,14 @@ type AESConfig struct {
 
 // AESConfigPath returns the file holding the AES key/iv list.
 func AESConfigPath() string {
-	if p := os.Getenv("AI_TOOLS_AES_CONFIG"); p != "" {
+	if p := os.Getenv("VAULTY_KEEPER_AES_CONFIG"); p != "" {
 		return p
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".ai-tools", "aes.json")
+		return filepath.Join(".", ".vaulty", "aes.json")
 	}
-	return filepath.Join(home, ".ai-tools", "aes.json")
+	return filepath.Join(home, ".vaulty", "aes.json")
 }
 
 // AESConfigList reads the named key/iv list. A missing file is not an error;

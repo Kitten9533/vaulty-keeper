@@ -28,7 +28,7 @@ func withStdin(t *testing.T, data string) {
 func dbTestEnv(t *testing.T) (dir string) {
 	t.Helper()
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_DB_KEY", key)
+	t.Setenv("VAULTY_KEEPER_DB_KEY", key)
 	return t.TempDir()
 }
 
@@ -100,7 +100,7 @@ func TestDBConnectPrintsReadyCommand(t *testing.T) {
 	dir := dbTestEnv(t)
 	db := filepath.Join(dir, "db")
 	// serve 运行时的 token 文件
-	t.Setenv("AI_TOOLS_BRIDGE_TOKEN", "tok-abc123")
+	t.Setenv("VAULTY_KEEPER_BRIDGE_TOKEN", "tok-abc123")
 	withStdin(t, "postgres://app:pgpass@db.example.com:5432/appdb\n")
 	if code := Run([]string{"db", "add", "pgdb", "--dir", db}); code != 0 {
 		t.Fatalf("db add failed: %d", code)

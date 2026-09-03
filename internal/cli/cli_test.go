@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"ai-tools/internal/aesx"
+	"vaulty-keeper/internal/aesx"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -105,8 +105,8 @@ func TestIsBoolFlag(t *testing.T) {
 // (no Keychain dependency) and a temp snapshot dir.
 func TestApolloPipeline(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 
@@ -147,8 +147,8 @@ func TestApolloPipeline(t *testing.T) {
 // so an AI cannot self-authorize plaintext reads.
 func TestPlainMarkGuardRefusesSensitiveKey(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -178,8 +178,8 @@ func TestPlainMarkGuardRefusesSensitiveKey(t *testing.T) {
 
 func TestImportAutoName(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "merdi_portal.txt")
@@ -199,8 +199,8 @@ func TestImportRefusesOverwriteWithoutForce(t *testing.T) {
 	defer func() { isTerminalFunc = old }()
 
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -251,8 +251,8 @@ func TestImportRefusesOverwriteWithoutForce(t *testing.T) {
 func TestReveal(t *testing.T) {
 	asTTY(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 
@@ -322,8 +322,8 @@ func TestReveal(t *testing.T) {
 func TestRevealPlainValue(t *testing.T) {
 	asTTY(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -345,8 +345,8 @@ func TestRevealPlainValue(t *testing.T) {
 func TestEdit(t *testing.T) {
 	asTTY(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -383,8 +383,8 @@ func TestEdit(t *testing.T) {
 
 func TestListAndCompareJSON(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -445,8 +445,8 @@ func TestListAndCompareJSON(t *testing.T) {
 
 func TestApolloRejectsUnsafeSnapshotName(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	err := captureStderr(t, func() {
 		if code := Run([]string{"apollo", "list", "../outside", "--dir", t.TempDir(), "--appid", "app-x"}); code != 1 {
 			t.Fatalf("list with unsafe name returned %d, want 1", code)
@@ -518,7 +518,7 @@ func TestHelpDoesNotRunCommand(t *testing.T) {
 			t.Fatalf("apollo list -h returned code %d", code)
 		}
 	})
-	if !strings.Contains(out, "ai-tools apollo list") {
+	if !strings.Contains(out, "vaulty-keeper apollo list") {
 		t.Errorf("-h output missing syntax line:\n%s", out)
 	}
 	if strings.Contains(out, "test (a)") {
@@ -531,7 +531,7 @@ func TestHelpDoesNotRunCommand(t *testing.T) {
 			t.Fatalf("aes gen-key -h returned code %d", code)
 		}
 	})
-	if !strings.Contains(out, "ai-tools aes gen-key") {
+	if !strings.Contains(out, "vaulty-keeper aes gen-key") {
 		t.Errorf("-h output missing syntax line:\n%s", out)
 	}
 	if strings.Contains(out, "SECRET_KEY") {
@@ -544,7 +544,7 @@ func TestHelpDoesNotRunCommand(t *testing.T) {
 			t.Fatalf("db show -h returned code %d", code)
 		}
 	})
-	if !strings.Contains(out, "ai-tools db show") {
+	if !strings.Contains(out, "vaulty-keeper db show") {
 		t.Errorf("db show -h output missing syntax line:\n%s", out)
 	}
 }
@@ -553,8 +553,8 @@ func TestHelpDoesNotRunCommand(t *testing.T) {
 // compatibility alias.
 func TestImportAppID(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -575,8 +575,8 @@ func TestImportAppID(t *testing.T) {
 
 func TestApolloRm(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -610,8 +610,8 @@ func TestApolloRm(t *testing.T) {
 func TestPlaintextCommandsRejectedWhenPiped(t *testing.T) {
 	asPiped(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -678,8 +678,8 @@ func TestPlaintextCommandsRejectedWhenPiped(t *testing.T) {
 func TestPlaintextCommandsAvailableOnTTY(t *testing.T) {
 	asTTY(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -722,8 +722,8 @@ func asPiped(t *testing.T) {
 func TestReverseDefaultAndMark(t *testing.T) {
 	asPiped(t)
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
-	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
 	dir := t.TempDir()
 	snap := filepath.Join(dir, "snap")
 	in := filepath.Join(dir, "paste.txt")
@@ -816,7 +816,7 @@ func TestReverseDefaultAndMark(t *testing.T) {
 // AES key/iv values into non-interactive (script/AI) output.
 func TestAESListMasksKeysInNonTTY(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AI_TOOLS_AES_CONFIG", filepath.Join(dir, "aes.json"))
+	t.Setenv("VAULTY_KEEPER_AES_CONFIG", filepath.Join(dir, "aes.json"))
 	if code := Run([]string{"aes", "add", "--name", "oss", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop"}); code != 0 {
 		t.Fatalf("aes add failed with code %d", code)
 	}

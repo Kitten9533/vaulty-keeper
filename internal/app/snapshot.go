@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"ai-tools/internal/aesx"
-	"ai-tools/internal/apollo"
+	"vaulty-keeper/internal/aesx"
+	"vaulty-keeper/internal/apollo"
 )
 
 // Import parses Apollo key/value text and writes a new encrypted snapshot.

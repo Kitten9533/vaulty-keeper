@@ -25,14 +25,14 @@ import (
 	"sync"
 	"time"
 
-	"ai-tools/internal/apollo"
-	"ai-tools/internal/dbproxy"
+	"vaulty-keeper/internal/apollo"
+	"vaulty-keeper/internal/dbproxy"
 )
 
 const (
 	// EnvAddr and EnvToken are read by the remote client to reach the bridge.
-	EnvAddr  = "AI_TOOLS_BRIDGE_ADDR"
-	EnvToken = "AI_TOOLS_BRIDGE_TOKEN"
+	EnvAddr  = "VAULTY_KEEPER_BRIDGE_ADDR"
+	EnvToken = "VAULTY_KEEPER_BRIDGE_TOKEN"
 
 	// TokenFile is where serve writes the per-run token (0600, host-user
 	// readable) so wrapper scripts can hand it to an isolated agent.
@@ -42,7 +42,7 @@ const (
 // Config configures the masked-only bridge. SnapshotKey and SensitiveKey
 // resolve the host keys (Keychain/env); Token, when empty, is generated at
 // Start time. DBStore is the path to the encrypted database-connection store
-// (~/.ai-tools/db.json) served by /api/db/list; when empty that endpoint
+// (~/.vaulty/db.json) served by /api/db/list; when empty that endpoint
 // reports no connections.
 type Config struct {
 	Dir          string
@@ -118,7 +118,7 @@ func requireToken(token string, next http.Handler) http.Handler {
 			if delay > 0 {
 				time.Sleep(delay)
 			}
-			writeAPIError(w, http.StatusUnauthorized, "auth_required", "访问令牌无效或缺失（请查看 'ai-tools serve' 打印的 URL）")
+			writeAPIError(w, http.StatusUnauthorized, "auth_required", "访问令牌无效或缺失（请查看 'vaulty-keeper serve' 打印的 URL）")
 			return
 		}
 		mu.Lock()
@@ -388,12 +388,12 @@ func (h *handler) loadError(w http.ResponseWriter, name string, err error) {
 func (h *handler) keys(w http.ResponseWriter) (snapKey, sensitiveKey []byte, ok bool) {
 	snapKey, err := h.cfg.SnapshotKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("快照密钥不可用（%s）；请运行 'ai-tools apollo init' 或设置 %s", err, apollo.EnvKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("快照密钥不可用（%s）；请运行 'vaulty-keeper apollo init' 或设置 %s", err, apollo.EnvKey))
 		return nil, nil, false
 	}
 	sensitiveKey, err = h.cfg.SensitiveKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("敏感值密钥不可用（%s）；请运行 'ai-tools sensitive init' 或设置 %s", err, apollo.EnvSensitiveKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("敏感值密钥不可用（%s）；请运行 'vaulty-keeper sensitive init' 或设置 %s", err, apollo.EnvSensitiveKey))
 		return nil, nil, false
 	}
 	return snapKey, sensitiveKey, true
@@ -425,7 +425,7 @@ func NewToken() string {
 }
 
 // Start runs the bridge on addr (e.g. "127.0.0.1:8970") until ctx is done. A
-// per-run token is generated and written to <home>/.ai-tools/bridge-token
+// per-run token is generated and written to <home>/.vaulty/bridge-token
 // (0600) plus printed to out, so wrappers can pass it to an isolated agent.
 // hostDir is the directory holding the token file; it need not equal cfg.Dir.
 func Start(ctx context.Context, cfg Config, addr string, hostDir string, out io.Writer) error {
@@ -451,7 +451,7 @@ func Start(ctx context.Context, cfg Config, addr string, hostDir string, out io.
 		}
 	}
 
-	fmt.Fprintf(out, "ai-tools masked bridge listening on http://%s\n", addr)
+	fmt.Fprintf(out, "vaulty-keeper masked bridge listening on http://%s\n", addr)
 	fmt.Fprintf(out, "hand token to the isolated agent via %s=%s and %s=http://%s\n", EnvToken, cfg.Token, EnvAddr, addr)
 
 	srv := &http.Server{Handler: NewHandler(cfg)}
@@ -480,5 +480,5 @@ func writeTokenFile(dir, token string) error {
 
 // TokenPath returns the default location of the bridge token file.
 func TokenPath(home string) string {
-	return filepath.Join(home, ".ai-tools", TokenFile)
+	return filepath.Join(home, ".vaulty", TokenFile)
 }

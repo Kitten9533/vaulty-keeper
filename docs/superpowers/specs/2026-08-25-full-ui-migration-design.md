@@ -2,14 +2,14 @@
 
 ## Goal
 
-把 `ai-tools` 的全部功能迁移到本地 Web UI，使其成为唯一的主要手动入口；CLI 保留全部子命令作为脚本与自动化接口，现有行为与输出格式完全不变。
+把 `vaulty-keeper` 的全部功能迁移到本地 Web UI，使其成为唯一的主要手动入口；CLI 保留全部子命令作为脚本与自动化接口，现有行为与输出格式完全不变。
 
 ## Scope
 
 本次迁移覆盖：
 
 - **apollo**：init、import、list/get、set、unset、compare、reveal、edit、export（含剪贴板复制）。
-- **aes**：encrypt、decrypt、gen-key、key/iv 管理（`~/.ai-tools/aes.json`）。
+- **aes**：encrypt、decrypt、gen-key、key/iv 管理（`~/.vaulty/aes.json`）。
 - **密钥管理**：快照密钥初始化引导（UI 内完成）。
 - **CLI**：全部保留，仅重构内部实现以共享应用层，输出不变。
 
@@ -94,7 +94,7 @@ DELETE /api/aes/config                  → 204 清除 aes.json
 
 ### 密钥初始化
 
-1. UI 检测快照密钥不可用 → 快照区显示引导卡片：「运行 `ai-tools apollo init` 或点击生成」。
+1. UI 检测快照密钥不可用 → 快照区显示引导卡片：「运行 `vaulty-keeper apollo init` 或点击生成」。
 2. 点击生成 → `POST /api/init` → 成功后刷新快照列表。
 
 ### 明文编辑（替代 CLI `edit`）

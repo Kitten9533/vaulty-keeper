@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `ai-tools ui`, a loopback-only, Claude-light-theme Web UI for managing encrypted Apollo snapshots without exposing sensitive plaintext during ordinary browsing or comparison.
+**Goal:** Add `vaulty-keeper ui`, a loopback-only, Claude-light-theme Web UI for managing encrypted Apollo snapshots without exposing sensitive plaintext during ordinary browsing or comparison.
 
 **Architecture:** Create an `internal/ui` package that exposes a testable JSON HTTP handler and a blocking loopback server launcher. The handler adapts the existing `internal/apollo` encrypted storage APIs into safe view models; static HTML, CSS, and JavaScript are embedded in the Go binary and call only same-origin API endpoints. The CLI only parses `ui` flags and passes the configured snapshot directory to the UI package.
 
@@ -242,7 +242,7 @@ Append this to `internal/cli/cli_test.go`:
 ```go
 func TestApolloRejectsUnsafeSnapshotName(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
 	if code := Run([]string{"apollo", "list", "../outside", "--dir", t.TempDir()}); code != 1 {
 		t.Fatalf("list with unsafe name returned %d, want 1", code)
 	}
@@ -390,7 +390,7 @@ if err != nil {
 defer listener.Close()
 
 url := "http://" + listener.Addr().String()
-fmt.Fprintf(out, "ai-tools UI available at %s\n", url)
+fmt.Fprintf(out, "vaulty-keeper UI available at %s\n", url)
 ```
 
 When `openBrowser` is true, invoke a private `openURL(url)` after the listener exists. Serve with `http.Server{Handler: NewHandler(cfg)}` and shut down when `ctx.Done()` fires. Do not add a `0.0.0.0` option.
@@ -724,7 +724,7 @@ case "ui":
 Add usage text:
 
 ```text
-ai-tools ui [--dir <dir>] [--port <port>] [--no-open]
+vaulty-keeper ui [--dir <dir>] [--port <port>] [--no-open]
 ```
 
 Implement `runUI` with `flag.ContinueOnError`, `--dir`, `--port` (default `0`), and `--no-open`. Resolve the directory through existing `snapDir`, validate port with `parseUIPort`, then call:
@@ -733,7 +733,7 @@ Implement `runUI` with `flag.ContinueOnError`, `--dir`, `--port` (default `0`), 
 return ui.Start(context.Background(), ui.Config{Dir: dirPath}, port, !*noOpen, os.Stdout)
 ```
 
-`runUI` should return `0` only on clean server shutdown and call `fail("ui: %v", err)` for startup errors. Add `"ai-tools/internal/ui"`, `context`, and any required imports.
+`runUI` should return `0` only on clean server shutdown and call `fail("ui: %v", err)` for startup errors. Add `"vaulty-keeper/internal/ui"`, `context`, and any required imports.
 
 Update zsh, bash, and fish completion strings so `ui` is suggested as a top-level command.
 
@@ -755,9 +755,9 @@ Add a `## 本地 Web UI` section to `README.md` after the interactive-mode secti
 ## 本地 Web UI
 
 ```sh
-ai-tools ui
-ai-tools ui --dir /path/to/snapshots --port 8080
-ai-tools ui --no-open
+vaulty-keeper ui
+vaulty-keeper ui --dir /path/to/snapshots --port 8080
+vaulty-keeper ui --no-open
 ```
 
 - 仅监听 `127.0.0.1`，不会暴露到局域网。

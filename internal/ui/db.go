@@ -14,11 +14,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ai-tools/internal/apollo"
-	"ai-tools/internal/dbproxy"
+	"vaulty-keeper/internal/apollo"
+	"vaulty-keeper/internal/dbproxy"
 )
 
-// Database-connection endpoints, mirroring the `ai-tools db` CLI in the web
+// Database-connection endpoints, mirroring the `vaulty-keeper db` CLI in the web
 // UI. Same security model as the rest of the UI: list/connect are open GETs
 // (no URL, no password); init/add/test/rm are POST/DELETE (token-gated);
 // show (real URL) is plaintext-gated (--allow-plaintext) on top of the token.
@@ -403,14 +403,14 @@ func (h *handler) dbConnect(w http.ResponseWriter, r *http.Request) {
 
 // uiBridgeToken resolves the bridge token (env first, then the token file).
 func uiBridgeToken() string {
-	if t := os.Getenv("AI_TOOLS_BRIDGE_TOKEN"); t != "" {
+	if t := os.Getenv("VAULTY_KEEPER_BRIDGE_TOKEN"); t != "" {
 		return t
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	b, err := os.ReadFile(filepath.Join(home, ".ai-tools", "bridge-token"))
+	b, err := os.ReadFile(filepath.Join(home, ".vaulty", "bridge-token"))
 	if err != nil {
 		return ""
 	}

@@ -1,16 +1,16 @@
 # AGENTS.md
 
-个人 AI 工具箱（Go 单二进制）：加密 Apollo 配置快照、AES 加解密（Java CryptoUtil 兼容）、本地 Web UI。完整命令文档见 `README.md`；每条命令都能用 `ai-tools <cmd> -h` 自查。
+个人 AI 工具箱（Go 单二进制）：加密 Apollo 配置快照、AES 加解密（Java CryptoUtil 兼容）、本地 Web UI。完整命令文档见 `README.md`；每条命令都能用 `vaulty-keeper <cmd> -h` 自查。
 
 ## 构建
 
 ```sh
-make build     # 产物 bin/ai-tools
+make build     # 产物 bin/vaulty-keeper
 ```
 
 改过 `internal/ui/static/` 下的文件（HTML/CSS/JS）后**必须**重建：静态资源用 `go:embed` 打进二进制，源码改动不重建不生效。
 
-## AI 调用 ai-tools
+## AI 调用 vaulty-keeper
 
 ### 安全模型（先读这个）
 
@@ -21,8 +21,8 @@ make build     # 产物 bin/ai-tools
 - **AI 读**：`list`/`compare`/`get` 默认只给掩码 `*** (n chars)` + 指纹——**反转默认**：不靠 key 名猜测，非 TTY 下未显式标记安全的 key 一律掩码；只有 `set --plain` / `mark --plain` 显式标记为安全的 key 才输出明文。任何明文输出（reveal、export、edit、`--reveal`、`aes decrypt`）**非交互终端（脚本/AI）一律拒绝，即使加 `--yes`**——明文只在用户本人终端（TTY）可用。
 - **AI 写**：`set`/`unset`/`import` 安全，无需 `--yes`（AI 写的就是它已知的明文，写入即加密）。
 - **Web UI**：仅监听 127.0.0.1，随机 token 门控写操作与明文出口，GET 只返回掩码数据；**明文接口（reveal/export/明文编辑/AES 解密）默认禁用**，需 `--allow-plaintext` 显式开启（否则带 token 也 403）；token 失败限速（指数退避）。
-- **掩码代理（serve/remote）**：`ai-tools serve --addr 0.0.0.0:8970` 在 host 起掩码代理，`ai-tools remote list/get/compare` 在隔离域（Docker 容器/独立账号/VM）内读配置。代理**无条件掩码**——即使 `set --plain` 标记安全的 key 也不回明文；全部 /api 端点要 token（0600 写 `~/.ai-tools/bridge-token`）+ 失败限速。对"故意对抗的同用户 AI"，这是唯一真正能防住的方式：把 AI 放进摸不到密钥/密文的隔离域（见 README「容器隔离部署」，docker-compose 已内置不挂载密钥目录/cap_drop/no-new-privileges）。
-- **DB 隧道（db/serve）**：`ai-tools db add` 只加密数据库 URL（独立 DB 密钥 `AI_TOOLS_DB_KEY` + `~/.ai-tools/db.json`，0600）；`serve` 为每条连接起 TCP 隧道，在握手阶段把真实凭据注入（PG trust 风格 / MySQL 认证应答替换 / Redis 代发 AUTH），之后纯字节转发。客户端只需 bridge token（PG/MySQL 的 username 字段 / Redis 的 AUTH 首命令），**不需要真实账号密码**；DSN 永不离开 host、不进日志/回包。隧道监听地址跟随 `--addr`，`0.0.0.0` 时靠 token 门控兜底。只读靠注册只读账号实现，代理不强制。
+- **掩码代理（serve/remote）**：`vaulty-keeper serve --addr 0.0.0.0:8970` 在 host 起掩码代理，`vaulty-keeper remote list/get/compare` 在隔离域（Docker 容器/独立账号/VM）内读配置。代理**无条件掩码**——即使 `set --plain` 标记安全的 key 也不回明文；全部 /api 端点要 token（0600 写 `~/.vaulty/bridge-token`）+ 失败限速。对"故意对抗的同用户 AI"，这是唯一真正能防住的方式：把 AI 放进摸不到密钥/密文的隔离域（见 README「容器隔离部署」，docker-compose 已内置不挂载密钥目录/cap_drop/no-new-privileges）。
+- **DB 隧道（db/serve）**：`vaulty-keeper db add` 只加密数据库 URL（独立 DB 密钥 `VAULTY_KEEPER_DB_KEY` + `~/.vaulty/db.json`，0600）；`serve` 为每条连接起 TCP 隧道，在握手阶段把真实凭据注入（PG trust 风格 / MySQL 认证应答替换 / Redis 代发 AUTH），之后纯字节转发。客户端只需 bridge token（PG/MySQL 的 username 字段 / Redis 的 AUTH 首命令），**不需要真实账号密码**；DSN 永不离开 host、不进日志/回包。隧道监听地址跟随 `--addr`，`0.0.0.0` 时靠 token 门控兜底。只读靠注册只读账号实现，代理不强制。
 - **防破解**：掩码指纹是 HMAC-SHA256（密钥=快照密钥），密钥不泄露时无法离线枚举弱值匹配指纹；token 为 128 位随机，AES-256-GCM 暴力不可行。
 - **判断一致性**：用 `compare`（掩码 + 长度 + 指纹即可判断），不要 `get` 明文。
 
@@ -31,20 +31,20 @@ make build     # 产物 bin/ai-tools
 以下命令输出对 AI 安全（敏感值自动掩码为 `*** (n chars)`），默认使用：
 
 ```sh
-bin/ai-tools apollo list [<env>] --appid <id> --json
-bin/ai-tools apollo compare <a> <b> --appid <a_id> --appid-to <b_id> --json
-bin/ai-tools apollo get <env> <key> --appid <id>        # 非 TTY 只对标记为安全的 key 给明文
-bin/ai-tools apollo set/unset <env> <key> [<value>] --appid <id>
-bin/ai-tools apollo mark <env> <key> --plain|--secret --appid <id>   # 不改值，翻转安全/敏感标记
-bin/ai-tools aes encrypt --key ... --iv ...
-bin/ai-tools remote list|get|compare ...     # 容器/隔离域内经掩码代理读（永远只有掩码）
-bin/ai-tools db list / remote dblist ...     # 只列连接名/类型/端口（不返回 URL）
-bin/ai-tools db connect <name>            # 打印带 token 的完整客户端命令（--container 用 host.docker.internal）
-bin/ai-tools db test <name>                 # 验证注册的连接可用（AI 安全，不打印 URL）；失败提示 db add 同名修复（端口不变）
-bin/ai-tools db show <name>                 # 打印解密后的真实 URL（TTY-only，与 reveal 同门禁）
-bin/ai-tools db add <name>                   # 注册连接（URL 从 stdin 读，加密落盘）
+bin/vaulty-keeper apollo list [<env>] --appid <id> --json
+bin/vaulty-keeper apollo compare <a> <b> --appid <a_id> --appid-to <b_id> --json
+bin/vaulty-keeper apollo get <env> <key> --appid <id>        # 非 TTY 只对标记为安全的 key 给明文
+bin/vaulty-keeper apollo set/unset <env> <key> [<value>] --appid <id>
+bin/vaulty-keeper apollo mark <env> <key> --plain|--secret --appid <id>   # 不改值，翻转安全/敏感标记
+bin/vaulty-keeper aes encrypt --key ... --iv ...
+bin/vaulty-keeper remote list|get|compare ...     # 容器/隔离域内经掩码代理读（永远只有掩码）
+bin/vaulty-keeper db list / remote dblist ...     # 只列连接名/类型/端口（不返回 URL）
+bin/vaulty-keeper db connect <name>            # 打印带 token 的完整客户端命令（--container 用 host.docker.internal）
+bin/vaulty-keeper db test <name>                 # 验证注册的连接可用（AI 安全，不打印 URL）；失败提示 db add 同名修复（端口不变）
+bin/vaulty-keeper db show <name>                 # 打印解密后的真实 URL（TTY-only，与 reveal 同门禁）
+bin/vaulty-keeper db add <name>                   # 注册连接（URL 从 stdin 读，加密落盘）
 
-DB 隧道用法（AI 侧）：`db list`（或 `remote dblist`）拿到连接名 + 隧道端口后，用原生客户端连代理端口，token 即 `AI_TOOLS_BRIDGE_TOKEN`：
+DB 隧道用法（AI 侧）：`db list`（或 `remote dblist`）拿到连接名 + 隧道端口后，用原生客户端连代理端口，token 即 `VAULTY_KEEPER_BRIDGE_TOKEN`：
   psql "postgresql://$TOKEN@host.docker.internal:15432/appdb"   # token 放 user 字段，数据库名/账号密码一律用注册 URL 里的
   mysql -h host.docker.internal -P 15433 -u "$TOKEN" -px
   redis-cli -a "$TOKEN" -p 15434
@@ -59,13 +59,13 @@ AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或�
 
 红线：
 
-- **密钥不进 AI 环境**：快照密钥走系统密钥库（`ai-tools apollo init` 创建；macOS Keychain / Windows 凭据管理器）、敏感值密钥同理（`ai-tools sensitive init` 创建）、数据库密钥同理（`ai-tools db init` 创建，env 兜底 `AI_TOOLS_DB_KEY`），不要在 AI 会话里 `export AI_TOOLS_APOLLO_KEY` / `AI_TOOLS_SENSITIVE_KEY` / `AI_TOOLS_DB_KEY`——AI 拿到敏感值密钥就能自行解密所有快照的敏感值、拿到 DB 密钥就能解出全部数据库 URL。`AI_TOOLS_AES_KEY` / `AI_TOOLS_AES_IV` 同理，不要作为 `--key`/`--iv` 命令行参数传给命令（会出现在 `ps` 与 shell history）。注意：与 AI 同权限的进程本身就能读系统密钥库与 `~/.ai-tools/aes.json`，这条红线防的是**额外扩散**（env/参数/日志），不是"同用户进程读取"；要防"故意对抗"的同用户 AI，用 Docker 容器隔离（见 README「容器隔离部署」）。
+- **密钥不进 AI 环境**：快照密钥走系统密钥库（`vaulty-keeper apollo init` 创建；macOS Keychain / Windows 凭据管理器）、敏感值密钥同理（`vaulty-keeper sensitive init` 创建）、数据库密钥同理（`vaulty-keeper db init` 创建，env 兜底 `VAULTY_KEEPER_DB_KEY`），不要在 AI 会话里 `export VAULTY_KEEPER_APOLLO_KEY` / `VAULTY_KEEPER_SENSITIVE_KEY` / `VAULTY_KEEPER_DB_KEY`——AI 拿到敏感值密钥就能自行解密所有快照的敏感值、拿到 DB 密钥就能解出全部数据库 URL。`VAULTY_KEEPER_AES_KEY` / `VAULTY_KEEPER_AES_IV` 同理，不要作为 `--key`/`--iv` 命令行参数传给命令（会出现在 `ps` 与 shell history）。注意：与 AI 同权限的进程本身就能读系统密钥库与 `~/.vaulty/aes.json`，这条红线防的是**额外扩散**（env/参数/日志），不是"同用户进程读取"；要防"故意对抗"的同用户 AI，用 Docker 容器隔离（见 README「容器隔离部署」）。
 - **明文不可得**：明文命令在非交互环境一律拒绝（即使 `--yes`），不要尝试用 `--yes`、伪造 TTY、或替代命令（如 `aes decrypt`）获取明文；需要判断一致性用 `compare`。
-- **Web UI 带访问令牌**：`ai-tools ui` 启动时打印带 `?t=<token>` 的 URL，写操作（导入/增删改/导出/解密/明文编辑）都要这个令牌；**明文接口默认禁用**（需 `--allow-plaintext` 才开，否则带 token 也 403）。不要替用户执行会输出明文的 UI 操作（curl API），即使拿到了 token——明文只在用户本人浏览器里确认后可见。
+- **Web UI 带访问令牌**：`vaulty-keeper ui` 启动时打印带 `?t=<token>` 的 URL，写操作（导入/增删改/导出/解密/明文编辑）都要这个令牌；**明文接口默认禁用**（需 `--allow-plaintext` 才开，否则带 token 也 403）。不要替用户执行会输出明文的 UI 操作（curl API），即使拿到了 token——明文只在用户本人浏览器里确认后可见。
 - **`--plain` 防误标守卫**：`set --plain` / `mark --plain` 命中敏感规则（password/token/secret/JWT/带凭据 URI）的 key 时，非 TTY 一律拒绝、TTY 需二次确认。AI 不要尝试用 `--plain` 放行敏感 key 给自己读明文。
-- 快照目录：`--dir` 或 `AI_TOOLS_APOLLO_DIR`，默认 `~/.ai-tools/apollo/`。
+- 快照目录：`--dir` 或 `VAULTY_KEEPER_APOLLO_DIR`，默认 `~/.vaulty/apollo/`。
 - 非 TTY 下 `apollo rm` 需 `--yes`、`apollo import` 覆盖已有快照需 `--force`；不要绕过。
-- 无参数 `ai-tools` 显示完整命令 usage（交互菜单已移除，手动操作走 `ai-tools ui` 或直接子命令）。
+- 无参数 `vaulty-keeper` 显示完整命令 usage（交互菜单已移除，手动操作走 `vaulty-keeper ui` 或直接子命令）。
 
 ## 开发
 
