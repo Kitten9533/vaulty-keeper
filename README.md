@@ -4,10 +4,10 @@
 
 ## 快速开始
 
-**方式一：下载预编译二进制**（推荐，无需安装 Go）——从 [Releases](https://github.com/<your-org>/vaulty-keeper/releases) 下载对应平台的压缩包（darwin/linux/windows × amd64/arm64），解压后把 `vaulty-keeper` 放到 PATH：
+**方式一：下载预编译二进制**（推荐，无需安装 Go）——从 [Releases](https://github.com/Kitten9533/vaulty-keeper/releases) 下载对应平台的压缩包（darwin/linux/windows × amd64/arm64），解压后把 `vaulty-keeper` 放到 PATH：
 
 ```sh
-vaulty-keeper apollo init      # 首次：生成快照密钥（macOS Keychain / Windows 凭据管理器）
+vaulty-keeper apollo init      # 首次：生成快照密钥（macOS Keychain / Windows 凭据管理器 / Linux Secret Service）
 vaulty-keeper sensitive init   # 首次：生成敏感值密钥
 vaulty-keeper ui               # 打开本地 Web UI
 ```
@@ -15,7 +15,7 @@ vaulty-keeper ui               # 打开本地 Web UI
 **方式二：源码构建**（需要 Go 1.26+）：
 
 ```sh
-git clone <repo-url>
+git clone https://github.com/Kitten9533/vaulty-keeper.git
 make build          # → bin/vaulty-keeper
 make install        # 软链到 ~/.local/bin/vaulty-keeper
 make test           # 单测（含 Java↔Go 互操作向量）
@@ -55,7 +55,7 @@ vaulty-keeper ui --allow-plaintext    # 显式开启明文接口（见下）
 Apollo Open API 不可用时的替代方案：从 Apollo 门户**复制键值对**，导入加密快照，AI/脚本安全地读取、对比、修改。快照默认存 `~/.vaulty/apollo/<name>.json`（`--dir` 或环境变量 `VAULTY_KEEPER_APOLLO_DIR` 覆盖）。
 
 ```sh
-vaulty-keeper apollo init                          # 首次：生成快照密钥（系统密钥库，如 macOS Keychain / Windows 凭据管理器）
+vaulty-keeper apollo init                          # 首次：生成快照密钥（系统密钥库，如 macOS Keychain / Windows 凭据管理器 / Linux Secret Service）
 vaulty-keeper sensitive init                       # 首次：生成敏感值密钥（独立于快照密钥）
 vaulty-keeper apollo import prod.txt --appid xx    # 解析粘贴内容；--appid 必填；--name 省略时自动取文件名；已存在时需 --force 覆盖
 vaulty-keeper apollo import - --name prod --appid xx   # 从 stdin 读（旧写法 --app-id 仍兼容）
@@ -91,10 +91,22 @@ vaulty-keeper apollo import - --name prod --appid xx   # 从 stdin 读（旧写�
 - 一行内粘在一起的多个 `KEY = ` 条目自动拆分并警告（如 `A = 1B = 2`）。
 - key 校验 `[A-Za-z_][A-Za-z0-9_.-]*`，非法行跳过并警告。
 
-两把密钥（都在 Keychain，均可环境变量覆盖，均不进明文文件）：
+两把密钥（都在系统密钥库，均可环境变量覆盖，均不进明文文件）：
 
 - **快照密钥**（`VAULTY_KEEPER_APOLLO_KEY`，`apollo init` 创建）：加密所有非敏感值。
 - **敏感值密钥**（`VAULTY_KEEPER_SENSITIVE_KEY`，`sensitive init` 创建）：加密所有敏感值（password/token/secret/...）。敏感值只有这把密钥能解开，`reveal`/`--reveal` 显示明文靠它，AI 进程拿不到它就无法读取敏感值明文。文件权限 0600，值为 AES-256-GCM + 每条独立随机 nonce。
+
+**Linux 说明**：桌面会话（gnome-keyring / kwallet）下 `apollo init` / `sensitive init` / `db init` 开箱即用（Secret Service）；无头服务器没有 Secret Service 时用环境变量兜底——先在任意机器生成 32 字节 base64 密钥，再写进无头服务器的 shell 配置（文件 0600）：
+
+```sh
+# 生成密钥（任意机器，一次即可；密钥不要进终端日志/剪贴板）
+openssl rand -base64 32    # → 快照密钥
+openssl rand -base64 32    # → 敏感值密钥
+
+# 无头服务器 ~/.profile（0600）——密钥是红线，不要放进 AI 会话/命令行参数
+export VAULTY_KEEPER_APOLLO_KEY='<base64>'
+export VAULTY_KEEPER_SENSITIVE_KEY='<base64>'
+```
 
 敏感识别（默认掩码，`--reveal` 显示；`--reveal` 仅 TTY 可用）：
 
@@ -329,7 +341,7 @@ cat /tmp/vaulty-keeper-dbtest-serve.log | grep dbproxy:
 
 | 层 | 机制 |
 |---|---|
-| 静态加密 | 快照所有值 AES-256-GCM 落盘（0600，无明文）；两把独立密钥：快照密钥（非敏感值）+ 敏感值密钥（敏感值），都在系统密钥库（macOS Keychain / Windows 凭据管理器） |
+| 静态加密 | 快照所有值 AES-256-GCM 落盘（0600，无明文）；两把独立密钥：快照密钥（非敏感值）+ 敏感值密钥（敏感值），都在系统密钥库（macOS Keychain / Windows 凭据管理器 / Linux Secret Service） |
 | 信任边界 | 系统密钥库**不防同用户进程**（实测：同 UID 进程可无弹窗 `security find-generic-password -w` 读出两把密钥）；它防的是其他用户/其他机器/意外明文。对**故意对抗**的同用户 AI，用「容器隔离部署」把 AI 放进摸不到密钥的隔离域 |
 | 掩码代理 | `vaulty-keeper serve`（host 持有密钥）+ `vaulty-keeper remote`（容器/隔离域内）——容器侧只拿到 `*** (n chars)` + 长度 + 指纹，**即使 `set --plain` 标记安全的 key 也不回明文**；token 门控 + 限速 |
 | AI 读 | **反转默认**：`get`/`list`/`compare` 非 TTY 下默认全部掩码 `*** (n chars)`，不靠 key 名猜测；只有 `set --plain` / `mark --plain` 显式标记为安全的 key 才输出明文。明文出口（reveal、export、edit、`--reveal`、`aes decrypt`）**非交互终端一律拒绝，即使 `--yes`**——只在用户本人 TTY 可用 |

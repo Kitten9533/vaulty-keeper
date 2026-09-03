@@ -59,7 +59,7 @@ AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或�
 
 红线：
 
-- **密钥不进 AI 环境**：快照密钥走系统密钥库（`vaulty-keeper apollo init` 创建；macOS Keychain / Windows 凭据管理器）、敏感值密钥同理（`vaulty-keeper sensitive init` 创建）、数据库密钥同理（`vaulty-keeper db init` 创建，env 兜底 `VAULTY_KEEPER_DB_KEY`），不要在 AI 会话里 `export VAULTY_KEEPER_APOLLO_KEY` / `VAULTY_KEEPER_SENSITIVE_KEY` / `VAULTY_KEEPER_DB_KEY`——AI 拿到敏感值密钥就能自行解密所有快照的敏感值、拿到 DB 密钥就能解出全部数据库 URL。`VAULTY_KEEPER_AES_KEY` / `VAULTY_KEEPER_AES_IV` 同理，不要作为 `--key`/`--iv` 命令行参数传给命令（会出现在 `ps` 与 shell history）。注意：与 AI 同权限的进程本身就能读系统密钥库与 `~/.vaulty/aes.json`，这条红线防的是**额外扩散**（env/参数/日志），不是"同用户进程读取"；要防"故意对抗"的同用户 AI，用 Docker 容器隔离（见 README「容器隔离部署」）。
+- **密钥不进 AI 环境**：快照密钥走系统密钥库（`vaulty-keeper apollo init` 创建；macOS Keychain / Windows 凭据管理器 / Linux Secret Service）、敏感值密钥同理（`vaulty-keeper sensitive init` 创建）、数据库密钥同理（`vaulty-keeper db init` 创建，env 兜底 `VAULTY_KEEPER_DB_KEY`），不要在 AI 会话里 `export VAULTY_KEEPER_APOLLO_KEY` / `VAULTY_KEEPER_SENSITIVE_KEY` / `VAULTY_KEEPER_DB_KEY`——AI 拿到敏感值密钥就能自行解密所有快照的敏感值、拿到 DB 密钥就能解出全部数据库 URL。`VAULTY_KEEPER_AES_KEY` / `VAULTY_KEEPER_AES_IV` 同理，不要作为 `--key`/`--iv` 命令行参数传给命令（会出现在 `ps` 与 shell history）。注意：与 AI 同权限的进程本身就能读系统密钥库与 `~/.vaulty/aes.json`，这条红线防的是**额外扩散**（env/参数/日志），不是"同用户进程读取"；要防"故意对抗"的同用户 AI，用 Docker 容器隔离（见 README「容器隔离部署」）。
 - **明文不可得**：明文命令在非交互环境一律拒绝（即使 `--yes`），不要尝试用 `--yes`、伪造 TTY、或替代命令（如 `aes decrypt`）获取明文；需要判断一致性用 `compare`。
 - **Web UI 带访问令牌**：`vaulty-keeper ui` 启动时打印带 `?t=<token>` 的 URL，写操作（导入/增删改/导出/解密/明文编辑）都要这个令牌；**明文接口默认禁用**（需 `--allow-plaintext` 才开，否则带 token 也 403）。不要替用户执行会输出明文的 UI 操作（curl API），即使拿到了 token——明文只在用户本人浏览器里确认后可见。
 - **`--plain` 防误标守卫**：`set --plain` / `mark --plain` 命中敏感规则（password/token/secret/JWT/带凭据 URI）的 key 时，非 TTY 一律拒绝、TTY 需二次确认。AI 不要尝试用 `--plain` 放行敏感 key 给自己读明文。

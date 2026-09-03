@@ -258,7 +258,7 @@ serve
 ### 流程 4 · 密钥层级（谁保护谁）
 
 ```
-系统密钥库（macOS Keychain / Windows 凭据管理器）
+系统密钥库（macOS Keychain / Windows 凭据管理器 / Linux Secret Service）
    │
    ├─ apollo 快照密钥 ────────── 加密 → Apollo 快照的「非敏感值」
    ├─ sensitive 敏感值密钥 ───── 加密 → 快照里的「敏感值」

@@ -37,7 +37,7 @@
 ## 1 · 一分钟上手
 
 ```sh
-# ① 首次：两把密钥进系统密钥库（macOS Keychain / Windows 凭据管理器）
+# ① 首次：两把密钥进系统密钥库（macOS Keychain / Windows 凭据管理器 / Linux Secret Service）
 vaulty-keeper apollo init        # 快照密钥（加密非敏感值）
 vaulty-keeper sensitive init     # 敏感值密钥（加密敏感值）
 
@@ -110,7 +110,7 @@ vaulty-keeper apollo get prod APP_NAME --appid merdi
 
 安全价值：**快照密钥泄露（比如误发到别处）也解不开敏感值**——敏感值被敏感值密钥加密，而 `apollo init` 和 `sensitive init` 是两次独立的密钥生成。`reveal`/`--reveal` 显示敏感值明文必须同时有敏感值密钥（`internal/app/snapshot.go` 的 `DecryptItem` 按 `secret` 选钥匙）。
 
-> env 覆盖只在无密钥库的环境（如 Linux 无 Secret Service 后端）兜底，属于红线密钥：不要导进 AI 会话、不要放命令行参数。
+> env 覆盖只在无密钥库的环境（如 Linux 无头服务器没有 Secret Service）兜底，属于红线密钥：不要导进 AI 会话、不要放命令行参数。
 
 ---
 
