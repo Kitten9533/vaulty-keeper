@@ -127,11 +127,11 @@ func (t *Tunnel) handle(ctx context.Context, client net.Conn, name string) {
 	clientAddr := client.RemoteAddr().String()
 	switch conn.Type {
 	case "redis":
-		err = handleRedis(client, u, t.Token)
+		err = handleRedis(client, u, t.Token, conn.Token)
 	case "postgres":
-		err = handlePostgres(client, u, t.Token)
+		err = handlePostgres(client, u, t.Token, conn.Token)
 	case "mysql":
-		err = handleMySQL(client, u, t.Token)
+		err = handleMySQL(client, u, t.Token, conn.Token)
 	default:
 		err = fmt.Errorf("unsupported type %q", conn.Type)
 	}
@@ -170,7 +170,14 @@ func splice(br io.Reader, client io.Writer, server io.ReadWriteCloser) {
 	<-done
 }
 
-// tokenOK does a constant-time comparison of the presented token.
-func tokenOK(presented, expected string) bool {
-	return subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) == 1
+// tokenOKAny does constant-time comparisons of the presented token against
+// every expected token (the connection's dedicated token and the global
+// bridge token), accepting if any matches. Every expected token is always
+// compared so timing does not reveal which one matched.
+func tokenOKAny(presented string, expected ...string) bool {
+	var ok byte = 0
+	for _, e := range expected {
+		ok |= byte(subtle.ConstantTimeCompare([]byte(presented), []byte(e)))
+	}
+	return ok == 1
 }

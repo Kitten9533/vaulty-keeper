@@ -58,6 +58,8 @@ func runDB(args []string) int {
 		return dbConnect(rest)
 	case "test":
 		return dbTest(rest)
+	case "regen":
+		return dbRegen(rest)
 	case "show":
 		return dbShow(rest)
 	case "help", "-h", "--help":
@@ -339,6 +341,64 @@ func mustURLPath(raw string) string {
 	return u.Path
 }
 
+// dbRegen regenerates the dedicated tunnel token of one connection (or every
+// connection with --all). The old token stops working immediately because the
+// tunnel re-checks it on every connection; the global bridge token used by
+// masked reads / container agents is unaffected. Safe for AI: it only prints
+// the tunnel token, never the real database URL or credentials.
+func dbRegen(args []string) int {
+	fs := flag.NewFlagSet("db regen", flag.ContinueOnError)
+	dir := fs.String("dir", "", "store directory")
+	all := fs.Bool("all", false, "regenerate the token of every connection")
+	if code, helped := parseFlags(fs, args); helped || code != 0 {
+		return code
+	}
+	if *all && fs.NArg() != 0 {
+		return fail("db regen: --all 时不接受连接名")
+	}
+	if !*all && fs.NArg() != 1 {
+		return fail("db regen: 用法：vaulty-keeper db regen <name> 或 vaulty-keeper db regen --all")
+	}
+	path, err := dbPath(*dir)
+	if err != nil {
+		return fail("db regen: %v", err)
+	}
+	key, err := apollo.DBKey()
+	if err != nil {
+		return fail("db regen: %v", err)
+	}
+	if *all {
+		names, err := dbproxy.RegenTokenAll(path, key)
+		if err != nil {
+			return fail("db regen: %v", err)
+		}
+		if len(names) == 0 {
+			fmt.Println("没有可重新生成 token 的连接")
+			return 0
+		}
+		fmt.Printf("已为 %d 个连接重新生成 token：%s\n", len(names), strings.Join(names, ", "))
+		return 0
+	}
+	name := fs.Arg(0)
+	tok, err := dbproxy.RegenToken(path, key, name)
+	if err != nil {
+		return fail("db regen: %v", err)
+	}
+	conn, err := dbproxy.Resolve(path, key, name)
+	if err != nil {
+		return fail("db regen: %v", err)
+	}
+	u, err := url.Parse(conn.URL)
+	if err != nil {
+		return fail("db regen: %v", err)
+	}
+	db := strings.TrimPrefix(u.Path, "/")
+	fmt.Printf("连接 %q 的新隧道 token：%s\n", name, tok)
+	fmt.Printf("新链接（本机）：%s\n", rawTunnelURL(conn.Type, tok, "127.0.0.1", conn.Port, db))
+	fmt.Printf("新链接（容器）：%s\n", rawTunnelURL(conn.Type, tok, "host.docker.internal", conn.Port, db))
+	return 0
+}
+
 // dbShow prints the decrypted real URL for a connection. TTY-only: like the
 // plaintext commands, it is never available to scripts/AI.
 func dbShow(args []string) int {
@@ -403,9 +463,13 @@ func dbConnect(args []string) int {
 	if err != nil {
 		return fail("db connect: %v", err)
 	}
-	token, err := bridgeToken()
-	if err != nil {
-		return fail("db connect: %v", err)
+	// Prefer the connection's dedicated token; fall back to the global bridge
+	// token for legacy connections that predate per-connection tokens.
+	token := conn.Token
+	if token == "" {
+		if token, err = bridgeToken(); err != nil {
+			return fail("db connect: %v", err)
+		}
 	}
 	h := *host
 	if *container {

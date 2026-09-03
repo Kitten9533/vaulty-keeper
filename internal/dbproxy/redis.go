@@ -19,7 +19,7 @@ import (
 //
 // The client never learns the real password: it authenticates with the bridge
 // token, and the real AUTH is sent host-side.
-func handleRedis(client net.Conn, u *url.URL, token string) error {
+func handleRedis(client net.Conn, u *url.URL, globalToken, connToken string) error {
 	br := bufio.NewReader(client)
 
 	args, err := readRESPCommand(br)
@@ -35,7 +35,7 @@ func handleRedis(client net.Conn, u *url.URL, token string) error {
 	if len(args) >= 2 && strings.EqualFold(string(args[0]), "AUTH") {
 		presented = string(args[len(args)-1])
 	}
-	if !tokenOK(presented, token) {
+	if !tokenOKAny(presented, globalToken, connToken) {
 		client.Write([]byte("-ERR authentication required\r\n"))
 		return errors.New("invalid bridge token")
 	}

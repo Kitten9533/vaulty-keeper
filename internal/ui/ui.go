@@ -94,6 +94,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("/api/db/connections", h.dbAdd)
 	mux.HandleFunc("/api/db/test", h.dbTest)
 	mux.HandleFunc("/api/db/test-url", h.dbTestURL)
+	mux.HandleFunc("/api/db/regen", h.dbRegen)
 	mux.HandleFunc("/api/db/connect", h.dbConnect)
 	mux.HandleFunc("/api/db/show", h.dbShow)
 	mux.HandleFunc("/api/db/connections/", func(w http.ResponseWriter, r *http.Request) {

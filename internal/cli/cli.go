@@ -1310,7 +1310,7 @@ const completionBash = `_vaulty_keeper() {
       ;;
     db)
       if [[ ${COMP_CWORD} -eq 2 ]]; then
-        COMPREPLY=( $(compgen -W "init add list test connect show rm shell help" -- "${cur}") )
+        COMPREPLY=( $(compgen -W "init add list test regen connect show rm shell help" -- "${cur}") )
       fi
       ;;
   esac
@@ -1332,7 +1332,7 @@ complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from apollo' -a 'init im
 complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from aes' -a 'encrypt decrypt gen-key list add help'
 complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from sensitive' -a 'init help'
 complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from remote' -a 'list get compare dblist help'
-complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from db' -a 'init add list test connect show rm shell help'
+complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from db' -a 'init add list test regen connect show rm shell help'
 `
 
 func runCompletion(args []string) int {

@@ -167,7 +167,7 @@
             <div id="db-form-result" class="db-form-result" hidden></div>
           </section>
           <section class="db-card">
-            <div class="sec-head"><h2>连接</h2><span id="db-count" class="count"></span></div>
+            <div class="sec-head"><h2>连接</h2><span class="sec-actions"><button class="ghost" type="button" id="db-regen-all-btn" title="所有连接的隧道 token 重新生成，旧链接立即失效">全部重新生成</button><span id="db-count" class="count"></span></span></div>
             <table class="aes-table" id="db-table">
               <thead><tr><th>名称</th><th>类型</th><th>端口</th><th>操作</th></tr></thead>
               <tbody id="db-body"></tbody>
@@ -468,6 +468,18 @@
     <div class="actions">
       <button type="button" class="ghost" data-close>取消</button>
       <button type="button" class="danger" id="db-delete-confirm-btn">删除</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="db-regen-dialog" aria-labelledby="db-regen-title">
+  <form method="dialog" class="dialog">
+    <h3 id="db-regen-title">重新生成隧道 token</h3>
+    <p id="db-regen-desc"></p>
+    <div id="db-regen-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="danger" id="db-regen-confirm-btn">重新生成</button>
     </div>
   </form>
 </dialog>

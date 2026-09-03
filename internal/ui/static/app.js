@@ -314,6 +314,7 @@ function renderDBTable() {
       : `<td class="row-actions">
           <button class="ghost" type="button" data-db-action="test" data-name="${escapeHtml(c.name)}">测试</button>
           <button class="ghost" type="button" data-db-action="connect" data-name="${escapeHtml(c.name)}">连接信息</button>
+          <button class="ghost" type="button" data-db-action="regen" data-name="${escapeHtml(c.name)}" title="重新生成隧道 token，旧链接立即失效">重新生成</button>
           <button class="ghost" type="button" data-db-action="show" data-name="${escapeHtml(c.name)}" hidden>查看URL</button>
           <button class="row-del" type="button" data-db-action="rm" data-name="${escapeHtml(c.name)}">删除</button>
         </td>`;
@@ -499,11 +500,14 @@ async function dbTest(name) {
   }
 }
 
-function showDBConnectDialog(res) {
+function showDBConnectDialog(res, regenerated) {
   $('db-connect-head').innerHTML =
     `<b>${escapeHtml(res.name)}</b><span class="tag">${escapeHtml(res.type)}</span><span class="port">:${res.port}</span>`;
   const note = $('db-connect-note');
-  if (res.note) {
+  if (regenerated) {
+    note.textContent = '已重新生成新 token，旧链接已立即失效';
+    note.hidden = false;
+  } else if (res.note) {
     note.textContent = res.note;
     note.hidden = false;
   } else {
@@ -561,6 +565,42 @@ async function confirmDBDelete() {
     loadDB();
   } catch (err) {
     dialogError('db-delete-dialog', err.message);
+  }
+}
+
+let regenTarget = null; // { all: true } or { name }
+
+function dbRegen(name) {
+  regenTarget = { name };
+  $('db-regen-desc').innerHTML =
+    `确定重新生成 <code>${escapeHtml(name)}</code> 的隧道 token 吗？旧链接将立即失效，此操作不可撤销（全局 bridge token 不受影响）。`;
+  openDialog('db-regen-dialog');
+}
+
+function dbRegenAll() {
+  regenTarget = { all: true };
+  $('db-regen-desc').textContent = '确定重新生成所有连接的隧道 token 吗？所有旧链接将立即失效，此操作不可撤销（全局 bridge token 不受影响）。';
+  openDialog('db-regen-dialog');
+}
+
+async function confirmDBRegen() {
+  if (!regenTarget) return;
+  try {
+    if (regenTarget.all) {
+      const res = await api('/api/db/regen', jsonOptions('POST', { all: true }));
+      closeDialog('db-regen-dialog');
+      regenTarget = null;
+      const n = (res.regenerated || []).length;
+      showDBError(n ? `已重新生成 ${n} 个连接的 token，旧链接已失效` : '没有可重新生成 token 的连接');
+      loadDB();
+    } else {
+      const res = await api('/api/db/regen', jsonOptions('POST', { name: regenTarget.name }));
+      closeDialog('db-regen-dialog');
+      regenTarget = null;
+      showDBConnectDialog(res, true);
+    }
+  } catch (err) {
+    dialogError('db-regen-dialog', err.message);
   }
 }
 
@@ -1744,6 +1784,7 @@ function wire() {
   $('db-init-btn').addEventListener('click', dbInit);
   $('db-add-btn').addEventListener('click', dbAdd);
   $('db-test-btn').addEventListener('click', dbTestURL);
+  $('db-regen-all-btn').addEventListener('click', dbRegenAll);
   $('db-body').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-db-action]');
     if (!btn) return;
@@ -1751,6 +1792,7 @@ function wire() {
     switch (btn.getAttribute('data-db-action')) {
       case 'test': dbTest(name); break;
       case 'connect': dbConnectInfo(name); break;
+      case 'regen': dbRegen(name); break;
       case 'show': dbShow(name); break;
       case 'rm': dbRemove(name); break;
     }
@@ -1790,6 +1832,7 @@ function wire() {
 
   $('snap-delete-confirm-btn').addEventListener('click', confirmDeleteSnapshot);
   $('db-delete-confirm-btn').addEventListener('click', confirmDBDelete);
+  $('db-regen-confirm-btn').addEventListener('click', confirmDBRegen);
 
   $('export-copy-btn').addEventListener('click', copyExport);
 

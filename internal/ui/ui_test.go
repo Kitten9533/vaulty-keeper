@@ -1140,11 +1140,14 @@ func TestDBListAddConnectRemove(t *testing.T) {
 		t.Fatalf("db list missing connection: %s", w.Body.String())
 	}
 
-	// connect info: token-based, no real password
+	// connect info: per-connection tunnel token, no real password
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/connect?name=pg", nil))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "bridge-tok") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"token":"`) {
 		t.Fatalf("connect = %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "bridge-tok") {
+		t.Fatalf("connect should use a per-connection token, not the global bridge token: %s", w.Body.String())
 	}
 	if strings.Contains(w.Body.String(), "realpass") || strings.Contains(w.Body.String(), "db.internal") {
 		t.Fatalf("connect leaked real credentials: %s", w.Body.String())
@@ -1306,5 +1309,98 @@ func TestDBTestURLGatedByToken(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("test-url bad payload = %d, want 400", w.Code)
+	}
+}
+
+// addConn adds a connection via the plaintext legacy field.
+func addConn(t *testing.T, h http.Handler, name, dsn string) {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodPost, "/api/db/connections",
+		bytes.NewBufferString(fmt.Sprintf(`{"name":%q,"url":%q}`, name, dsn)))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("add %s = %d: %s", name, w.Code, w.Body.String())
+	}
+}
+
+func connectToken(t *testing.T, h http.Handler, name string) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/connect?name="+name, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("connect %s = %d", name, w.Code)
+	}
+	var out struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("connect %s json: %v", name, err)
+	}
+	if out.Token == "" {
+		t.Fatalf("connect %s: empty token", name)
+	}
+	return out.Token
+}
+
+func TestDBRegenToken(t *testing.T) {
+	h := newDBHandler(t, true)
+	addConn(t, h, "pg", "postgres://app:realpass@db.internal:5432/appdb")
+	addConn(t, h, "rd", "redis://:rpw@db.internal:6379/0")
+
+	// regen requires the token
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/db/regen",
+		bytes.NewBufferString(`{"name":"pg"}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("regen without token = %d, want 401", w.Code)
+	}
+
+	old := connectToken(t, h, "pg")
+	oldRD := connectToken(t, h, "rd")
+
+	// single regen: new token differs, and connect now returns it
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/db/regen", bytes.NewBufferString(`{"name":"pg"}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("regen pg = %d: %s", w.Code, w.Body.String())
+	}
+	newTok := connectToken(t, h, "pg")
+	if newTok == old {
+		t.Fatalf("regen did not rotate the token: %q", newTok)
+	}
+	if connectToken(t, h, "rd") != oldRD {
+		t.Fatalf("regen of one connection must not affect another")
+	}
+	if strings.Contains(w.Body.String(), "realpass") || strings.Contains(w.Body.String(), "db.internal") {
+		t.Fatalf("regen response leaked real credentials: %s", w.Body.String())
+	}
+
+	// regen all: both connections rotate
+	rdAfterSingle := connectToken(t, h, "rd")
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/regen", bytes.NewBufferString(`{"all":true}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("regen all = %d: %s", w.Code, w.Body.String())
+	}
+	if connectToken(t, h, "pg") == newTok {
+		t.Fatalf("regen all did not rotate pg token")
+	}
+	if connectToken(t, h, "rd") == rdAfterSingle {
+		t.Fatalf("regen all did not rotate rd token")
+	}
+
+	// unknown name -> 4xx
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/regen", bytes.NewBufferString(`{"name":"nope"}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusNotFound {
+		t.Fatalf("regen unknown = %d, want 4xx", w.Code)
 	}
 }

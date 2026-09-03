@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -99,7 +100,8 @@ func TestDBShellRejectedWhenPiped(t *testing.T) {
 func TestDBConnectPrintsReadyCommand(t *testing.T) {
 	dir := dbTestEnv(t)
 	db := filepath.Join(dir, "db")
-	// serve 运行时的 token 文件
+	// The serve-time global bridge token still exists; a fresh connection gets
+	// its own dedicated token and db connect must use that, not the global one.
 	t.Setenv("VAULTY_KEEPER_BRIDGE_TOKEN", "tok-abc123")
 	withStdin(t, "postgres://app:pgpass@db.example.com:5432/appdb\n")
 	if code := Run([]string{"db", "add", "pgdb", "--dir", db}); code != 0 {
@@ -110,7 +112,15 @@ func TestDBConnectPrintsReadyCommand(t *testing.T) {
 			t.Fatalf("db connect failed: %d", code)
 		}
 	})
-	want := `psql "postgresql://tok-abc123@127.0.0.1:15432/appdb"`
+	tokRe := regexp.MustCompile(`postgresql://([0-9a-f]{32})@`)
+	m := tokRe.FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("db connect --cmd has no 32-hex per-connection token: %q", out)
+	}
+	if m[1] == "tok-abc123" {
+		t.Fatalf("db connect should use the per-connection token, not the global bridge token: %q", out)
+	}
+	want := `psql "postgresql://` + m[1] + `@127.0.0.1:15432/appdb"`
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("db connect --cmd = %q, want %q", out, want)
 	}
@@ -127,8 +137,8 @@ func TestDBConnectPrintsReadyCommand(t *testing.T) {
 	})
 	for _, wantSub := range []string{
 		"原始隧道链接",
-		"postgresql://tok-abc123@127.0.0.1:15432/appdb",
-		"jdbc:postgresql://127.0.0.1:15432/appdb?user=tok-abc123",
+		"postgresql://" + m[1] + "@127.0.0.1:15432/appdb",
+		"jdbc:postgresql://127.0.0.1:15432/appdb?user=" + m[1],
 		"pgAdmin4",
 	} {
 		if !strings.Contains(out, wantSub) {
@@ -146,6 +156,58 @@ func TestDBConnectPrintsReadyCommand(t *testing.T) {
 	})
 	if !strings.Contains(out, "host.docker.internal") {
 		t.Fatalf("db connect --container should use host.docker.internal: %q", out)
+	}
+}
+
+func TestDBRegenToken(t *testing.T) {
+	dir := dbTestEnv(t)
+	db := filepath.Join(dir, "db")
+	add := func(name, dsn string) {
+		t.Helper()
+		withStdin(t, dsn+"\n")
+		if code := Run([]string{"db", "add", name, "--dir", db}); code != 0 {
+			t.Fatalf("db add %s failed: %d", name, code)
+		}
+	}
+	connTok := func(name string) string {
+		t.Helper()
+		out := captureStdout(t, func() {
+			if code := Run([]string{"db", "connect", name, "--cmd", "--dir", db}); code != 0 {
+				t.Fatalf("db connect %s failed: %d", name, code)
+			}
+		})
+		m := regexp.MustCompile(`[0-9a-f]{32}`).FindString(out)
+		if m == "" {
+			t.Fatalf("no token in connect output for %s: %q", name, out)
+		}
+		return m
+	}
+	add("pg", "postgres://app:pgpass@db.example.com:5432/appdb")
+	add("rd", "redis://:pw@db.example.com:6379/0")
+
+	oldPG, oldRD := connTok("pg"), connTok("rd")
+	out := captureStdout(t, func() {
+		if code := Run([]string{"db", "regen", "pg", "--dir", db}); code != 0 {
+			t.Fatalf("db regen pg failed: %d", code)
+		}
+	})
+	if strings.Contains(out, "pgpass") || strings.Contains(out, "db.example.com") {
+		t.Fatalf("db regen leaked real credentials: %q", out)
+	}
+	if newPG := connTok("pg"); newPG == oldPG {
+		t.Fatalf("db regen did not rotate the token")
+	}
+	if connTok("rd") != oldRD {
+		t.Fatalf("db regen of one connection must not affect another")
+	}
+
+	out = captureStdout(t, func() {
+		if code := Run([]string{"db", "regen", "--all", "--dir", db}); code != 0 {
+			t.Fatalf("db regen --all failed: %d", code)
+		}
+	})
+	if !strings.Contains(out, "已为 2 个连接") {
+		t.Fatalf("db regen --all summary missing: %q", out)
 	}
 }
 

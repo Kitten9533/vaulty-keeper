@@ -334,7 +334,7 @@ type dbClientLine struct {
 	Line  string `json:"line"`
 }
 
-// dbConnect returns connect info for a connection (bridge token embedded, not
+// dbConnect returns connect info for a connection (tunnel token embedded, not
 // the real database password).
 func (h *handler) dbConnect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -361,7 +361,21 @@ func (h *handler) dbConnect(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("container") == "1" {
 		host = "host.docker.internal"
 	}
-	token := uiBridgeToken()
+	token := conn.Token
+	if token == "" {
+		token = uiBridgeToken() // legacy connections fall back to the global token
+	}
+	info, err := buildConnectInfo(conn, token, host)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "unsupported_db_type", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+// buildConnectInfo renders the ready-to-run client links for a connection
+// using the given tunnel token.
+func buildConnectInfo(conn dbproxy.Conn, token, host string) (dbConnectInfo, error) {
 	info := dbConnectInfo{Name: conn.Name, Type: conn.Type, Port: conn.Port, Token: token, Host: host}
 	db := dbName(conn.URL)
 	if token == "" {
@@ -395,7 +409,65 @@ func (h *handler) dbConnect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	default:
-		writeAPIError(w, http.StatusBadRequest, "unsupported_db_type", fmt.Sprintf("不支持的数据库类型 %q", conn.Type))
+		return info, fmt.Errorf("不支持的数据库类型 %q", conn.Type)
+	}
+	return info, nil
+}
+
+type dbRegenRequest struct {
+	Name string `json:"name"`
+	All  bool   `json:"all"`
+}
+
+// dbRegen regenerates the tunnel token of one connection (or all with
+// all:true) and returns the fresh connect info for a single connection. The
+// old token stops working immediately (the tunnel re-checks on every
+// connection). Token-gated; never returns the real URL or credentials.
+func (h *handler) dbRegen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		return
+	}
+	store, ok := h.dbStore()
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "未配置数据库存储")
+		return
+	}
+	var req dbRegenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		return
+	}
+	key, err := h.dbKey()
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用")
+		return
+	}
+	if req.All {
+		names, err := dbproxy.RegenTokenAll(store, key)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "db_regen_failed", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "regenerated": names})
+		return
+	}
+	if req.Name == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_db_regen", "缺少 name（或 all:true）")
+		return
+	}
+	if _, err := dbproxy.RegenToken(store, key, req.Name); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "db_regen_failed", err.Error())
+		return
+	}
+	conn, err := dbproxy.Resolve(store, key, req.Name)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "db_not_found", err.Error())
+		return
+	}
+	info, err := buildConnectInfo(conn, conn.Token, "127.0.0.1")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "unsupported_db_type", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, info)

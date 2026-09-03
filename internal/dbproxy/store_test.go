@@ -251,3 +251,66 @@ func TestKeyMismatchDiagnosedPrecisely(t *testing.T) {
 		t.Fatalf("mismatch error should suggest re-register: %v", err)
 	}
 }
+
+func TestRegenToken(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	if err := Add(path, key, "m", "redis://h", 0); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Resolve(path, key, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Token) != 32 {
+		t.Fatalf("fresh connection should have a 32-hex dedicated token, got %q", c.Token)
+	}
+	old := c.Token
+
+	// legacy entries (no token_cipher) resolve with an empty token -> global fallback
+	// path in the tunnel (reproduced by writing a store without the token fields).
+	// RegenToken rotates only the target and keeps the URL intact.
+	tok, err := RegenToken(path, key, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok == old || len(tok) != 32 {
+		t.Fatalf("RegenToken should return a fresh 32-hex token, got %q (old %q)", tok, old)
+	}
+	c2, err := Resolve(path, key, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c2.Token != tok {
+		t.Fatalf("Resolve should return the regenerated token: got %q want %q", c2.Token, tok)
+	}
+	if c2.URL != c.URL || c2.Port != c.Port {
+		t.Fatalf("RegenToken must not touch URL/port: %+v vs %+v", c2, c)
+	}
+
+	// RegenTokenAll rotates every connection.
+	if err := Add(path, key, "n", "postgres://h", 0); err != nil {
+		t.Fatal(err)
+	}
+	names, err := RegenTokenAll(path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 {
+		t.Fatalf("RegenTokenAll should cover 2 connections, got %v", names)
+	}
+	m2, _ := Resolve(path, key, "m")
+	n2, _ := Resolve(path, key, "n")
+	if m2.Token == tok {
+		t.Fatalf("RegenTokenAll did not rotate m")
+	}
+	if len(n2.Token) != 32 {
+		t.Fatalf("RegenTokenAll should give n a token, got %q", n2.Token)
+	}
+
+	// unknown name
+	if _, err := RegenToken(path, key, "zzz"); err == nil {
+		t.Fatal("RegenToken of unknown connection should fail")
+	}
+}

@@ -42,7 +42,7 @@ const myServerVersion = "5.7.0-proxy"
 // caching_sha2_password fast/full auth) and completes the handshake, including
 // the TLS upgrade when the URL has tls=true. Then the raw byte streams are
 // spliced.
-func handleMySQL(client net.Conn, u *url.URL, token string) error {
+func handleMySQL(client net.Conn, u *url.URL, globalToken, connToken string) error {
 	// ---- client side: fake server ----
 	clientBR := bufio.NewReader(client)
 	salt := make([]byte, 20)
@@ -60,7 +60,7 @@ func handleMySQL(client net.Conn, u *url.URL, token string) error {
 	if err != nil {
 		return err
 	}
-	if !tokenOK(user, token) {
+	if !tokenOKAny(user, globalToken, connToken) {
 		return errors.New("invalid bridge token in username field")
 	}
 	if err := myWritePacket(client, 2, myOKPacket()); err != nil {

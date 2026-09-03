@@ -41,14 +41,17 @@ var connNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // Conn is one decrypted connection. URL is in memory only and must never be
 // serialized, logged, or returned to a tunnel client (json:"-" is a hard
-// guarantee it never appears in any JSON output). Broken marks an entry whose
-// ciphertext cannot be decrypted with the current key (stale key); it is still
-// listed so it can be removed, but has no usable URL.
+// guarantee it never appears in any JSON output). Token is the connection's
+// dedicated tunnel token (empty for legacy entries, which then use the global
+// bridge token). Broken marks an entry whose ciphertext cannot be decrypted
+// with the current key (stale key); it is still listed so it can be removed,
+// but has no usable URL.
 type Conn struct {
 	Name   string `json:"name"`
 	Type   string `json:"type"`
 	URL    string `json:"-"`
 	Port   int    `json:"port"`
+	Token  string `json:"-"`
 	Broken bool   `json:"broken,omitempty"`
 }
 
@@ -57,13 +60,16 @@ type Conn struct {
 // fingerprint of the encryption key, so a key mismatch can be diagnosed
 // precisely instead of surfacing as a cryptic "message authentication failed".
 // Type is stored in plaintext so listing needs no decryption (a stale-key
-// entry cannot block the whole list).
+// entry cannot block the whole list). TokenEnc/TokenNonce hold the
+// connection's dedicated tunnel token, sealed with the same DB key.
 type storedConn struct {
-	URLEnc string `json:"url_cipher"`
-	Nonce  string `json:"nonce"`
-	KeyID  string `json:"key_id,omitempty"`
-	Type   string `json:"type,omitempty"`
-	Port   int    `json:"port,omitempty"`
+	URLEnc     string `json:"url_cipher"`
+	Nonce      string `json:"nonce"`
+	KeyID      string `json:"key_id,omitempty"`
+	Type       string `json:"type,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	TokenEnc   string `json:"token_cipher,omitempty"`
+	TokenNonce string `json:"token_nonce,omitempty"`
 }
 
 type store struct {
@@ -109,29 +115,27 @@ func keyID(key []byte) string {
 	return hex.EncodeToString(h[:8])
 }
 
-// encryptConn seals a URL with the database key.
-func encryptConn(key []byte, raw string) (storedConn, error) {
+// seal encrypts a small string (URL or tunnel token) with AES-256-GCM under
+// the database key and returns base64 ciphertext + nonce.
+func seal(key []byte, raw string) (ctB64, nonceB64 string, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return storedConn{}, err
+		return "", "", err
 	}
 	g, err := cipher.NewGCM(block)
 	if err != nil {
-		return storedConn{}, err
+		return "", "", err
 	}
 	nonce := make([]byte, g.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return storedConn{}, err
+		return "", "", err
 	}
 	ct := g.Seal(nil, nonce, []byte(raw), nil)
-	return storedConn{
-		URLEnc: base64.StdEncoding.EncodeToString(ct),
-		Nonce:  base64.StdEncoding.EncodeToString(nonce),
-		KeyID:  keyID(key),
-	}, nil
+	return base64.StdEncoding.EncodeToString(ct), base64.StdEncoding.EncodeToString(nonce), nil
 }
 
-func (s storedConn) decryptConn(key []byte) (string, error) {
+// open reverses seal.
+func open(key []byte, ctB64, nonceB64 string) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
@@ -140,19 +144,50 @@ func (s storedConn) decryptConn(key []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	nonce, err := base64.StdEncoding.DecodeString(s.Nonce)
+	nonce, err := base64.StdEncoding.DecodeString(nonceB64)
 	if err != nil {
 		return "", err
 	}
-	ct, err := base64.StdEncoding.DecodeString(s.URLEnc)
+	ct, err := base64.StdEncoding.DecodeString(ctB64)
 	if err != nil {
 		return "", err
 	}
 	pt, err := g.Open(nil, nonce, ct, nil)
 	if err != nil {
-		return "", fmt.Errorf("解密连接失败：%w", err)
+		return "", err
 	}
 	return string(pt), nil
+}
+
+// encryptConn seals a URL with the database key.
+func encryptConn(key []byte, raw string) (storedConn, error) {
+	ct, nonce, err := seal(key, raw)
+	if err != nil {
+		return storedConn{}, err
+	}
+	return storedConn{
+		URLEnc: ct,
+		Nonce:  nonce,
+		KeyID:  keyID(key),
+	}, nil
+}
+
+func (s storedConn) decryptConn(key []byte) (string, error) {
+	pt, err := open(key, s.URLEnc, s.Nonce)
+	if err != nil {
+		return "", fmt.Errorf("解密连接失败：%w", err)
+	}
+	return pt, nil
+}
+
+// newToken generates a fresh 128-bit tunnel token (hex), matching the length
+// of the global bridge token.
+func newToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func load(path string, key []byte) (*store, error) {
@@ -238,10 +273,75 @@ func Add(path string, key []byte, name, rawURL string, port int) error {
 	if err != nil {
 		return err
 	}
+	tok, err := newToken()
+	if err != nil {
+		return err
+	}
+	if sc.TokenEnc, sc.TokenNonce, err = seal(key, tok); err != nil {
+		return err
+	}
 	sc.Type = typ
 	sc.Port = allocated
 	s.Conns[name] = sc
 	return s.save(path)
+}
+
+// RegenToken replaces the dedicated tunnel token of one connection and
+// returns the new token. The old token stops working immediately (tunnels
+// re-check on every connection); the global bridge token is unaffected.
+func RegenToken(path string, key []byte, name string) (string, error) {
+	if err := ValidateConnName(name); err != nil {
+		return "", err
+	}
+	s, err := load(path, key)
+	if err != nil {
+		return "", err
+	}
+	sc, ok := s.Conns[name]
+	if !ok {
+		return "", fmt.Errorf("连接 %q 不存在", name)
+	}
+	tok, err := newToken()
+	if err != nil {
+		return "", err
+	}
+	if sc.TokenEnc, sc.TokenNonce, err = seal(key, tok); err != nil {
+		return "", err
+	}
+	s.Conns[name] = sc
+	if err := s.save(path); err != nil {
+		return "", err
+	}
+	return tok, nil
+}
+
+// RegenTokenAll replaces the dedicated tunnel token of every connection and
+// returns the connection names that were updated.
+func RegenTokenAll(path string, key []byte) ([]string, error) {
+	s, err := load(path, key)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(s.Conns))
+	for n, sc := range s.Conns {
+		tok, err := newToken()
+		if err != nil {
+			return nil, err
+		}
+		if sc.TokenEnc, sc.TokenNonce, err = seal(key, tok); err != nil {
+			return nil, err
+		}
+		s.Conns[n] = sc
+		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return names, nil
+	}
+	sort.Strings(names)
+	if err := s.save(path); err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // Remove deletes a named connection.
@@ -314,7 +414,14 @@ func Resolve(path string, key []byte, name string) (Conn, error) {
 	if err != nil {
 		return Conn{}, err
 	}
-	return Conn{Name: name, Type: typ, URL: raw, Port: sc.Port}, nil
+	tok := ""
+	if sc.TokenEnc != "" {
+		tok, err = open(key, sc.TokenEnc, sc.TokenNonce)
+		if err != nil {
+			return Conn{}, fmt.Errorf("连接 %q 的隧道令牌无法解密（%v）；用 'vaulty-keeper db regen %s' 重新生成", name, err, name)
+		}
+	}
+	return Conn{Name: name, Type: typ, URL: raw, Port: sc.Port, Token: tok}, nil
 }
 
 // keyMismatchErr rewrites a decrypt failure into a precise diagnosis when the

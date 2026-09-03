@@ -29,7 +29,7 @@ import (
 // Because the auth messages on both sides are consumed by pgproto3 and the
 // real server's ParameterStatus/ReadyForQuery are re-synthesized for the
 // client, the raw byte splice carries only the session traffic that follows.
-func handlePostgres(client net.Conn, u *url.URL, token string) error {
+func handlePostgres(client net.Conn, u *url.URL, globalToken, connToken string) error {
 	// ---- client side: fake server ----
 	backend := pgproto3.NewBackend(client, client)
 	var startup *pgproto3.StartupMessage
@@ -44,7 +44,7 @@ func handlePostgres(client net.Conn, u *url.URL, token string) error {
 				return err
 			}
 		case *pgproto3.StartupMessage:
-			if !tokenOK(m.Parameters["user"], token) {
+			if !tokenOKAny(m.Parameters["user"], globalToken, connToken) {
 				return errors.New("invalid bridge token in user field")
 			}
 			startup = m

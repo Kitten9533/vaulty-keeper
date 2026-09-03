@@ -313,18 +313,35 @@ dialog::backdrop{background:rgba(38,38,36,.28)}
 .db-card .row-actions button:hover{background:#f7f5f0}
 .db-card .row-actions .primary{background:var(--ink);border-color:var(--ink);color:#fff}
 .db-card .row-actions .primary:hover{background:#3a3834}
+.db-card .sec-actions{display:flex;align-items:center;gap:10px}
+.db-card .sec-actions .ghost{margin:0;border:1px solid #e8e3da;background:#fff;color:#6b665f;font-size:10.5px;line-height:1;border-radius:5px;padding:3px 7px;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+.db-card .sec-actions .ghost:hover{background:#f6f4ef;border-color:#dcd5c9;color:#4a4641}
+.db-card .sec-actions #db-regen-all-btn{background:#fdf1e3;border-color:#f2ddc2;color:#9c5f1e}
+.db-card .sec-actions #db-regen-all-btn:hover{background:#f9e8d0;border-color:#ebcfa9;color:#8c5318}
 .db-card .field textarea{font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
 .db-form-result{margin:14px 0 0;padding:10px 12px;border-radius:10px;font-size:12.5px;line-height:1.55;white-space:pre-wrap}
 .db-form-result.ok{color:var(--green);background:var(--green-soft)}
 .db-form-result.fail{color:#8a3b2a;background:#fbeae4;border:1px solid #f0d3c8}
 .db-empty{padding:24px 10px;color:var(--faint);font-size:12.5px;text-align:center;border:1px dashed var(--line);border-radius:10px;line-height:1.7}
-#db-table .row-actions{white-space:nowrap}
-#db-table .row-actions .ghost{margin-left:6px;border:1px solid var(--line);background:#fff;color:#4a4641;font-size:11.5px;border-radius:6px;padding:4px 9px;cursor:pointer}
-#db-table .row-actions .ghost:hover{background:#f7f5f0}
-#db-table .row-actions .ghost:disabled{color:#c7c1b8;cursor:default}
+#db-table .row-actions{white-space:nowrap;text-align:right}
+#db-table .row-actions .ghost{margin-left:5px;border:1px solid #e8e3da;background:#fff;color:#6b665f;font-size:10.5px;line-height:1;border-radius:5px;padding:3px 7px;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+#db-table .row-actions .ghost:hover{background:#f6f4ef;border-color:#dcd5c9;color:#4a4641}
+#db-table .row-actions .ghost:disabled{color:#c7c1b8;cursor:default;background:#fff}
 #db-table .row-actions .ghost:disabled:hover{background:#fff}
-.row-del{margin-left:8px;border:1px solid var(--line);background:#fff;color:#b3573f;font-size:11.5px;line-height:1;cursor:pointer;padding:4px 9px;border-radius:7px;transition:background .12s,color .12s,border-color .12s}
-.row-del:hover{color:#fff;background:#b3573f;border-color:#b3573f}
+#db-table .row-actions .row-del{margin-left:5px;border:1px solid #e8e3da;background:#fff;color:#b3573f;font-size:10.5px;line-height:1;cursor:pointer;padding:3px 7px;border-radius:5px;transition:background .12s,color .12s,border-color .12s}
+#db-table .row-actions .row-del:hover{color:#fff;background:#b3573f;border-color:#b3573f}
+
+/* row action buttons: distinct tinted backgrounds so each action reads at a glance */
+#db-table .row-actions [data-db-action="test"]{background:#e8f1ec;border-color:#d3e4d8;color:#2f6a4b}
+#db-table .row-actions [data-db-action="test"]:hover{background:#dcebe2;border-color:#c2dacb;color:#2a5f43}
+#db-table .row-actions [data-db-action="connect"]{background:#eaf1f7;border-color:#d3e2f0;color:#37648c}
+#db-table .row-actions [data-db-action="connect"]:hover{background:#dde9f2;border-color:#c3d8e9;color:#315a7e}
+#db-table .row-actions [data-db-action="regen"]{background:#fdf1e3;border-color:#f2ddc2;color:#9c5f1e}
+#db-table .row-actions [data-db-action="regen"]:hover{background:#f9e8d0;border-color:#ebcfa9;color:#8c5318}
+#db-table .row-actions [data-db-action="show"]{background:#f1ecf8;border-color:#e3d9f0;color:#695692}
+#db-table .row-actions [data-db-action="show"]:hover{background:#e9e1f3;border-color:#d7c9e8;color:#5e4c83}
+#db-table .row-actions [data-db-action="rm"]{background:#fbeae4;border-color:#f0d3c8;color:#a44c35}
+#db-table .row-actions [data-db-action="rm"]:hover{color:#fff;background:#b3573f;border-color:#b3573f}
 .db-result-row td{padding:8px 10px;font-size:12.5px;line-height:1.5}
 .db-result.ok{color:var(--green);background:var(--green-soft)}
 .db-result.fail{color:#8a3b2a;background:#fbeae4}

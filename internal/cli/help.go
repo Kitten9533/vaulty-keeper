@@ -57,6 +57,7 @@ var commandHelp = []cmdHelp{
 	{domain: "db", path: "db add", syntax: "vaulty-keeper db add <name> [--port <port>] [--test] [--dir <dir>]", desc: "注册连接（URL 从 stdin 读，加密落盘；--test 先验证）"},
 	{domain: "db", path: "db list", syntax: "vaulty-keeper db list [--json] [--dir <dir>]", desc: "列出连接（name/type/port，不含 URL）"},
 	{domain: "db", path: "db test", syntax: "vaulty-keeper db test <name> [--dir <dir>]", desc: "验证注册的连接可用（AI 安全，不打印 URL）"},
+	{domain: "db", path: "db regen", syntax: "vaulty-keeper db regen <name> | --all [--dir <dir>]", desc: "重新生成隧道 token（单个连接或全部），旧 token 立即失效"},
 	{domain: "db", path: "db connect", syntax: "vaulty-keeper db connect <name> [--container] [--cmd] [--host <host>] [--dir <dir>]", desc: "打印带 token 的现成客户端命令"},
 	{domain: "db", path: "db show", syntax: "vaulty-keeper db show <name> [--dir <dir>]", desc: "打印解密后的真实 URL（仅 TTY）"},
 	{domain: "db", path: "db rm", syntax: "vaulty-keeper db rm <name> [--yes] [--dir <dir>]", desc: "删除一个连接（非 TTY 需 --yes）"},
