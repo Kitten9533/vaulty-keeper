@@ -16,18 +16,18 @@ import (
 //	iv:        iv string as UTF-8 bytes, passed straight to GCM
 //	cipher:    base64 string
 
-var ErrInvalidKey = errors.New("secret key must be 16, 24 or 32 bytes (UTF-8)")
+var ErrInvalidKey = errors.New("密钥长度必须为 16、24 或 32 字节（UTF-8）")
 
 func gcm(secretKey, iv string) (cipher.AEAD, []byte, error) {
 	kb := []byte(secretKey)
 	switch len(kb) {
 	case 16, 24, 32:
 	default:
-		return nil, nil, fmt.Errorf("%w: got %d bytes", ErrInvalidKey, len(kb))
+		return nil, nil, fmt.Errorf("%w：实际 %d 字节", ErrInvalidKey, len(kb))
 	}
 	ivb := []byte(iv)
 	if len(ivb) == 0 {
-		return nil, nil, errors.New("iv must not be empty")
+		return nil, nil, errors.New("iv 不能为空")
 	}
 	block, err := aes.NewCipher(kb)
 	if err != nil {
@@ -58,11 +58,11 @@ func Decrypt(secretKey, iv, ciphertext string) (string, error) {
 	}
 	ct, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
-		return "", fmt.Errorf("invalid base64 ciphertext: %w", err)
+		return "", fmt.Errorf("非法的 base64 密文：%w", err)
 	}
 	pt, err := g.Open(nil, ivb, ct, nil)
 	if err != nil {
-		return "", fmt.Errorf("decrypt failed (wrong key/iv or corrupted ciphertext): %w", err)
+		return "", fmt.Errorf("解密失败（key/iv 错误或密文损坏）：%w", err)
 	}
 	return string(pt), nil
 }

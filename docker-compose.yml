@@ -1,0 +1,49 @@
+# ai-tools agent container: isolates agent CLIs (codex/claude/opencode/pi)
+# from the host. The host runs 'ai-tools serve' and holds the snapshot keys;
+# this container only ever receives masked values via the bridge token.
+#
+# Usage:
+#   1. On the host (with the keys):
+#        ai-tools serve --addr 0.0.0.0:8970
+#      (0.0.0.0 makes the bridge reachable from the Docker VM; the token gates
+#       it and it only ever returns masked values.)
+#   2. Start the container:
+#        export AI_TOOLS_BRIDGE_TOKEN="$(cat ~/.ai-tools/bridge-token)"
+#        docker compose up -d
+#   3. Run an agent CLI inside:
+#        docker compose exec agent codex
+#      (or let the entrypoint install CLIs first, see AI_TOOLS_INSTALL_AGENTS)
+#
+# Mounting: only the project dir is mounted. The host's ~/.ai-tools,
+# Keychain/Credential Manager, ~/.ssh and the docker socket are deliberately
+# NOT mounted, so an agent inside cannot read keys or ciphertext.
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-tools-agent:local
+    container_name: ai-tools-agent
+    stdin_open: true
+    tty: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      AI_TOOLS_BRIDGE_ADDR: ${AI_TOOLS_BRIDGE_ADDR:-http://host.docker.internal:8970}
+      AI_TOOLS_BRIDGE_TOKEN: "${AI_TOOLS_BRIDGE_TOKEN:?export AI_TOOLS_BRIDGE_TOKEN (host: cat ~/.ai-tools/bridge-token)}"
+      AI_TOOLS_INSTALL_AGENTS: ${AI_TOOLS_INSTALL_AGENTS:-}
+    extra_hosts:
+      # Makes host.docker.internal work on Linux Docker (harmless on Docker
+      # Desktop for macOS/Windows, where it is already provided).
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${AI_TOOLS_PROJECT_DIR:-./}:/workspace
+      # Persist the agent's home (installed CLIs, session history) across
+      # container recreations. The host's secrets are still never mounted.
+      - agent-home:/home/agent
+    working_dir: /workspace
+volumes:
+  agent-home:

@@ -1,6 +1,9 @@
 package apollo
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 )
@@ -58,4 +61,17 @@ func Mask() string {
 // secret actually changed in size.
 func MaskWithLen(n int) string {
 	return fmt.Sprintf("*** (%d chars)", n)
+}
+
+// Fingerprint returns an HMAC-SHA256 fingerprint (8 bytes, hex) of the
+// normalized value keyed by hmacKey, so two masked values can be compared for
+// equality without exposing the plaintext. Without hmacKey an attacker cannot
+// offline-enumerate weak values and match fingerprints.
+func Fingerprint(value string, hmacKey []byte) string {
+	if hmacKey == nil {
+		return ""
+	}
+	mac := hmac.New(sha256.New, hmacKey)
+	mac.Write([]byte(NormValue(value)))
+	return hex.EncodeToString(mac.Sum(nil)[:8])
 }

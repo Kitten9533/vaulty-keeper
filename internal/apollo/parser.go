@@ -21,6 +21,23 @@ type KV struct {
 	Value string
 }
 
+// Warning describes a non-fatal parse issue (auto-split / skipped line).
+// Line is 1-based, Content is the offending raw line/segment so the user can
+// locate it in their paste.
+type Warning struct {
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+	Content string `json:"content"`
+}
+
+func (w Warning) String() string {
+	s := fmt.Sprintf("line %d: %s", w.Line, w.Message)
+	if w.Content != "" {
+		s += fmt.Sprintf(": %q", w.Content)
+	}
+	return s
+}
+
 var (
 	keyRe    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
 	splitRe  = regexp.MustCompile(`[A-Z][A-Z0-9_]*\s*=`)
@@ -28,10 +45,10 @@ var (
 )
 
 // ParseKV returns parsed items plus non-fatal warnings (auto-split / skipped).
-func ParseKV(text string) ([]KV, []string) {
+func ParseKV(text string) ([]KV, []Warning) {
 	var (
 		items    []KV
-		warnings []string
+		warnings []Warning
 	)
 	for i, raw := range strings.Split(text, "\n") {
 		lineNo := i + 1
@@ -41,12 +58,20 @@ func ParseKV(text string) ([]KV, []string) {
 		}
 		segs := splitSegments(line)
 		if len(segs) > 1 {
-			warnings = append(warnings, fmt.Sprintf("line %d: auto-split %d merged entries, please verify", lineNo, len(segs)))
+			warnings = append(warnings, Warning{
+				Line:    lineNo,
+				Message: fmt.Sprintf("自动拆分 %d 个粘连条目，请核对", len(segs)),
+				Content: line,
+			})
 		}
 		for _, seg := range segs {
 			key, value, ok := parseOne(seg)
 			if !ok {
-				warnings = append(warnings, fmt.Sprintf("line %d: skipped (no '=' or invalid key): %q", lineNo, strings.TrimSpace(seg)))
+				warnings = append(warnings, Warning{
+					Line:    lineNo,
+					Message: "已跳过（缺少 '=' 或 key 非法）",
+					Content: strings.TrimSpace(seg),
+				})
 				continue
 			}
 			items = append(items, KV{Key: key, Value: value})
@@ -58,7 +83,7 @@ func ParseKV(text string) ([]KV, []string) {
 // ValidateKey reports whether key is a valid Apollo key name.
 func ValidateKey(key string) error {
 	if !keyRe.MatchString(key) {
-		return fmt.Errorf("invalid key %q", key)
+		return fmt.Errorf("非法的 key %q", key)
 	}
 	return nil
 }

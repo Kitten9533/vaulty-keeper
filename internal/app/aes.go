@@ -91,10 +91,10 @@ func AESConfigSave(entries []AESEntry) error {
 // AESConfigAdd appends a named entry. The name must be unique.
 func AESConfigAdd(name, key, iv string) error {
 	if name == "" {
-		return errors.New("name is required")
+		return errors.New("name 必填")
 	}
 	if key == "" || iv == "" {
-		return errors.New("key and iv are required")
+		return errors.New("key 与 iv 必填")
 	}
 	entries, err := AESConfigList()
 	if err != nil {
@@ -102,7 +102,7 @@ func AESConfigAdd(name, key, iv string) error {
 	}
 	for _, e := range entries {
 		if e.Name == name {
-			return fmt.Errorf("entry %q already exists", name)
+			return fmt.Errorf("条目 %q 已存在", name)
 		}
 	}
 	entries = append(entries, AESEntry{Name: name, SecretKey: key, IV: iv})

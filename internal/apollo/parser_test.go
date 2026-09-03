@@ -93,6 +93,14 @@ func TestMultipleMergedEntriesOnLine(t *testing.T) {
 	if len(warnings) != 1 {
 		t.Errorf("expected 1 warning, got %v", warnings)
 	}
+	// the warning must carry the line number and the offending line content so
+	// the user can locate it in their paste
+	if warnings[0].Line != 1 {
+		t.Errorf("warning line = %d, want 1", warnings[0].Line)
+	}
+	if !strings.Contains(warnings[0].Content, "A = 1B = 2C = 3") {
+		t.Errorf("warning missing line content: %+v", warnings[0])
+	}
 }
 
 func TestValueWithTrailingSpacesTrimmed(t *testing.T) {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"ai-tools/internal/aesx"
@@ -44,7 +45,8 @@ func TestImportGetSetDelete(t *testing.T) {
 	if v, ok, err := GetValue(dir, "prod", "app-x", key, sensitiveKey, "SECRET_TOKEN"); err != nil || !ok || v != "x" {
 		t.Fatalf("GetValue sensitive = %q %v %v", v, ok, err)
 	}
-	it, err := SetValue(dir, "prod", "app-x", "A", "2", nil, key, sensitiveKey)
+	plain := false
+	it, err := SetValue(dir, "prod", "app-x", "A", "2", &plain, key, sensitiveKey)
 	if err != nil || it.Value == nil || *it.Value != "2" {
 		t.Fatalf("SetValue = %#v, %v", it, err)
 	}
@@ -218,5 +220,25 @@ func TestRemove(t *testing.T) {
 	ok, err = Remove(dir, "prod", "app-x")
 	if err != nil || ok {
 		t.Fatalf("second Remove = %v, %v", ok, err)
+	}
+}
+
+func TestLoadErrorMentionsAppIDAndHints(t *testing.T) {
+	dir := t.TempDir()
+	key := make([]byte, 32)
+	for _, appID := range []string{"a", "merdi2"} {
+		if _, err := Import(dir, "test", appID, "A = 1\n", key, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, _, err := GetValueSafe(dir, "test", "merdi", key, key, "A")
+	if err == nil {
+		t.Fatal("expected an error for a missing snapshot")
+	}
+	msg := err.Error()
+	for _, want := range []string{`"test"（appid merdi）`, "appid a", "appid merdi2"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing %q:\n%s", want, msg)
+		}
 	}
 }

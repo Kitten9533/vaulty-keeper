@@ -1,0 +1,10 @@
+# keep the build context small; the Go build stage needs the source
+.git
+.gitignore
+docs
+tools
+bin
+*.md
+README.md
+AGENTS.md
+docker-compose.yml

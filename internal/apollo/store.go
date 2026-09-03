@@ -33,6 +33,11 @@ type Item struct {
 	Enc    string `json:"enc"`
 	Nonce  string `json:"nonce"`
 	Secret bool   `json:"secret"`
+	// Safe records an explicit user decision (set --plain / mark --plain)
+	// that this value is safe to show in plaintext to scripts/AI consumers.
+	// Auto-detected items are never Safe, so non-interactive output masks
+	// them by default (reverse default).
+	Safe bool `json:"safe,omitempty"`
 }
 
 type Snapshot struct {
@@ -49,7 +54,7 @@ func NewSnapshot(name, appID string) *Snapshot {
 
 func ValidateSnapshotName(name string) error {
 	if !snapshotNameRe.MatchString(name) {
-		return errors.New("snapshot name must start with a letter or number and contain only letters, numbers, dot, dash, or underscore")
+		return errors.New("快照名必须以字母或数字开头，且只能包含字母、数字、点、横线或下划线")
 	}
 	return nil
 }
@@ -63,10 +68,10 @@ var appIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 // snapshots must reject it themselves.
 func ValidateAppID(appID string) error {
 	if appID == "" {
-		return errors.New("app id must not be empty")
+		return errors.New("app id 不能为空")
 	}
 	if !appIDRe.MatchString(appID) {
-		return errors.New("app id must start with a letter or number and contain only letters, numbers, dot, dash, or underscore")
+		return errors.New("app id 必须以字母或数字开头，且只能包含字母、数字、点、横线或下划线")
 	}
 	return nil
 }
@@ -100,11 +105,10 @@ type VisibleItem struct {
 }
 
 // VisibleItems decrypts every value (for length) but only exposes plaintext
-// for non-sensitive items; sensitive values are masked to their length.
-// Sensitive items decrypt with sensitiveKey, others with snapKey. A value is
-// masked when its item is marked secret or the value carries inline URI
-// credentials (so pre-existing snapshots imported before that rule still hide
-// e.g. mongodb://user:pw@host).
+// for items explicitly marked safe (set --plain); everything else is masked
+// to its length, so the Web UI never returns plaintext for values the user
+// has not opted into revealing to scripts/AI. Sensitive items decrypt with
+// sensitiveKey, others with snapKey.
 func (s *Snapshot) VisibleItems(snapKey, sensitiveKey []byte) (map[string]VisibleItem, error) {
 	items := make(map[string]VisibleItem, len(s.Items))
 	for name, item := range s.Items {
@@ -112,7 +116,7 @@ func (s *Snapshot) VisibleItems(snapKey, sensitiveKey []byte) (map[string]Visibl
 		if err != nil {
 			return nil, err
 		}
-		sensitive := item.Secret || IsSensitiveKeyValue(name, value)
+		sensitive := !item.Safe
 		view := VisibleItem{Key: name, Sensitive: sensitive}
 		if sensitive {
 			view.Length = len(value)
@@ -126,21 +130,29 @@ func (s *Snapshot) VisibleItems(snapKey, sensitiveKey []byte) (map[string]Visibl
 
 func (s *Snapshot) Set(snapKey, sensitiveKey []byte, k, v string, secret *bool) error {
 	secretVal := IsSensitiveKeyValue(k, v)
+	safe := false
 	if secret != nil {
 		secretVal = *secret
+		safe = !*secret
+	} else if existing, ok := s.Items[k]; ok {
+		// no explicit flag: preserve the item's current classification so a
+		// plain `set` never silently unmarks (or re-marks) an existing key
+		secretVal = existing.Secret
+		safe = existing.Safe
 	}
 	key := snapKey
 	if secretVal {
 		key = sensitiveKey
 	}
 	if key == nil {
-		return errors.New("snapshot key not available")
+		return errors.New("快照密钥不可用")
 	}
 	it, err := encryptValue(key, v)
 	if err != nil {
 		return err
 	}
 	it.Secret = secretVal
+	it.Safe = safe
 	s.Items[k] = it
 	return nil
 }
@@ -168,12 +180,12 @@ func (s *Snapshot) Get(snapKey, sensitiveKey []byte, k string) (string, bool, er
 func (s *Snapshot) keyFor(item Item, snapKey, sensitiveKey []byte) ([]byte, error) {
 	if item.Secret {
 		if sensitiveKey == nil {
-			return nil, errors.New("sensitive key not available")
+			return nil, errors.New("敏感值密钥不可用")
 		}
 		return sensitiveKey, nil
 	}
 	if snapKey == nil {
-		return nil, errors.New("snapshot key not available")
+		return nil, errors.New("快照密钥不可用")
 	}
 	return snapKey, nil
 }
@@ -203,6 +215,9 @@ type Change struct {
 	Old    string
 	New    string
 	Secret bool
+	// Safe reports whether the value(s) involved are explicitly marked safe
+	// (set --plain), so non-interactive output may reveal them.
+	Safe bool
 }
 
 // Diff compares two snapshots. Missing values are empty strings. It returns
@@ -238,26 +253,26 @@ func (a *Snapshot) Diff(b *Snapshot, snapKey, sensitiveKey []byte) ([]Change, er
 		case !aok && bok:
 			v, err := plain(bi)
 			if err != nil {
-				return nil, fmt.Errorf("decrypt %q: %w", k, err)
+				return nil, fmt.Errorf("解密 %q：%w", k, err)
 			}
-			out = append(out, Change{Key: k, Kind: "added", New: v, Secret: bi.Secret})
+			out = append(out, Change{Key: k, Kind: "added", New: v, Secret: bi.Secret, Safe: bi.Safe})
 		case aok && !bok:
 			v, err := plain(ai)
 			if err != nil {
-				return nil, fmt.Errorf("decrypt %q: %w", k, err)
+				return nil, fmt.Errorf("解密 %q：%w", k, err)
 			}
-			out = append(out, Change{Key: k, Kind: "removed", Old: v, Secret: ai.Secret})
+			out = append(out, Change{Key: k, Kind: "removed", Old: v, Secret: ai.Secret, Safe: ai.Safe})
 		default:
 			av, err := plain(ai)
 			if err != nil {
-				return nil, fmt.Errorf("decrypt %q: %w", k, err)
+				return nil, fmt.Errorf("解密 %q：%w", k, err)
 			}
 			bv, err := plain(bi)
 			if err != nil {
-				return nil, fmt.Errorf("decrypt %q: %w", k, err)
+				return nil, fmt.Errorf("解密 %q：%w", k, err)
 			}
 			if NormValue(av) != NormValue(bv) {
-				out = append(out, Change{Key: k, Kind: "changed", Old: av, New: bv, Secret: ai.Secret || bi.Secret})
+				out = append(out, Change{Key: k, Kind: "changed", Old: av, New: bv, Secret: ai.Secret || bi.Secret, Safe: ai.Safe && bi.Safe})
 			}
 		}
 	}
@@ -266,7 +281,7 @@ func (a *Snapshot) Diff(b *Snapshot, snapKey, sensitiveKey []byte) ([]Change, er
 
 func (it Item) DecryptValue(key []byte) (string, error) {
 	if key == nil {
-		return "", errors.New("snapshot key not available")
+		return "", errors.New("快照密钥不可用")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -286,7 +301,7 @@ func (it Item) DecryptValue(key []byte) (string, error) {
 	}
 	pt, err := g.Open(nil, nonce, ct, nil)
 	if err != nil {
-		return "", fmt.Errorf("decrypt %q failed: %w", "value", err)
+		return "", fmt.Errorf("解密 %q 失败：%w", "value", err)
 	}
 	return string(pt), nil
 }

@@ -3,6 +3,11 @@ package ui
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"ai-tools/internal/apollo"
 	"ai-tools/internal/aesx"
+	"ai-tools/internal/apollo"
 )
 
 func TestSnapshotViewMasksSensitiveValue(t *testing.T) {
@@ -141,7 +146,9 @@ func TestSnapshotViewWithAppID(t *testing.T) {
 	if view.Code != http.StatusOK {
 		t.Fatalf("view = %d: %s", view.Code, view.Body.String())
 	}
-	if strings.Contains(view.Body.String(), "hide") || !strings.Contains(view.Body.String(), "merdi") {
+	// reverse default: even the non-sensitive APP_NAME is masked in GET
+	// unless explicitly marked safe; the key name is still visible
+	if strings.Contains(view.Body.String(), "hide") || strings.Contains(view.Body.String(), "merdi") || !strings.Contains(view.Body.String(), "APP_NAME") {
 		t.Fatalf("view body: %s", view.Body.String())
 	}
 }
@@ -213,7 +220,7 @@ func TestDeleteItem(t *testing.T) {
 
 func newEmptyHandler(t *testing.T) http.Handler {
 	t.Helper()
-	return NewHandler(Config{Dir: t.TempDir(), SnapshotKey: func() ([]byte, error) { return fixedKey(), nil }, SensitiveKey: func() ([]byte, error) { return fixedSensitiveKey(), nil }})
+	return NewHandler(Config{Dir: t.TempDir(), AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return fixedKey(), nil }, SensitiveKey: func() ([]byte, error) { return fixedSensitiveKey(), nil }})
 }
 
 func newTestHandler(t *testing.T, kvText string) http.Handler {
@@ -231,7 +238,7 @@ func newTestHandler(t *testing.T, kvText string) http.Handler {
 	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
+	return NewHandler(Config{Dir: dir, AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
 }
 
 func newCompareHandler(t *testing.T) http.Handler {
@@ -248,7 +255,7 @@ func newCompareHandler(t *testing.T) http.Handler {
 			t.Fatal(err)
 		}
 	}
-	return NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
+	return NewHandler(Config{Dir: dir, AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
 }
 
 func fixedKey() []byte {
@@ -359,7 +366,7 @@ func TestStartPrintsTokenizedURL(t *testing.T) {
 	var buf syncBuf
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Start(ctx, Config{Dir: t.TempDir(), SnapshotKey: func() ([]byte, error) { return make([]byte, 32), nil }}, port, false, &buf)
+		errCh <- Start(ctx, Config{Dir: t.TempDir(), AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return make([]byte, 32), nil }}, port, false, &buf)
 	}()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -376,7 +383,7 @@ func TestStartPrintsTokenizedURL(t *testing.T) {
 		t.Fatalf("started URL missing token: %s", url)
 	}
 	// the token from the printed URL actually gates state-changing requests
-	tok := strings.TrimSuffix(strings.SplitN(url, "?t=", 2)[1], "\n")
+	tok := strings.TrimSpace(strings.SplitN(strings.SplitN(url, "?t=", 2)[1], "\n", 2)[0])
 	addr := strings.TrimPrefix(strings.SplitN(url, "://", 2)[1], "ai-tools UI available at ")
 	base := "http://" + strings.TrimSpace(strings.Split(addr, "?t=")[0])
 
@@ -440,7 +447,7 @@ func TestRevealWithExplicitKeyIV(t *testing.T) {
 	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
 		t.Fatal(err)
 	}
-	h := NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
+	h := NewHandler(Config{Dir: dir, AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
 
 	// the stored value is an external CryptoUtil ciphertext; without overrides
 	// reveal shows the stored ciphertext (decrypted from the snapshot layer),
@@ -480,7 +487,7 @@ func TestRevealShowsSensitiveValue(t *testing.T) {
 	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
 		t.Fatal(err)
 	}
-	h := NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
+	h := NewHandler(Config{Dir: dir, AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return key, nil }, SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil }})
 
 	// masked in the list view
 	r := httptest.NewRequest(http.MethodGet, "/api/snapshots/prod", nil)
@@ -581,7 +588,7 @@ func TestAESTransformRoundTrip(t *testing.T) {
 func TestAESConfigAPI(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AI_TOOLS_AES_CONFIG", filepath.Join(dir, "aes.json"))
-	h := NewHandler(Config{Dir: dir, SnapshotKey: func() ([]byte, error) { return make([]byte, 32), nil }})
+	h := NewHandler(Config{Dir: dir, AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return make([]byte, 32), nil }})
 
 	get := httptest.NewRecorder()
 	h.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/aes/config", nil))
@@ -773,6 +780,7 @@ func TestCompareMulti(t *testing.T) {
 			t.Fatalf("create %s = %d: %s", ref.name, w.Code, w.Body.String())
 		}
 	}
+	// reverse default: mask everything except explicitly-safe keys
 	r := httptest.NewRequest(http.MethodPost, "/api/compare/multi",
 		strings.NewReader(`{"refs":[{"name":"prod","app_id":"app-x"},{"name":"test","app_id":"app-y"}]}`))
 	w := httptest.NewRecorder()
@@ -798,11 +806,36 @@ func TestCompareMulti(t *testing.T) {
 	if out.Rows[0].Key != "DB_HOST" || len(out.Rows[0].Values) != 2 {
 		t.Fatalf("first row = %#v", out.Rows[0])
 	}
+	for _, sv := range out.Rows[0].Values {
+		if sv.Value != nil || !sv.Sensitive {
+			t.Fatalf("DB_HOST value should be masked by default: %#v", sv)
+		}
+	}
+
+	// mark DB_HOST safe in both snapshots; it then shows plaintext
+	for _, ref := range []struct{ name, appID, text string }{
+		{"prod", "app-x", "db.prod"},
+		{"test", "app-y", "db.test"},
+	} {
+		body := strings.NewReader(`{"value":"` + ref.text + `","secret":false}`)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/snapshots/"+ref.name+"/items/DB_HOST?appid="+ref.appID, body))
+		if w.Code != http.StatusOK {
+			t.Fatalf("mark safe %s = %d: %s", ref.name, w.Code, w.Body.String())
+		}
+	}
+	r = httptest.NewRequest(http.MethodPost, "/api/compare/multi",
+		strings.NewReader(`{"refs":[{"name":"prod","app_id":"app-x"},{"name":"test","app_id":"app-y"}]}`))
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
 	if out.Rows[0].Values[0].Value == nil || *out.Rows[0].Values[0].Value != "db.prod" {
-		t.Fatalf("prod value = %#v", out.Rows[0].Values[0])
+		t.Fatalf("prod value after marking safe = %#v", out.Rows[0].Values[0])
 	}
 	if out.Rows[0].Values[1].Value == nil || *out.Rows[0].Values[1].Value != "db.test" {
-		t.Fatalf("test value = %#v", out.Rows[0].Values[1])
+		t.Fatalf("test value after marking safe = %#v", out.Rows[0].Values[1])
 	}
 }
 
@@ -973,5 +1006,305 @@ func TestCompareKeyFiltersByAppID(t *testing.T) {
 	}
 	if len(out.Rows) != 3 {
 		t.Fatalf("unfiltered rows = %d", len(out.Rows))
+	}
+}
+
+// TestPlaintextDisabledByDefault verifies that plaintext-emitting endpoints
+// (reveal/export/edit/AES decrypt) are refused by default and only enabled
+// with Config.AllowPlaintext, so a leaked token cannot dump plaintext unless
+// the operator explicitly opted in.
+func TestPlaintextDisabledByDefault(t *testing.T) {
+	dir := t.TempDir()
+	key := fixedKey()
+	sensitiveKey := fixedSensitiveKey()
+	s := apollo.NewSnapshot("prod", "")
+	if err := s.Set(key, sensitiveKey, "SECRET_TOKEN", "secret", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(Config{
+		Dir:          dir,
+		Token:        "t",
+		SnapshotKey:  func() ([]byte, error) { return key, nil },
+		SensitiveKey: func() ([]byte, error) { return sensitiveKey, nil },
+	})
+
+	post := func(path, body string) int {
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		r.Header.Set("X-Auth-Token", "t")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if code := post("/api/snapshots/prod/reveal", `{"targets":["SECRET_TOKEN"],"confirm":true}`); code != http.StatusForbidden {
+		t.Fatalf("reveal = %d, want 403", code)
+	}
+	if code := post("/api/snapshots/prod/export", `{"confirm":true}`); code != http.StatusForbidden {
+		t.Fatalf("export = %d, want 403", code)
+	}
+	if code := post("/api/snapshots/prod/edit", `{"confirm":true}`); code != http.StatusForbidden {
+		t.Fatalf("edit load = %d, want 403", code)
+	}
+	if code := post("/api/aes/transform", `{"op":"decrypt","key":"k","iv":"i","text":"x"}`); code != http.StatusForbidden {
+		t.Fatalf("aes decrypt = %d, want 403", code)
+	}
+
+	// /api/config reports the state
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"allow_plaintext":false`) {
+		t.Fatalf("config = %d %s", w.Code, w.Body.String())
+	}
+
+	// with AllowPlaintext the same reveal succeeds
+	h2 := NewHandler(Config{
+		Dir:            dir,
+		Token:          "t",
+		AllowPlaintext: true,
+		SnapshotKey:    func() ([]byte, error) { return key, nil },
+		SensitiveKey:   func() ([]byte, error) { return sensitiveKey, nil },
+	})
+	if code := postWithToken(h2, "/api/snapshots/prod/reveal", `{"targets":["SECRET_TOKEN"],"confirm":true}`); code != http.StatusOK {
+		t.Fatalf("reveal with allow-plaintext = %d, want 200", code)
+	}
+}
+
+func postWithToken(h http.Handler, path, body string) int {
+	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	r.Header.Set("X-Auth-Token", "t")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w.Code
+}
+
+// ---- database tunnel endpoints ----
+
+func newDBHandler(t *testing.T, allowPlain bool) http.Handler {
+	t.Helper()
+	key := fixedKey()
+	store := filepath.Join(t.TempDir(), "db.json")
+	t.Setenv("AI_TOOLS_BRIDGE_TOKEN", "bridge-tok")
+	return NewHandler(Config{
+		Dir:            t.TempDir(),
+		SnapshotKey:    func() ([]byte, error) { return key, nil },
+		SensitiveKey:   func() ([]byte, error) { return fixedSensitiveKey(), nil },
+		AllowPlaintext: allowPlain,
+		Token:          "ui-tok",
+		DBStore:        store,
+		DBKey:          func() ([]byte, error) { return key, nil },
+	})
+}
+
+func TestDBListAddConnectRemove(t *testing.T) {
+	h := newDBHandler(t, true)
+
+	// key status
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/key", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"available":true`) {
+		t.Fatalf("db key status = %d %s", w.Code, w.Body.String())
+	}
+
+	// add requires token
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/db/connections",
+		bytes.NewBufferString(`{"name":"pg","url":"postgres://app:realpass@db.internal:5432/appdb"}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("add without token = %d, want 401", w.Code)
+	}
+
+	// add with token
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/db/connections",
+		bytes.NewBufferString(`{"name":"pg","url":"postgres://app:realpass@db.internal:5432/appdb"}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("add = %d: %s", w.Code, w.Body.String())
+	}
+
+	// list is open GET and never leaks the URL/password
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list = %d: %s", w.Code, w.Body.String())
+	}
+	for _, secret := range []string{"realpass", "db.internal"} {
+		if strings.Contains(w.Body.String(), secret) {
+			t.Fatalf("db list leaked %q: %s", secret, w.Body.String())
+		}
+	}
+	if !strings.Contains(w.Body.String(), `"name":"pg"`) || !strings.Contains(w.Body.String(), `"type":"postgres"`) {
+		t.Fatalf("db list missing connection: %s", w.Body.String())
+	}
+
+	// connect info: token-based, no real password
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/connect?name=pg", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "bridge-tok") {
+		t.Fatalf("connect = %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "realpass") || strings.Contains(w.Body.String(), "db.internal") {
+		t.Fatalf("connect leaked real credentials: %s", w.Body.String())
+	}
+
+	// show requires POST + token + plaintext
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/show", bytes.NewBufferString(`{"name":"pg"}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "realpass") {
+		t.Fatalf("show = %d %s", w.Code, w.Body.String())
+	}
+
+	// remove requires token
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/db/connections/pg", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("rm without token = %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodDelete, "/api/db/connections/pg", nil)
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("rm = %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
+	if strings.Contains(w.Body.String(), `"name":"pg"`) {
+		t.Fatalf("connection not removed: %s", w.Body.String())
+	}
+}
+
+func TestDBShowGatedByPlaintext(t *testing.T) {
+	h := newDBHandler(t, false) // plaintext disabled
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/db/show", bytes.NewBufferString(`{"name":"x"}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("db show without --allow-plaintext = %d, want 403", w.Code)
+	}
+}
+
+// encryptForDBURL simulates the browser: derive an AES-256-GCM key from the
+// UI's published ECDH public key and seal a database URL with it.
+func encryptForDBURL(t *testing.T, pub *ecdh.PublicKey, dsn string) (ephRaw, ivRaw, ctRaw []byte) {
+	t.Helper()
+	eph, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := eph.ECDH(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := aes.NewCipher(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iv := make([]byte, g.NonceSize())
+	if _, err := rand.Read(iv); err != nil {
+		t.Fatal(err)
+	}
+	return eph.PublicKey().Bytes(), iv, g.Seal(nil, iv, []byte(dsn), nil)
+}
+
+func TestDBPubKeyAndEncryptedAdd(t *testing.T) {
+	h := newDBHandler(t, true)
+
+	// pubkey is an open GET
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/pubkey", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("pubkey = %d %s", w.Code, w.Body.String())
+	}
+	var pk struct {
+		Alg string `json:"alg"`
+		Pub string `json:"pub"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &pk); err != nil {
+		t.Fatalf("pubkey json: %v", err)
+	}
+	if pk.Alg != "ECDH-P256" || pk.Pub == "" {
+		t.Fatalf("unexpected pubkey: %#v", pk)
+	}
+	pubRaw, err := base64.StdEncoding.DecodeString(pk.Pub)
+	if err != nil {
+		t.Fatalf("pub b64: %v", err)
+	}
+	serverPub, err := ecdh.P256().NewPublicKey(pubRaw)
+	if err != nil {
+		t.Fatalf("server pub: %v", err)
+	}
+
+	const dsn = "mysql://app:secrectpw@db.remote:3306/orders"
+	eph, iv, ct := encryptForDBURL(t, serverPub, dsn)
+	body, err := json.Marshal(map[string]any{
+		"name": "enc-pg",
+		"url_enc": map[string]string{
+			"eph": base64.StdEncoding.EncodeToString(eph),
+			"iv":  base64.StdEncoding.EncodeToString(iv),
+			"ct":  base64.StdEncoding.EncodeToString(ct),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// encrypted add requires the token
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/db/connections", bytes.NewReader(body)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("encrypted add without token = %d, want 401", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/db/connections", bytes.NewReader(body))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("encrypted add = %d %s", w.Code, w.Body.String())
+	}
+
+	// show proves the decrypted URL round-tripped exactly (mysql type too)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/show", bytes.NewBufferString(`{"name":"enc-pg"}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), dsn) {
+		t.Fatalf("show encrypted-added = %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"type":"mysql"`) {
+		t.Fatalf("show type = %s", w.Body.String())
+	}
+}
+
+func TestDBTestURLGatedByToken(t *testing.T) {
+	h := newDBHandler(t, true)
+	bad := bytes.NewBufferString(`{"url_enc":{"eph":"x","iv":"y","ct":"z"}}`)
+
+	// no token -> 401
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/db/test-url", bad))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("test-url without token = %d, want 401", w.Code)
+	}
+
+	// token + garbage ciphertext -> 400 (no panic), not a crash
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/db/test-url",
+		bytes.NewBufferString(`{"url_enc":{"eph":"x","iv":"y","ct":"z"}}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("test-url bad payload = %d, want 400", w.Code)
 	}
 }

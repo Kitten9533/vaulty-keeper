@@ -142,6 +142,40 @@ func TestApolloPipeline(t *testing.T) {
 	}
 }
 
+// TestPlainMarkGuardRefusesSensitiveKey verifies that marking a
+// sensitive-looking key as safe (--plain) is refused in non-TTY contexts,
+// so an AI cannot self-authorize plaintext reads.
+func TestPlainMarkGuardRefusesSensitiveKey(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	in := filepath.Join(dir, "paste.txt")
+	os.WriteFile(in, []byte("APP_NAME = merdi\nSECRET_TOKEN = abc\n"), 0o600)
+	if code := Run([]string{"apollo", "import", in, "--name", "prod", "--dir", snap, "--app-id", "app-x"}); code != 0 {
+		t.Fatalf("import failed with code %d", code)
+	}
+
+	old := isTerminalFunc
+	isTerminalFunc = func() bool { return false }
+	defer func() { isTerminalFunc = old }()
+
+	if code := Run([]string{"apollo", "set", "prod", "SECRET_TOKEN", "xyz", "--plain", "--dir", snap, "--appid", "app-x"}); code == 0 {
+		t.Fatal("set --plain on sensitive key succeeded in non-TTY, want refusal")
+	}
+	if code := Run([]string{"apollo", "mark", "prod", "SECRET_TOKEN", "--plain", "--dir", snap, "--appid", "app-x"}); code == 0 {
+		t.Fatal("mark --plain on sensitive key succeeded in non-TTY, want refusal")
+	}
+	// a genuinely safe key is still allowed
+	if code := Run([]string{"apollo", "set", "prod", "APP_NAME", "other", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("set --plain on safe key failed with code %d", code)
+	}
+	if code := Run([]string{"apollo", "mark", "prod", "APP_NAME", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("mark --plain on safe key failed with code %d", code)
+	}
+}
+
 func TestImportAutoName(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
@@ -185,7 +219,10 @@ func TestImportRefusesOverwriteWithoutForce(t *testing.T) {
 	if !strings.Contains(err, "--force") {
 		t.Fatalf("stderr %q missing --force hint", err)
 	}
-	// value unchanged
+	// value unchanged (marked plain so it stays readable when piped)
+	if code := Run([]string{"apollo", "set", "prod", "FOO", "1", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("set FOO --plain failed with code %d", code)
+	}
 	out := captureStdout(t, func() {
 		if code := Run([]string{"apollo", "get", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 0 {
 			t.Fatalf("get failed with code %d", code)
@@ -197,6 +234,9 @@ func TestImportRefusesOverwriteWithoutForce(t *testing.T) {
 	// --force overwrites
 	if code := Run([]string{"apollo", "import", in, "--name", "prod", "--dir", snap, "--app-id", "app-x", "--force"}); code != 0 {
 		t.Fatalf("import --force failed with code %d", code)
+	}
+	if code := Run([]string{"apollo", "set", "prod", "FOO", "2", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("set FOO --plain failed with code %d", code)
 	}
 	out = captureStdout(t, func() {
 		if code := Run([]string{"apollo", "get", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 0 {
@@ -358,6 +398,13 @@ func TestListAndCompareJSON(t *testing.T) {
 	if code := Run([]string{"apollo", "set", "test", "FOO", "2", "--dir", snap, "--appid", "app-x"}); code != 0 {
 		t.Fatalf("set failed with code %d", code)
 	}
+	// mark FOO safe so non-TTY list can reveal it; SECRET_TOKEN stays masked
+	if code := Run([]string{"apollo", "mark", "prod", "FOO", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("mark FOO --plain failed with code %d", code)
+	}
+	if code := Run([]string{"apollo", "mark", "test", "FOO", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("mark test FOO --plain failed with code %d", code)
+	}
 
 	// list --json: secret masked
 	out := captureStdout(t, func() {
@@ -405,7 +452,7 @@ func TestApolloRejectsUnsafeSnapshotName(t *testing.T) {
 			t.Fatalf("list with unsafe name returned %d, want 1", code)
 		}
 	})
-	if !strings.Contains(err, "snapshot name must start") {
+	if !strings.Contains(err, "快照名必须以字母或数字开头") {
 		t.Fatalf("stderr %q missing name validation message", err)
 	}
 }
@@ -458,6 +505,71 @@ func TestCompletion(t *testing.T) {
 		if !strings.Contains(out, "apollo") {
 			t.Errorf("completion %s missing apollo", shell)
 		}
+	}
+}
+
+// TestHelpDoesNotRunCommand guards against -h printing help and then
+// continuing to run the command (the old parseFlags behavior let
+// `aes gen-key -h` generate a key and `apollo list -h` list snapshots).
+func TestHelpDoesNotRunCommand(t *testing.T) {
+	// apollo list -h must print the syntax line, not list real snapshots.
+	out := captureStdout(t, func() {
+		if code := Run([]string{"apollo", "list", "-h"}); code != 0 {
+			t.Fatalf("apollo list -h returned code %d", code)
+		}
+	})
+	if !strings.Contains(out, "ai-tools apollo list") {
+		t.Errorf("-h output missing syntax line:\n%s", out)
+	}
+	if strings.Contains(out, "test (a)") {
+		t.Errorf("apollo list -h ran the command and listed snapshots:\n%s", out)
+	}
+
+	// aes gen-key -h must not actually generate and print a key.
+	out = captureStdout(t, func() {
+		if code := Run([]string{"aes", "gen-key", "-h"}); code != 0 {
+			t.Fatalf("aes gen-key -h returned code %d", code)
+		}
+	})
+	if !strings.Contains(out, "ai-tools aes gen-key") {
+		t.Errorf("-h output missing syntax line:\n%s", out)
+	}
+	if strings.Contains(out, "SECRET_KEY") {
+		t.Errorf("aes gen-key -h actually generated a key:\n%s", out)
+	}
+
+	// TTY-only commands must print help instead of being refused.
+	out = captureStdout(t, func() {
+		if code := Run([]string{"db", "show", "-h"}); code != 0 {
+			t.Fatalf("db show -h returned code %d", code)
+		}
+	})
+	if !strings.Contains(out, "ai-tools db show") {
+		t.Errorf("db show -h output missing syntax line:\n%s", out)
+	}
+}
+
+// TestImportAppID verifies --appid works and --app-id stays as a
+// compatibility alias.
+func TestImportAppID(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	in := filepath.Join(dir, "paste.txt")
+	os.WriteFile(in, []byte("FOO = 1\n"), 0o600)
+
+	for _, flag := range []string{"--appid", "--app-id"} {
+		if code := Run([]string{"apollo", "import", in, "--name", "prod-" + flag[2:], flag, "app-x", "--dir", snap}); code != 0 {
+			t.Fatalf("import with %s failed with code %d", flag, code)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(snap, "prod-appid__app-x.json")); err != nil {
+		t.Fatalf("import with --appid did not write the snapshot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(snap, "prod-app-id__app-x.json")); err != nil {
+		t.Fatalf("import with --app-id (alias) did not write the snapshot: %v", err)
 	}
 }
 
@@ -516,8 +628,6 @@ func TestPlaintextCommandsRejectedWhenPiped(t *testing.T) {
 
 	// plaintext commands are refused in non-TTY contexts even with --yes
 	cases := [][]string{
-		{"apollo", "get", "prod", "SECRET_TOKEN", "--dir", snap, "--appid", "app-x"},
-		{"apollo", "get", "prod", "SECRET_TOKEN", "--yes", "--dir", snap, "--appid", "app-x"},
 		{"apollo", "list", "prod", "--reveal", "--dir", snap, "--appid", "app-x"},
 		{"apollo", "list", "prod", "--reveal", "--yes", "--dir", snap, "--appid", "app-x"},
 		{"apollo", "compare", "prod", "prod", "--reveal", "--dir", snap, "--appid", "app-x", "--appid-to", "app-x"},
@@ -535,9 +645,29 @@ func TestPlaintextCommandsRejectedWhenPiped(t *testing.T) {
 		}
 	}
 
-	// non-sensitive get still works when piped
-	if code := Run([]string{"apollo", "get", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 0 {
-		t.Fatalf("get non-sensitive failed with code %d", code)
+	// reverse default: get on a non-safe key is masked when piped, never
+	// plaintext, and never an error (the key exists, its value is hidden)
+	for _, keyName := range []string{"SECRET_TOKEN", "FOO"} {
+		out := captureStdout(t, func() {
+			if code := Run([]string{"apollo", "get", "prod", keyName, "--dir", snap, "--appid", "app-x"}); code != 0 {
+				t.Fatalf("get %s failed with code %d", keyName, code)
+			}
+		})
+		if strings.TrimSpace(out) != "*** (3 chars)" && !strings.Contains(out, "***") {
+			t.Fatalf("get %s leaked plaintext or unexpected output: %q", keyName, out)
+		}
+	}
+	// a key explicitly marked safe (--plain) is readable when piped
+	if code := Run([]string{"apollo", "set", "prod", "FOO", "1", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("set --plain failed with code %d", code)
+	}
+	out := captureStdout(t, func() {
+		if code := Run([]string{"apollo", "get", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 0 {
+			t.Fatalf("get safe FOO failed with code %d", code)
+		}
+	})
+	if strings.TrimSpace(out) != "1" {
+		t.Fatalf("get safe FOO = %q, want 1", out)
 	}
 	// encrypt is not plaintext and works when piped
 	if code := Run([]string{"aes", "encrypt", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop", "hello"}); code != 0 {
@@ -587,4 +717,129 @@ func asPiped(t *testing.T) {
 	old := isTerminalFunc
 	isTerminalFunc = func() bool { return false }
 	t.Cleanup(func() { isTerminalFunc = old })
+}
+
+func TestReverseDefaultAndMark(t *testing.T) {
+	asPiped(t)
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("AI_TOOLS_APOLLO_KEY", key)
+	t.Setenv("AI_TOOLS_SENSITIVE_KEY", key)
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	in := filepath.Join(dir, "paste.txt")
+	os.WriteFile(in, []byte("FOO = 1\nBAR = 2\nSECRET_TOKEN = abc\n"), 0o600)
+	if code := Run([]string{"apollo", "import", in, "--name", "prod", "--dir", snap, "--app-id", "app-x"}); code != 0 {
+		t.Fatalf("import failed with code %d", code)
+	}
+
+	// reverse default: every auto-detected value is masked when piped
+	for _, k := range []string{"FOO", "BAR", "SECRET_TOKEN"} {
+		out := captureStdout(t, func() {
+			if code := Run([]string{"apollo", "get", "prod", k, "--dir", snap, "--appid", "app-x"}); code != 0 {
+				t.Fatalf("get %s failed with code %d", k, code)
+			}
+		})
+		if strings.TrimSpace(out) != "*** (1 chars)" && strings.TrimSpace(out) != "*** (3 chars)" {
+			t.Fatalf("get %s = %q, want mask", k, out)
+		}
+	}
+
+	// mark FOO safe -> piped get returns plaintext; others stay masked
+	if code := Run([]string{"apollo", "mark", "prod", "FOO", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("mark FOO --plain failed with code %d", code)
+	}
+	out := captureStdout(t, func() {
+		if code := Run([]string{"apollo", "get", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 0 {
+			t.Fatalf("get FOO failed with code %d", code)
+		}
+	})
+	if strings.TrimSpace(out) != "1" {
+		t.Fatalf("get safe FOO = %q, want 1", out)
+	}
+	out = captureStdout(t, func() {
+		if code := Run([]string{"apollo", "get", "prod", "BAR", "--dir", snap, "--appid", "app-x"}); code != 0 {
+			t.Fatalf("get BAR failed with code %d", code)
+		}
+	})
+	if strings.TrimSpace(out) != "*** (1 chars)" {
+		t.Fatalf("get BAR = %q, want mask", out)
+	}
+
+	// mark BACK to secret -> masked again
+	if code := Run([]string{"apollo", "mark", "prod", "FOO", "--secret", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("mark FOO --secret failed with code %d", code)
+	}
+	out = captureStdout(t, func() {
+		if code := Run([]string{"apollo", "get", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 0 {
+			t.Fatalf("get FOO failed with code %d", code)
+		}
+	})
+	if strings.TrimSpace(out) != "*** (1 chars)" {
+		t.Fatalf("get FOO after --secret = %q, want mask", out)
+	}
+
+	// mark requires exactly one of --plain/--secret
+	if code := Run([]string{"apollo", "mark", "prod", "FOO", "--dir", snap, "--appid", "app-x"}); code != 1 {
+		t.Fatalf("mark without flag returned %d, want 1", code)
+	}
+	if code := Run([]string{"apollo", "mark", "prod", "FOO", "--plain", "--secret", "--dir", snap, "--appid", "app-x"}); code != 1 {
+		t.Fatalf("mark with both flags returned %d, want 1", code)
+	}
+	if code := Run([]string{"apollo", "mark", "prod", "MISSING", "--plain", "--dir", snap, "--appid", "app-x"}); code != 1 {
+		t.Fatalf("mark missing key returned %d, want 1", code)
+	}
+
+	// list --json also follows reverse default: only FOO-safe shows plaintext
+	if code := Run([]string{"apollo", "mark", "prod", "FOO", "--plain", "--dir", snap, "--appid", "app-x"}); code != 0 {
+		t.Fatalf("mark FOO --plain failed with code %d", code)
+	}
+	out = captureStdout(t, func() {
+		if code := Run([]string{"apollo", "list", "prod", "--json", "--dir", snap, "--appid", "app-x"}); code != 0 {
+			t.Fatalf("list failed with code %d", code)
+		}
+	})
+	var lm struct {
+		Items map[string]string `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &lm); err != nil {
+		t.Fatalf("list json: %v\n%s", err, out)
+	}
+	if lm.Items["FOO"] != "1" {
+		t.Errorf("list FOO = %q, want 1", lm.Items["FOO"])
+	}
+	if lm.Items["BAR"] != "*** (1 chars)" || lm.Items["SECRET_TOKEN"] != "*** (3 chars)" {
+		t.Errorf("list masked items wrong: %#v", lm.Items)
+	}
+}
+
+// TestAESListMasksKeysInNonTTY verifies that `aes list` does not dump stored
+// AES key/iv values into non-interactive (script/AI) output.
+func TestAESListMasksKeysInNonTTY(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AI_TOOLS_AES_CONFIG", filepath.Join(dir, "aes.json"))
+	if code := Run([]string{"aes", "add", "--name", "oss", "--key", "0123456789abcdef", "--iv", "abcdefghijklmnop"}); code != 0 {
+		t.Fatalf("aes add failed with code %d", code)
+	}
+	old := isTerminalFunc
+	isTerminalFunc = func() bool { return false }
+	defer func() { isTerminalFunc = old }()
+
+	oldOut := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	Run([]string{"aes", "list"})
+	w.Close()
+	os.Stdout = oldOut
+	b, _ := io.ReadAll(r)
+	out := string(b)
+
+	if strings.Contains(out, "0123456789abcdef") || strings.Contains(out, "abcdefghijklmnop") {
+		t.Fatalf("aes list leaked plaintext key/iv in non-TTY: %s", out)
+	}
+	if !strings.Contains(out, "oss") {
+		t.Fatalf("aes list missing entry name: %s", out)
+	}
+	if !strings.Contains(out, "***") {
+		t.Fatalf("aes list did not mask key/iv: %s", out)
+	}
 }

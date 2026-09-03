@@ -11,13 +11,30 @@
 <div class="app">
   <aside>
     <div class="brand"><span class="mark">✦</span> ai-tools</div>
-    <button class="new" type="button" data-action="import"><b>+</b> 导入配置快照</button>
+    <button class="new" type="button" data-action="import">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      导入配置快照
+    </button>
     <div class="rail-scroll">
-      <div class="group">快照</div>
-      <div id="snapshot-list"></div>
-      <div class="group">工具</div>
-      <div class="nav-item" id="nav-aes">AES 加解密</div>
-      <div class="nav-item" id="nav-settings">设置</div>
+      <section class="rail-card">
+        <div class="rail-card-head">快照</div>
+        <div id="snapshot-list"></div>
+      </section>
+      <section class="rail-card">
+        <div class="rail-card-head">工具</div>
+        <div class="nav-item" id="nav-aes">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+          <span>AES 加解密</span>
+        </div>
+        <div class="nav-item" id="nav-db">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+          <span>数据库隧道</span>
+        </div>
+        <div class="nav-item" id="nav-settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          <span>设置</span>
+        </div>
+      </section>
     </div>
     <div class="foot"><div class="avatar">K</div><div><b>本地工作区</b><span>仅此设备可访问</span></div></div>
   </aside>
@@ -37,6 +54,7 @@
           <button class="cta" type="button" data-action="import">导入快照</button>
         </div>
         <div id="error-region" class="error-region" hidden></div>
+        <div id="plaintext-banner" class="error-region" hidden>明文接口（导出/解密/明文编辑/AES 密钥列表）默认禁用；需要时用 <code>--allow-plaintext</code> 重启 UI。当前 URL 的令牌不要发给 AI/脚本。</div>
         <div class="layout">
           <section>
             <div id="snapshot-context" class="context">
@@ -111,6 +129,51 @@
           <div class="row-actions">
             <button class="ghost" type="button" id="aes-copy">复制结果</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="view-db" hidden>
+      <div class="canvas">
+        <div class="hero">
+          <div>
+            <h1>数据库隧道。</h1>
+            <p class="sub">注册的连接 URL 加密存储（独立 DB 密钥），隧道由 host 的 <code>ai-tools serve</code> 提供；这里可注册、测试、生成客户端链接</p>
+          </div>
+        </div>
+        <div id="db-error" class="error-region" hidden></div>
+        <div id="db-keyline" class="db-keyline">
+          <span id="db-key-status" class="status-line">检测中…</span>
+          <button class="primary" type="button" id="db-init-btn" hidden>初始化数据库密钥</button>
+        </div>
+        <div class="db-layout">
+          <section class="db-card">
+            <div class="sec-head"><h2>新增连接</h2></div>
+            <div class="fields">
+              <label class="field" for="db-name">名称
+                <input id="db-name" type="text" autocomplete="off" spellcheck="false" placeholder="例如 mysql-orders">
+              </label>
+              <label class="field" for="db-port">隧道端口（可选，留空自动分配）
+                <input id="db-port" type="number" min="1" max="65535" autocomplete="off" spellcheck="false" placeholder="15441">
+              </label>
+            </div>
+            <label class="field" for="db-url">数据库 URL（含账号密码，浏览器内加密后传输）
+              <textarea id="db-url" rows="3" placeholder="postgres://user:pass@host:5432/dbname&#10;mysql://user:pass@host:3306/dbname&#10;redis://:pass@host:6379/0" spellcheck="false"></textarea>
+            </label>
+            <div class="row-actions">
+              <button class="ghost" type="button" id="db-test-btn">测试连接</button>
+              <button class="primary" type="button" id="db-add-btn">注册连接</button>
+            </div>
+            <div id="db-form-result" class="db-form-result" hidden></div>
+          </section>
+          <section class="db-card">
+            <div class="sec-head"><h2>连接</h2><span id="db-count" class="count"></span></div>
+            <table class="aes-table" id="db-table">
+              <thead><tr><th>名称</th><th>类型</th><th>端口</th><th>操作</th></tr></thead>
+              <tbody id="db-body"></tbody>
+            </table>
+            <div id="db-empty" class="db-empty" hidden></div>
+          </section>
         </div>
       </div>
     </div>
@@ -363,6 +426,48 @@
     <p>安全摘要仅基于可见值与本机元数据生成，不包含原始密钥。此能力在当前版本为占位，将在后续版本提供。</p>
     <div class="actions">
       <button type="button" class="ghost" data-close>关闭</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="db-connect-dialog" aria-labelledby="db-connect-title">
+  <div class="dialog result-dialog">
+    <div class="result-head">
+      <h3 id="db-connect-title">连接信息</h3>
+      <div class="result-actions">
+        <button type="button" class="ghost" data-close>关闭</button>
+      </div>
+    </div>
+    <div id="db-connect-head" class="db-connect-head"></div>
+    <div id="db-connect-note" class="warn-line" hidden></div>
+    <div id="db-connect-body" class="db-connect-body"></div>
+  </div>
+</dialog>
+
+<dialog id="db-show-dialog" aria-labelledby="db-show-title">
+  <div class="dialog result-dialog">
+    <div class="result-head">
+      <h3 id="db-show-title">真实连接信息</h3>
+      <div class="result-actions">
+        <button type="button" class="ghost" data-close>关闭</button>
+      </div>
+    </div>
+    <p class="muted">仅你的浏览器可见，请勿转发给他人。</p>
+    <div id="db-show-url" class="reveal-box"></div>
+    <div class="actions">
+      <button type="button" class="ghost" id="db-show-copy-btn">复制</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="db-delete-dialog" aria-labelledby="db-delete-title">
+  <form method="dialog" class="dialog">
+    <h3 id="db-delete-title">删除连接</h3>
+    <p>确定删除连接 <code id="db-delete-name"></code> 吗？隧道将随之消失，此操作不可撤销。</p>
+    <div id="db-delete-error" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>取消</button>
+      <button type="button" class="danger" id="db-delete-confirm-btn">删除</button>
     </div>
   </form>
 </dialog>

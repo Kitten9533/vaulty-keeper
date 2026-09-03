@@ -24,7 +24,7 @@ func Import(dir, name, appID, text string, snapKey, sensitiveKey []byte) (int, e
 	}
 	kvs, _ := apollo.ParseKV(text)
 	if len(kvs) == 0 {
-		return 0, errors.New("no key/value entries parsed")
+		return 0, errors.New("未解析到任何键值条目")
 	}
 	s := apollo.NewSnapshot(name, appID)
 	for _, kv := range kvs {
@@ -50,6 +50,56 @@ func GetValue(dir, name, appID string, snapKey, sensitiveKey []byte, key string)
 	return s.Get(snapKey, sensitiveKey, key)
 }
 
+// GetValueSafe returns a decrypted value, whether the item is explicitly
+// marked safe for scripts/AI (set --plain), and whether it exists.
+func GetValueSafe(dir, name, appID string, snapKey, sensitiveKey []byte, key string) (string, bool, bool, error) {
+	if err := apollo.ValidateKey(key); err != nil {
+		return "", false, false, err
+	}
+	s, err := load(dir, name, appID)
+	if err != nil {
+		return "", false, false, err
+	}
+	it, ok := s.Items[key]
+	if !ok {
+		return "", false, false, nil
+	}
+	v, err := s.DecryptItem(it, snapKey, sensitiveKey)
+	if err != nil {
+		return "", false, true, err
+	}
+	return v, it.Safe, true, nil
+}
+
+// MarkValue flips the explicit safe/secret flag on an existing item without
+// changing its value, re-encrypting with the appropriate key. Returns whether
+// the key exists.
+func MarkValue(dir, name, appID, key string, safe bool, snapKey, sensitiveKey []byte) (bool, error) {
+	if err := apollo.ValidateKey(key); err != nil {
+		return false, err
+	}
+	s, err := load(dir, name, appID)
+	if err != nil {
+		return false, err
+	}
+	it, ok := s.Items[key]
+	if !ok {
+		return false, nil
+	}
+	v, err := s.DecryptItem(it, snapKey, sensitiveKey)
+	if err != nil {
+		return false, err
+	}
+	secret := !safe
+	if err := s.Set(snapKey, sensitiveKey, key, v, &secret); err != nil {
+		return false, err
+	}
+	if err := s.Save(apollo.SnapPath(dir, name, appID)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // SetValue upserts an item and saves. Returns the safe view of the item.
 func SetValue(dir, name, appID, key, value string, secret *bool, snapKey, sensitiveKey []byte) (*apollo.VisibleItem, error) {
 	if err := apollo.ValidateKey(key); err != nil {
@@ -71,7 +121,7 @@ func SetValue(dir, name, appID, key, value string, secret *bool, snapKey, sensit
 	}
 	it, ok := visible[key]
 	if !ok {
-		return nil, fmt.Errorf("item %q not found after save", key)
+		return nil, fmt.Errorf("保存后未找到条目 %q", key)
 	}
 	return &it, nil
 }
@@ -151,7 +201,7 @@ func EditApply(dir, name, appID string, snapKey, sensitiveKey []byte, text strin
 	}
 	kvs, _ := apollo.ParseKV(text)
 	if len(kvs) == 0 {
-		return 0, errors.New("no key/value entries after edit; snapshot not changed")
+		return 0, errors.New("编辑后未解析到任何键值条目；快照未变更")
 	}
 	ns := apollo.NewSnapshot(s.Meta.Name, s.Meta.AppID)
 	for _, kv := range kvs {
@@ -183,7 +233,7 @@ func Reveal(dir, name, appID string, snapKey, sensitiveKey []byte, targets []str
 		}
 		it, ok := s.Items[k]
 		if !ok {
-			return nil, fmt.Errorf("key %q not found in snapshot %q", k, name)
+			return nil, fmt.Errorf("快照 %q 中不存在 key %q", k, name)
 		}
 		if aesKeyOverride != "" && aesIVOverride != "" {
 			readKey := snapKey
@@ -192,7 +242,7 @@ func Reveal(dir, name, appID string, snapKey, sensitiveKey []byte, targets []str
 			}
 			cipher, err := it.DecryptValue(readKey)
 			if err != nil {
-				return nil, fmt.Errorf("read %q: %w", k, err)
+				return nil, fmt.Errorf("读取 %q：%w", k, err)
 			}
 			p, err := aesx.Decrypt(aesKeyOverride, aesIVOverride, cipher)
 			if err != nil {
@@ -214,7 +264,43 @@ func load(dir, name, appID string) (*apollo.Snapshot, error) {
 	if err := apollo.ValidateSnapshotName(name); err != nil {
 		return nil, err
 	}
-	return apollo.Load(apollo.SnapPath(dir, name, appID))
+	path := apollo.SnapPath(dir, name, appID)
+	s, err := apollo.Load(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			msg := fmt.Sprintf("快照 %q 不存在", name)
+			if appID != "" {
+				msg = fmt.Sprintf("快照 %q（appid %s）不存在", name, appID)
+			}
+			if hints := snapshotHints(dir, name, appID); len(hints) > 0 {
+				msg += "；相近快照：" + strings.Join(hints, "、")
+			}
+			return nil, errors.New(msg)
+		}
+		return nil, err
+	}
+	return s, nil
+}
+
+// snapshotHints lists other snapshots sharing the same environment name, so a
+// typo'd or missing app id is surfaced instead of a bare "not found" error.
+func snapshotHints(dir, name, appID string) []string {
+	refs, err := apollo.ListSnapshots(dir)
+	if err != nil {
+		return nil
+	}
+	var hints []string
+	for _, r := range refs {
+		if r.Name != name || r.AppID == appID {
+			continue
+		}
+		if r.AppID != "" {
+			hints = append(hints, fmt.Sprintf("%s (appid %s)", r.Name, r.AppID))
+		} else {
+			hints = append(hints, r.Name)
+		}
+	}
+	return hints
 }
 
 // Remove deletes a snapshot file. Returns whether it existed.

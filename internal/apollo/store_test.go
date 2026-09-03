@@ -184,7 +184,8 @@ func TestValidateSnapshotName(t *testing.T) {
 
 func TestSnapshotVisibleItemsMaskSensitiveValues(t *testing.T) {
 	s := NewSnapshot("prod", "")
-	mustSet(t, s, "APP_NAME", "merdi", nil)
+	plain := false
+	mustSet(t, s, "APP_NAME", "merdi", &plain)
 	mustSet(t, s, "SECRET_TOKEN", "do-not-expose", nil)
 
 	items, err := s.VisibleItems(testKey, testSensitiveKey)
@@ -192,11 +193,22 @@ func TestSnapshotVisibleItemsMaskSensitiveValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	if items["APP_NAME"].Value == nil || *items["APP_NAME"].Value != "merdi" {
-		t.Fatalf("normal item = %#v", items["APP_NAME"])
+		t.Fatalf("safe item = %#v", items["APP_NAME"])
 	}
 	secret := items["SECRET_TOKEN"]
 	if !secret.Sensitive || secret.Value != nil || secret.Length != len("do-not-expose") {
 		t.Fatalf("sensitive item = %#v", secret)
+	}
+	// reverse default: an auto-detected non-sensitive item is still masked
+	// (only explicitly-safe items are revealed)
+	auto := NewSnapshot("prod", "")
+	mustSet(t, auto, "FOO", "bar", nil)
+	autoItems, err := auto.VisibleItems(testKey, testSensitiveKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !autoItems["FOO"].Sensitive || autoItems["FOO"].Value != nil {
+		t.Fatalf("auto item should be masked by default: %#v", autoItems["FOO"])
 	}
 }
 

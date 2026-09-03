@@ -137,16 +137,25 @@ function refLabel(name, appID) {
 
 function switchView(name) {
   state.view = name;
-  for (const v of ['snapshots', 'aes', 'settings']) {
+  if (name !== 'snapshots') {
+    state.active = null;
+    state.activeAppID = '';
+    state.snapshot = null;
+    renderRail();
+    renderContext();
+  }
+  for (const v of ['snapshots', 'aes', 'db', 'settings']) {
     const el = $(`view-${v}`);
     if (el) el.hidden = v !== name;
     const nav = $(`nav-${v}`);
     if (nav) nav.classList.toggle('active', v === name);
   }
+  const titles = { aes: 'AES 加解密', db: '数据库隧道', settings: '设置' };
   $('breadcrumb').innerHTML = name === 'snapshots'
     ? '<b>配置工作台</b>'
-    : `<b>${name === 'aes' ? 'AES 加解密' : '设置'}</b>`;
+    : `<b>${titles[name] || name}</b>`;
   if (name === 'aes') loadAESEntries();
+  if (name === 'db') loadDB();
   if (name === 'settings') loadSettings();
 }
 
@@ -245,6 +254,314 @@ function copyAESOutput() {
   const text = $('aes-output').value;
   if (!text) return;
   copyText(text).then(() => showAESError('已复制到剪贴板。')).catch(() => showAESError('复制失败。'));
+}
+
+// ---- database tunnels ----
+
+let dbConns = [];
+
+function showDBError(msg) {
+  const el = $('db-error');
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+async function loadDB() {
+  const status = $('db-key-status');
+  const initBtn = $('db-init-btn');
+  try {
+    const ks = await api('/api/db/key');
+    if (ks.available) {
+      status.textContent = '数据库密钥可用（Keychain 或环境变量）';
+      status.className = 'status-line ok';
+      initBtn.hidden = true;
+    } else {
+      throw new Error('unavailable');
+    }
+  } catch (_) {
+    status.textContent = '数据库密钥不可用，点击下方按钮生成本机密钥';
+    status.className = 'status-line warn';
+    initBtn.hidden = false;
+  }
+  try {
+    const res = await api('/api/db/list');
+    dbConns = res.connections || [];
+    renderDBTable();
+  } catch (e) {
+    showDBError(e.message);
+  }
+}
+
+function renderDBTable() {
+  $('db-count').textContent = dbConns.length ? `${dbConns.length} 条` : '';
+  const body = $('db-body');
+  body.innerHTML = '';
+  const empty = $('db-empty');
+  if (!dbConns.length) {
+    empty.hidden = false;
+    empty.textContent = '暂无连接，在左侧填写名称与数据库 URL 并注册；注册后 host 上的 ai-tools serve 会自动为它开启一条本地隧道';
+  } else {
+    empty.hidden = true;
+  }
+  for (const c of dbConns) {
+    const tr = document.createElement('tr');
+    tr.dataset.name = c.name;
+    const typeCell = c.broken
+      ? `<td><span class="warn-badge" title="无法用当前密钥解密">密钥不匹配</span></td>`
+      : `<td>${escapeHtml(c.type)}</td>`;
+    const actions = c.broken
+      ? `<td class="row-actions"><button class="row-del" type="button" data-db-action="rm" data-name="${escapeHtml(c.name)}">删除</button></td>`
+      : `<td class="row-actions">
+          <button class="ghost" type="button" data-db-action="test" data-name="${escapeHtml(c.name)}">测试</button>
+          <button class="ghost" type="button" data-db-action="connect" data-name="${escapeHtml(c.name)}">连接信息</button>
+          <button class="ghost" type="button" data-db-action="show" data-name="${escapeHtml(c.name)}" hidden>查看URL</button>
+          <button class="row-del" type="button" data-db-action="rm" data-name="${escapeHtml(c.name)}">删除</button>
+        </td>`;
+    tr.innerHTML = `<td><b>${escapeHtml(c.name)}</b></td>${typeCell}<td>:${c.port}</td>${actions}`;
+    body.appendChild(tr);
+  }
+  // only offer "查看URL" when plaintext endpoints are enabled
+  api('/api/config').then((cfg) => {
+    if (cfg.allow_plaintext) {
+      body.querySelectorAll('[data-db-action="show"]').forEach((b) => (b.hidden = false));
+    }
+  }).catch(() => {});
+}
+
+// URL encryption: the browser derives a fresh AES-GCM key from the UI's
+// per-process ECDH public key, so the database URL never crosses the wire as
+// plaintext. The matching private key lives only in the ui process memory.
+let dbPubKey = '';
+
+async function fetchDBPubKey() {
+  if (dbPubKey) return dbPubKey;
+  const res = await api('/api/db/pubkey');
+  if (!res || !res.pub) throw new Error('无法获取数据库 URL 加密公钥');
+  dbPubKey = res.pub;
+  return dbPubKey;
+}
+
+function b64ToBuf(b64) {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u.buffer;
+}
+
+function bufToB64(buf) {
+  const u = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < u.length; i++) bin += String.fromCharCode(u[i]);
+  return btoa(bin);
+}
+
+async function encryptDBURL(url) {
+  const pubB64 = await fetchDBPubKey();
+  const serverPub = await crypto.subtle.importKey('raw', b64ToBuf(pubB64), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const eph = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']);
+  const aesKey = await crypto.subtle.deriveKey({ name: 'ECDH', public: serverPub }, eph.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, new TextEncoder().encode(url));
+  const ephRaw = await crypto.subtle.exportKey('raw', eph.publicKey);
+  return { eph: bufToB64(ephRaw), iv: bufToB64(iv), ct: bufToB64(ct) };
+}
+
+function showDBFormResult(msg, cls) {
+  const el = $('db-form-result');
+  el.textContent = msg || '';
+  el.className = 'db-form-result ' + (cls || '');
+  el.hidden = !msg;
+}
+
+function setDBFormBusy(busy) {
+  $('db-add-btn').disabled = busy;
+  $('db-test-btn').disabled = busy;
+}
+
+async function dbInit() {
+  if (!confirm('初始化数据库密钥？（仅当此前从未初始化时才需要；已存在时不要用强制覆盖，否则已有连接将无法解密）')) return;
+  try {
+    await api('/api/db/init', jsonOptions('POST', { force: false }));
+    showDBError('');
+    loadDB();
+  } catch (e) {
+    if (e.message.includes('已存在')) {
+      if (confirm('密钥已存在，确认强制覆盖？这会使所有已注册连接无法解密，必须重新注册')) {
+        try {
+          await api('/api/db/init', jsonOptions('POST', { force: true }));
+          loadDB();
+        } catch (e2) {
+          showDBError(e2.message);
+        }
+      }
+    } else {
+      showDBError(e.message);
+    }
+  }
+}
+
+async function dbAdd() {
+  const name = $('db-name').value.trim();
+  const url = $('db-url').value.trim();
+  const port = parseInt($('db-port').value || '0', 10) || 0;
+  if (!name || !url) {
+    showDBError('名称与数据库 URL 必填');
+    return;
+  }
+  setDBFormBusy(true);
+  try {
+    const url_enc = await encryptDBURL(url);
+    await api('/api/db/connections', jsonOptions('POST', { name, url_enc, port }));
+    $('db-name').value = '';
+    $('db-url').value = '';
+    $('db-port').value = '';
+    showDBError('');
+    showDBFormResult('', '');
+    loadDB();
+  } catch (e) {
+    showDBError(e.message);
+  } finally {
+    setDBFormBusy(false);
+  }
+}
+
+async function dbTestURL() {
+  const url = $('db-url').value.trim();
+  if (!url) {
+    showDBFormResult('请先填写数据库 URL', 'fail');
+    return;
+  }
+  setDBFormBusy(true);
+  try {
+    const url_enc = await encryptDBURL(url);
+    const res = await api('/api/db/test-url', jsonOptions('POST', { url_enc }));
+    if (res.ok) {
+      let msg = `✅ 连接成功（${res.type}`;
+      if (res.user) msg += `，user=${res.user}`;
+      if (res.db) msg += `，db=${res.db}`;
+      msg += '）';
+      showDBFormResult(msg, 'ok');
+    } else {
+      showDBFormResult('❌ ' + res.error, 'fail');
+    }
+  } catch (e) {
+    showDBFormResult('❌ ' + e.message, 'fail');
+  } finally {
+    setDBFormBusy(false);
+  }
+}
+
+function findDBRow(name) {
+  return [...$('db-body').rows].find((r) => r.dataset.name === name);
+}
+
+function removeDBResultRow(row) {
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains('db-result-row')) next.remove();
+}
+
+function insertDBResultRow(row, ok, text) {
+  removeDBResultRow(row);
+  const tr = document.createElement('tr');
+  tr.className = 'db-result-row';
+  const td = document.createElement('td');
+  td.colSpan = 4;
+  td.className = ok ? 'db-result ok' : 'db-result fail';
+  td.textContent = text;
+  tr.appendChild(td);
+  row.after(tr);
+  setTimeout(() => { if (tr.parentNode) tr.remove(); }, 10000);
+}
+
+async function dbTest(name) {
+  const row = findDBRow(name);
+  const btn = row && row.querySelector('[data-db-action="test"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '测试中…';
+  }
+  let ok = false;
+  let text;
+  try {
+    const res = await api('/api/db/test', jsonOptions('POST', { name }));
+    ok = res.ok;
+    let parts = [`${res.name} (${res.type}) :${res.port}`];
+    if (res.user) parts.push(`user=${res.user}`);
+    if (res.db) parts.push(`db=${res.db}`);
+    text = ok ? '✅ ' + parts.join(' ') : '❌ ' + parts.join(' ') + ' — ' + res.error;
+  } catch (e) {
+    text = '❌ ' + e.message;
+  }
+  if (row) insertDBResultRow(row, ok, text);
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = '测试';
+  }
+}
+
+function showDBConnectDialog(res) {
+  $('db-connect-head').innerHTML =
+    `<b>${escapeHtml(res.name)}</b><span class="tag">${escapeHtml(res.type)}</span><span class="port">:${res.port}</span>`;
+  const note = $('db-connect-note');
+  if (res.note) {
+    note.textContent = res.note;
+    note.hidden = false;
+  } else {
+    note.hidden = true;
+  }
+  let html = '';
+  if (res.raw) {
+    html += `<div class="db-line"><div class="db-line-label">原始隧道链接（AI / 其他工具可据此自行转换）</div>` +
+      `<pre><code>${escapeHtml(res.raw)}</code></pre><button type="button" class="copy-btn" data-copy>复制</button></div>`;
+  }
+  for (const cl of res.clients) {
+    html += `<div class="db-line"><div class="db-line-label">${escapeHtml(cl.label)}</div>` +
+      `<pre><code>${escapeHtml(cl.line)}</code></pre><button type="button" class="copy-btn" data-copy>复制</button></div>`;
+  }
+  html += `<div class="db-connect-footer">token 是 bridge token，不是真实数据库密码。</div>`;
+  $('db-connect-body').innerHTML = html;
+  openDialog('db-connect-dialog');
+}
+
+async function dbConnectInfo(name) {
+  try {
+    const res = await api(`/api/db/connect?name=${encodeURIComponent(name)}`);
+    showDBConnectDialog(res);
+  } catch (e) {
+    showDBError(e.message);
+  }
+}
+
+async function dbShow(name) {
+  try {
+    const res = await api('/api/db/show', jsonOptions('POST', { name }));
+    $('db-show-url').textContent = res.url;
+    $('db-show-copy-btn').textContent = '复制';
+    openDialog('db-show-dialog');
+  } catch (e) {
+    showDBError(e.message);
+  }
+}
+
+let deletingDBConn = null;
+
+function dbRemove(name) {
+  deletingDBConn = name;
+  $('db-delete-name').textContent = name;
+  openDialog('db-delete-dialog');
+}
+
+async function confirmDBDelete() {
+  if (!deletingDBConn) return;
+  const name = deletingDBConn;
+  try {
+    await api(`/api/db/connections/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    closeDialog('db-delete-dialog');
+    deletingDBConn = null;
+    loadDB();
+  } catch (err) {
+    dialogError('db-delete-dialog', err.message);
+  }
 }
 
 // ---- settings ----
@@ -618,10 +935,21 @@ function renderImportPreview(data) {
   box.textContent = '';
   const warns = data.warnings || [];
   if (warns.length) {
-    const w = document.createElement('div');
-    w.className = 'warn';
-    w.textContent = warns.join('\n');
-    box.appendChild(w);
+    const list = document.createElement('div');
+    list.className = 'warn-list';
+    for (const w of warns) {
+      const el = document.createElement('div');
+      el.className = 'warn';
+      const badge = document.createElement('span');
+      badge.className = 'warn-badge';
+      badge.textContent = `L${w.line}`;
+      el.appendChild(badge);
+      const msg = document.createElement('span');
+      msg.textContent = w.message + (w.content ? `: "${w.content}"` : '');
+      el.appendChild(msg);
+      list.appendChild(el);
+    }
+    box.appendChild(list);
   }
   for (const it of data.items || []) {
     const row = document.createElement('div');
@@ -1410,7 +1738,39 @@ function wire() {
   });
 
   $('nav-aes').addEventListener('click', () => switchView('aes'));
+  $('nav-db').addEventListener('click', () => switchView('db'));
   $('nav-settings').addEventListener('click', () => switchView('settings'));
+
+  $('db-init-btn').addEventListener('click', dbInit);
+  $('db-add-btn').addEventListener('click', dbAdd);
+  $('db-test-btn').addEventListener('click', dbTestURL);
+  $('db-body').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-db-action]');
+    if (!btn) return;
+    const name = btn.getAttribute('data-name');
+    switch (btn.getAttribute('data-db-action')) {
+      case 'test': dbTest(name); break;
+      case 'connect': dbConnectInfo(name); break;
+      case 'show': dbShow(name); break;
+      case 'rm': dbRemove(name); break;
+    }
+  });
+  $('db-connect-dialog').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-copy]');
+    if (!btn) return;
+    const code = btn.closest('.db-line').querySelector('code');
+    if (!code) return;
+    copyText(code.textContent)
+      .then(() => { btn.textContent = '已复制'; setTimeout(() => { btn.textContent = '复制'; }, 1200); })
+      .catch(() => {});
+  });
+  $('db-show-copy-btn').addEventListener('click', () => {
+    const text = $('db-show-url').textContent;
+    if (!text) return;
+    copyText(text)
+      .then(() => { $('db-show-copy-btn').textContent = '已复制'; setTimeout(() => { $('db-show-copy-btn').textContent = '复制'; }, 1200); })
+      .catch(() => {});
+  });
 
   $('aes-encrypt-btn').addEventListener('click', () => runAES('encrypt'));
   $('aes-decrypt-btn').addEventListener('click', () => runAES('decrypt'));
@@ -1429,6 +1789,7 @@ function wire() {
   $('edit-form').addEventListener('submit', (e) => { e.preventDefault(); saveBulkEdit(); });
 
   $('snap-delete-confirm-btn').addEventListener('click', confirmDeleteSnapshot);
+  $('db-delete-confirm-btn').addEventListener('click', confirmDBDelete);
 
   $('export-copy-btn').addEventListener('click', copyExport);
 
@@ -1466,6 +1827,12 @@ async function init() {
   if (!TOKEN) {
     showError('未携带访问令牌：请用启动时打印的完整 URL（含 ?t=...）打开，否则导入/修改/导出/解密等操作不可用。');
   }
+  try {
+    const cfg = await api('/api/config');
+    if (cfg && !cfg.allow_plaintext) {
+      $('plaintext-banner').hidden = false;
+    }
+  } catch (_) { /* banner is cosmetic */ }
   try {
     const data = await api('/api/snapshots');
     state.snapshots = data.snapshots;
