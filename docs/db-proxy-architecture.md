@@ -102,7 +102,7 @@ db.json（磁盘密文，权限 0600，无任何明文）◄── 快照密钥/
 | DB Key 独立于其他密钥 | 快照密钥泄露 ≠ 数据库凭据泄露 |
 | DB Key 在系统密钥库 | 防其他用户 / 其他机器 / 意外明文 |
 | 真实凭据只进 host 内存 | 日志、回包、客户端、AI 环境全部接触不到 |
-| token 门控 | 防"无 token 的第三方"（局域网暴露 0.0.0.0 时兜底） |
+| token 门控 | 防"无 token 的第三方"（局域网暴露 0.0.0.0 时兜底）。token 为**连接专属**（128 位随机，`db add` 生成、随 URL 一并加密落盘），`db regen <name>|--all` 可轮换、旧 token 立即失效；未升级的旧连接回退全局 bridge token（掩码桥同款） |
 
 ---
 
@@ -142,7 +142,7 @@ PostgreSQL :15432           MySQL :15435/15436          Redis :15434
 AI / 容器内能看到                                    AI 永远看不到
 ──────────────────────────────────────────          ─────────────────────────
 ✔ 连接名 / 类型 / 隧道端口（db list）        ✘ 真实 URL（地址 / 账号 / 密码）
-✔ 自己的 bridge token                       ✘ db.json 密文内容
+✔ 自己的隧道 token（连接专属；旧连接回退 bridge token）   ✘ db.json 密文内容
 ✔ 查询结果（本来就是要给 AI 的数据）          ✘ DB Key 及任何密钥
 ✔ 审计日志的"成功 / 拒绝"行（无 SQL/凭据）    ✘ 明文出口（reveal/export 等 TTY-only）
 ✔ 隧道端口用原生客户端自由查询                ✘ serve 之外的任何明文中间态
@@ -274,7 +274,8 @@ serve
 
 ```
 vaulty-keeper serve --addr 0.0.0.0:8972
-   │ ① 生成 128 位随机 token → 写 ~/.vaulty/bridge-token（0600）+ 打印
+   │ ① 生成 128 位随机全局 bridge token → 写 ~/.vaulty/bridge-token（0600）+ 打印
+   │    （掩码桥 /api 用；每条连接的隧道 token 由 db add 生成、db regen 轮换）
    ▼
    │ ② 读 db.json（DB Key 解密）→ 每个连接开一个 TCP 隧道
    │    pgdb :15432 / mysqltest :15435 / mysqlnative :15436 / cache :15434
@@ -282,7 +283,7 @@ vaulty-keeper serve --addr 0.0.0.0:8972
    │ ③ 起 HTTP 掩码桥 :8972（/api/* 全部要 token + 失败限速）
    ▼
 就绪：4 隧道 + 1 桥，等待连接
-   │ 每次连接 → 审计日志（authenticated / invalid bridge token，无 SQL/凭据）
+   │ 每次连接 → 审计日志（authenticated / invalid token，无 SQL/凭据）
    ▼
 Ctrl-C / 退出 → 隧道与桥关闭，内存中的真实 URL 消亡
 ```
@@ -355,7 +356,7 @@ agent-entrypoint.sh
 
 容器里同时具备两种能力（都经 host 的 serve）：
 - **Apollo 掩码读**：`vaulty-keeper remote list|get|compare` → 只有 `*** (n chars)` + 指纹
-- **DB 隧道**：`db list` 拿隧道端口 → psql/mysql/redis-cli 连 `host.docker.internal:端口`，token 当用户名/AUTH
+- **DB 隧道**：`db list` 拿隧道端口 → psql/mysql/redis-cli 连 `host.docker.internal:端口`，隧道 token 当用户名/AUTH（连接专属，`db connect` 打印；旧连接回退 bridge token）
 
 **边界提醒**：Docker 是"防绝大多数 AI 主动拿密钥"的强隔离，但不是绝对隔离（daemon 是 root 服务，容器逃逸是真实攻击面）。极高威胁等级应升级到独立账号 / VM / 云沙箱（README「不用 Docker 的替代用法」）。
 

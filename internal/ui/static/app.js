@@ -154,59 +154,11 @@ function switchView(name) {
   $('breadcrumb').innerHTML = name === 'snapshots'
     ? '<b>配置工作台</b>'
     : `<b>${titles[name] || name}</b>`;
-  if (name === 'aes') loadAESEntries();
   if (name === 'db') loadDB();
   if (name === 'settings') loadSettings();
 }
 
 // ---- AES tools ----
-
-let aesEntries = [];
-
-async function loadAESEntries() {
-  try {
-    const data = await api('/api/aes/config');
-    aesEntries = data.entries || [];
-    populateAESSelect($('aes-list-select'));
-    populateAESSelect($('reveal-list-select'));
-    return data.path || '';
-  } catch (err) {
-    aesEntries = [];
-    return '';
-  }
-}
-
-function populateAESSelect(sel) {
-  const current = sel.value;
-  sel.textContent = '';
-  const none = document.createElement('option');
-  none.value = '';
-  none.textContent = '— 选择已保存的 key/iv —';
-  sel.appendChild(none);
-  for (const e of aesEntries) {
-    const opt = document.createElement('option');
-    opt.value = e.name;
-    opt.textContent = e.name;
-    sel.appendChild(opt);
-  }
-  if ([...sel.options].some((o) => o.value === current)) sel.value = current;
-}
-
-async function loadSelectedAESEntry(target) {
-  const name = $(target).value;
-  if (!name) return;
-  const e = aesEntries.find((x) => x.name === name);
-  if (!e) return;
-  $('aes-name').value = e.name;
-  $('aes-key').value = e['secret-key'];
-  $('aes-iv').value = e.iv;
-  setAESInputsLocked(true);
-}
-
-function setAESInputsLocked(locked) {
-  $('aes-key').disabled = locked;
-  $('aes-iv').disabled = locked;
-}
 
 async function runAES(op) {
   const key = $('aes-key').value.trim();
@@ -218,30 +170,6 @@ async function runAES(op) {
     const data = await api('/api/aes/transform', jsonOptions('POST', { op, key, iv, text }));
     $('aes-output').value = data.result;
     showAESError('');
-  } catch (err) { showAESError(err.message); }
-}
-
-async function genAESKey() {
-  try {
-    const data = await api('/api/aes/gen-key', jsonOptions('POST', { bytes: 16, iv_bytes: 12 }));
-    $('aes-key').value = data.key;
-    $('aes-iv').value = data.iv;
-    setAESInputsLocked(false);
-    showAESError('已生成 key/iv。填写名称后点击「保存到列表」即可存入 aes.json。');
-  } catch (err) { showAESError(err.message); }
-}
-
-async function saveAESConfig() {
-  const name = $('aes-name').value.trim();
-  const key = $('aes-key').value.trim();
-  const iv = $('aes-iv').value.trim();
-  if (!name) { showAESError('请填写名称。'); return; }
-  if (!key || !iv) { showAESError('请填写 key 和 iv。'); return; }
-  try {
-    await api('/api/aes/config', jsonOptions('POST', { name, 'secret-key': key, iv }));
-    showAESError('已保存到 aes.json。');
-    await loadAESEntries();
-    $('aes-list-select').value = name;
   } catch (err) { showAESError(err.message); }
 }
 
@@ -639,67 +567,6 @@ async function loadSettings() {
     sStatus.className = 'status-line warn';
     sInit.hidden = false;
   }
-  try {
-    const path = await loadAESEntries();
-    const el = $('aes-config-status');
-    el.textContent = aesEntries.length ? `已保存 ${aesEntries.length} 条（${path}）。` : `未保存任何条目（${path}）。`;
-    el.className = aesEntries.length ? 'status-line ok' : 'status-line';
-    renderAESList();
-  } catch (err) { showSettingsError(err.message); }
-}
-
-function renderAESList() {
-  const body = $('aes-list-body');
-  body.textContent = '';
-  if (!aesEntries.length) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.className = 'empty';
-    td.textContent = '暂无条目';
-    td.colSpan = 3;
-    tr.appendChild(td);
-    body.appendChild(tr);
-    return;
-  }
-  for (const e of aesEntries) {
-    const tr = document.createElement('tr');
-    const tdName = document.createElement('td');
-    tdName.textContent = e.name;
-    const tdKey = document.createElement('td');
-    tdKey.className = 'masked';
-    tdKey.textContent = maskSecret(e['secret-key']);
-    const tdIV = document.createElement('td');
-    tdIV.className = 'masked';
-    tdIV.textContent = maskSecret(e.iv);
-    const tdDel = document.createElement('td');
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'reveal-btn';
-    btn.textContent = '删除';
-    btn.addEventListener('click', () => deleteAESEntry(e.name));
-    tdDel.appendChild(btn);
-    tr.appendChild(tdName);
-    tr.appendChild(tdKey);
-    tr.appendChild(tdIV);
-    tr.appendChild(tdDel);
-    body.appendChild(tr);
-  }
-}
-
-function maskSecret(s) {
-  if (!s) return '';
-  if (s.length <= 8) return '••••';
-  return `${s.slice(0, 4)}…${s.slice(-4)}`;
-}
-
-async function deleteAESEntry(name) {
-  try {
-    await api(`/api/aes/config?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
-    await loadAESEntries();
-    renderAESList();
-    $('aes-config-status').textContent = aesEntries.length ? `已保存 ${aesEntries.length} 条。` : '未保存任何条目。';
-    $('aes-config-status').className = aesEntries.length ? 'status-line ok' : 'status-line';
-  } catch (err) { showSettingsError(err.message); }
 }
 
 async function initKey() {
@@ -1682,10 +1549,8 @@ function openReveal(item) {
   $('reveal-advanced').hidden = true;
   $('reveal-key-input').value = '';
   $('reveal-iv-input').value = '';
-  $('reveal-list-select').value = '';
   $('reveal-confirm-btn').hidden = false;
   $('reveal-confirm-btn').textContent = '显示';
-  if (aesEntries.length) populateAESSelect($('reveal-list-select'));
   openDialog('reveal-dialog');
 }
 
@@ -1704,15 +1569,6 @@ async function confirmReveal() {
     $('reveal-advanced').hidden = false;
     dialogError('reveal-dialog', err.message);
   }
-}
-
-function loadSelectedRevealEntry() {
-  const name = $('reveal-list-select').value;
-  if (!name) return;
-  const e = aesEntries.find((x) => x.name === name);
-  if (!e) return;
-  $('reveal-key-input').value = e['secret-key'];
-  $('reveal-iv-input').value = e.iv;
 }
 
 // ---- bulk edit ----
@@ -1816,18 +1672,12 @@ function wire() {
 
   $('aes-encrypt-btn').addEventListener('click', () => runAES('encrypt'));
   $('aes-decrypt-btn').addEventListener('click', () => runAES('decrypt'));
-  $('aes-gen-key').addEventListener('click', genAESKey);
-  $('aes-load-config').addEventListener('click', () => loadSelectedAESEntry('aes-list-select'));
-  $('aes-refresh-list').addEventListener('click', loadAESEntries);
-  $('aes-save-config').addEventListener('click', saveAESConfig);
   $('aes-copy').addEventListener('click', copyAESOutput);
-  $('aes-list-new').addEventListener('click', () => switchView('aes'));
 
   $('init-key-btn').addEventListener('click', initKey);
   $('init-sensitive-btn').addEventListener('click', initSensitiveKey);
 
   $('reveal-confirm-btn').addEventListener('click', confirmReveal);
-  $('reveal-load-config').addEventListener('click', loadSelectedRevealEntry);
   $('edit-form').addEventListener('submit', (e) => { e.preventDefault(); saveBulkEdit(); });
 
   $('snap-delete-confirm-btn').addEventListener('click', confirmDeleteSnapshot);

@@ -22,7 +22,7 @@ make build     # 产物 bin/vaulty-keeper
 - **AI 写**：`set`/`unset`/`import` 安全，无需 `--yes`（AI 写的就是它已知的明文，写入即加密）。
 - **Web UI**：仅监听 127.0.0.1，随机 token 门控写操作与明文出口，GET 只返回掩码数据；**明文接口（reveal/export/明文编辑/AES 解密）默认禁用**，需 `--allow-plaintext` 显式开启（否则带 token 也 403）；token 失败限速（指数退避）。
 - **掩码代理（serve/remote）**：`vaulty-keeper serve --addr 0.0.0.0:8970` 在 host 起掩码代理，`vaulty-keeper remote list/get/compare` 在隔离域（Docker 容器/独立账号/VM）内读配置。代理**无条件掩码**——即使 `set --plain` 标记安全的 key 也不回明文；全部 /api 端点要 token（0600 写 `~/.vaulty/bridge-token`）+ 失败限速。对"故意对抗的同用户 AI"，这是唯一真正能防住的方式：把 AI 放进摸不到密钥/密文的隔离域（见 README「容器隔离部署」，docker-compose 已内置不挂载密钥目录/cap_drop/no-new-privileges）。
-- **DB 隧道（db/serve）**：`vaulty-keeper db add` 只加密数据库 URL（独立 DB 密钥 `VAULTY_KEEPER_DB_KEY` + `~/.vaulty/db.json`，0600）；`serve` 为每条连接起 TCP 隧道，在握手阶段把真实凭据注入（PG trust 风格 / MySQL 认证应答替换 / Redis 代发 AUTH），之后纯字节转发。客户端只需 bridge token（PG/MySQL 的 username 字段 / Redis 的 AUTH 首命令），**不需要真实账号密码**；DSN 永不离开 host、不进日志/回包。隧道监听地址跟随 `--addr`，`0.0.0.0` 时靠 token 门控兜底。只读靠注册只读账号实现，代理不强制。
+- **DB 隧道（db/serve）**：`vaulty-keeper db add` 只加密数据库 URL（独立 DB 密钥 `VAULTY_KEEPER_DB_KEY` + `~/.vaulty/db.json`，0600），并为每条连接生成**专属隧道 token**；`serve` 为每条连接起 TCP 隧道，在握手阶段把真实凭据注入（PG trust 风格 / MySQL 认证应答替换 / Redis 代发 AUTH），之后纯字节转发。客户端只需隧道 token（`db connect <name>` 打印；旧连接回退全局 `VAULTY_KEEPER_BRIDGE_TOKEN`；PG/MySQL 的 username 字段 / Redis 的 AUTH 首命令），**不需要真实账号密码**；`db regen <name>|--all` 轮换 token（旧 token 立即失效）；DSN 永不离开 host、不进日志/回包。隧道监听地址跟随 `--addr`，`0.0.0.0` 时靠 token 门控兜底。只读靠注册只读账号实现，代理不强制。
 - **防破解**：掩码指纹是 HMAC-SHA256（密钥=快照密钥），密钥不泄露时无法离线枚举弱值匹配指纹；token 为 128 位随机，AES-256-GCM 暴力不可行。
 - **判断一致性**：用 `compare`（掩码 + 长度 + 指纹即可判断），不要 `get` 明文。
 
@@ -44,11 +44,11 @@ bin/vaulty-keeper db test <name>                 # 验证注册的连接可用�
 bin/vaulty-keeper db show <name>                 # 打印解密后的真实 URL（TTY-only，与 reveal 同门禁）
 bin/vaulty-keeper db add <name>                   # 注册连接（URL 从 stdin 读，加密落盘）
 
-DB 隧道用法（AI 侧）：`db list`（或 `remote dblist`）拿到连接名 + 隧道端口后，用原生客户端连代理端口，token 即 `VAULTY_KEEPER_BRIDGE_TOKEN`：
+DB 隧道用法（AI 侧）：`db list`（或 `remote dblist`）拿到连接名 + 隧道端口后，用原生客户端连代理端口，token 用 `db connect <name>` 打印的连接专属 token（旧连接回退 `VAULTY_KEEPER_BRIDGE_TOKEN`）：
   psql "postgresql://$TOKEN@host.docker.internal:15432/appdb"   # token 放 user 字段，数据库名/账号密码一律用注册 URL 里的
-  mysql -h host.docker.internal -P 15433 -u "$TOKEN" -px
+  mysql -h host.docker.internal -P 15435 -u "$TOKEN" -px
   redis-cli -a "$TOKEN" -p 15434
-AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或任何回包中找 DSN。Mongo 未接入代理。serve 热加载：db add/rm 后隧道自动开/关（每 2 秒同步 db.json），不用重启。
+AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或任何回包中找 DSN。Mongo 未接入代理。serve 热加载：db add/rm/regen 后隧道自动开/关（每 2 秒同步 db.json），不用重启。
 本地人工验证：`./scripts/dbtest.sh`（Docker 起 pg/mariadb/redis + 起 serve + 全量正/负向测试；`--clean` 收尾）。
 图解：`docs/db-proxy-architecture.md`（Docker 里是什么/凭据存哪/三库认证注入/安全边界/时序）。
 用法示例：`docs/db-proxy-examples.md`（多连接/各客户端/容器 AI/权限/脚本，全部实测过）。
@@ -65,7 +65,7 @@ AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或�
 - **`--plain` 防误标守卫**：`set --plain` / `mark --plain` 命中敏感规则（password/token/secret/JWT/带凭据 URI）的 key 时，非 TTY 一律拒绝、TTY 需二次确认。AI 不要尝试用 `--plain` 放行敏感 key 给自己读明文。
 - 快照目录：`--dir` 或 `VAULTY_KEEPER_APOLLO_DIR`，默认 `~/.vaulty/apollo/`。
 - 非 TTY 下 `apollo rm` 需 `--yes`、`apollo import` 覆盖已有快照需 `--force`；不要绕过。
-- 无参数 `vaulty-keeper` 显示完整命令 usage（交互菜单已移除，手动操作走 `vaulty-keeper ui` 或直接子命令）。
+- 无参数 `vaulty-keeper` 显示完整命令 usage，并自动完成首次初始化：创建数据目录（`~/.vaulty/`、`~/.vaulty/apollo/`，0700）并生成 AES key/iv 列表的 `default` 条目（`~/.vaulty/aes.json`，0600），检测三把加密密钥（快照/敏感值/数据库）是否已初始化——缺失时 TTY 询问初始化、非 TTY 打印提示（交互菜单已移除，手动操作走 `vaulty-keeper ui` 或直接子命令）。
 
 ## 开发
 

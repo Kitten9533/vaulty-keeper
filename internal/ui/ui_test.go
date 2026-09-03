@@ -337,11 +337,11 @@ func TestTokenGatesStateChangingRequests(t *testing.T) {
 	}
 
 	// correct token in query param works
-	r = httptest.NewRequest(http.MethodDelete, "/api/aes/config?name=x&t=s3cr3t-token", nil)
+	r = httptest.NewRequest(http.MethodPost, "/api/aes/transform?t=s3cr3t-token", strings.NewReader(`{"op":"encrypt","key":"0123456789abcdef","iv":"abcdefghijklmnop","text":"hello"}`))
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DELETE with query token = %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST with query token = %d", w.Code)
 	}
 
 	// read-only GET stays open without a token
@@ -582,52 +582,6 @@ func TestAESTransformRoundTrip(t *testing.T) {
 		strings.NewReader(`{"op":"decrypt","key":"0123456789abcdef","iv":"abcdefghijklmnop","text":"`+er.Result+`"}`)))
 	if dec.Code != http.StatusOK || !strings.Contains(dec.Body.String(), `"hello"`) {
 		t.Fatalf("decrypt = %d %s", dec.Code, dec.Body.String())
-	}
-}
-
-func TestAESConfigAPI(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("VAULTY_KEEPER_AES_CONFIG", filepath.Join(dir, "aes.json"))
-	h := NewHandler(Config{Dir: dir, AllowPlaintext: true, SnapshotKey: func() ([]byte, error) { return make([]byte, 32), nil }})
-
-	get := httptest.NewRecorder()
-	h.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/aes/config", nil))
-	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"entries"`) {
-		t.Fatalf("get empty config = %d %s", get.Code, get.Body.String())
-	}
-
-	// add an entry (replaces the old PUT single-object flow)
-	post := httptest.NewRecorder()
-	h.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/api/aes/config",
-		strings.NewReader(`{"name":"oss","secret-key":"kk","iv":"ivv"}`)))
-	if post.Code != http.StatusCreated {
-		t.Fatalf("post config = %d %s", post.Code, post.Body.String())
-	}
-
-	get2 := httptest.NewRecorder()
-	h.ServeHTTP(get2, httptest.NewRequest(http.MethodGet, "/api/aes/config", nil))
-	if get2.Code != http.StatusOK || !strings.Contains(get2.Body.String(), `"name":"oss"`) {
-		t.Fatalf("get after post = %d %s", get2.Code, get2.Body.String())
-	}
-
-	// duplicate name is rejected
-	post2 := httptest.NewRecorder()
-	h.ServeHTTP(post2, httptest.NewRequest(http.MethodPost, "/api/aes/config",
-		strings.NewReader(`{"name":"oss","secret-key":"k2","iv":"iv2"}`)))
-	if post2.Code != http.StatusBadRequest {
-		t.Fatalf("duplicate post = %d %s", post2.Code, post2.Body.String())
-	}
-
-	del := httptest.NewRecorder()
-	h.ServeHTTP(del, httptest.NewRequest(http.MethodDelete, "/api/aes/config?name=oss", nil))
-	if del.Code != http.StatusNoContent {
-		t.Fatalf("delete config = %d", del.Code)
-	}
-
-	get3 := httptest.NewRecorder()
-	h.ServeHTTP(get3, httptest.NewRequest(http.MethodGet, "/api/aes/config", nil))
-	if get3.Code != http.StatusOK || strings.Contains(get3.Body.String(), `"name":"oss"`) {
-		t.Fatalf("get after delete = %d %s", get3.Code, get3.Body.String())
 	}
 }
 

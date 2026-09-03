@@ -207,12 +207,10 @@ dialog::backdrop{background:rgba(38,38,36,.28)}
 #reveal-dialog .fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 #reveal-dialog .hint{margin:0 0 14px;font-size:12px}
 .reveal-advanced{margin-bottom:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fdfbf8}
-.reveal-advanced .row-actions{margin:0 0 10px}
 
-/* ---- select + aes list ---- */
+/* ---- select ---- */
 .select{font:inherit;font-size:13px;border:1px solid var(--line);border-radius:var(--r-ctl);background:#fff;color:#4a4641;padding:7px 10px;outline:none;max-width:280px}
 .select:focus{border-color:#d9d3c9}
-#view-aes .row-actions .select{flex:0 1 auto}
 .aes-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:14px}
 .aes-table td{padding:8px 10px;border-bottom:1px solid var(--line-soft)}
 .aes-table td:first-child{width:30%;font:600 12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#4c4842;word-break:break-all;overflow-wrap:anywhere}

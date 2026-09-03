@@ -91,30 +91,18 @@
         <div class="hero">
           <div>
             <h1>AES 加解密工具。</h1>
-            <p class="sub">Java CryptoUtil 兼容（AES/GCM/NoPadding）。从本机 aes.json 列表选择 key/iv，或手动输入。</p>
+            <p class="sub">Java CryptoUtil 兼容（AES/GCM/NoPadding）。手动输入 key/iv 加解密。</p>
           </div>
         </div>
         <div id="aes-error" class="error-region" hidden></div>
         <div class="panel">
-          <div class="row-actions">
-            <select id="aes-list-select" class="select" aria-label="选择已保存的 key/iv"></select>
-            <button class="ghost" type="button" id="aes-load-config">加载所选</button>
-            <button class="ghost" type="button" id="aes-refresh-list">刷新列表</button>
-          </div>
           <div class="fields">
-            <label class="field" for="aes-name">名称
-              <input id="aes-name" type="text" autocomplete="off" spellcheck="false" placeholder="保存到列表时使用">
-            </label>
             <label class="field" for="aes-key">AES key（16/24/32 字节 UTF-8）
               <input id="aes-key" type="text" autocomplete="off" spellcheck="false">
             </label>
             <label class="field" for="aes-iv">IV（UTF-8 字节）
               <input id="aes-iv" type="text" autocomplete="off" spellcheck="false">
             </label>
-          </div>
-          <div class="row-actions">
-            <button class="ghost" type="button" id="aes-gen-key">生成 key/iv</button>
-            <button class="ghost" type="button" id="aes-save-config">保存到列表</button>
           </div>
           <label class="field" for="aes-input">输入
             <textarea id="aes-input" rows="6" placeholder="明文或 base64 密文…" spellcheck="false"></textarea>
@@ -197,14 +185,6 @@
           <div id="sensitive-key-status" class="status-line">检测中…</div>
           <div class="row-actions">
             <button class="primary" type="button" id="init-sensitive-btn" hidden>生成敏感值密钥</button>
-          </div>
-          <div class="sec-head"><h2>AES key/iv 列表（aes.json）</h2></div>
-          <div id="aes-config-status" class="status-line">检测中…</div>
-          <table class="aes-table" id="aes-list-table">
-            <tbody id="aes-list-body"></tbody>
-          </table>
-          <div class="row-actions">
-            <button class="ghost" type="button" id="aes-list-new">在 AES 工具中新增</button>
           </div>
         </div>
       </div>
@@ -382,10 +362,6 @@
     <h3 id="reveal-title">显示</h3>
     <p class="warning">⚠ 将显示 <code id="reveal-key"></code> 的明文值，请仅在本机查看。</p>
     <div id="reveal-advanced" class="reveal-advanced" hidden>
-      <div class="row-actions">
-        <select id="reveal-list-select" class="select" aria-label="选择已保存的 key/iv"></select>
-        <button class="ghost" type="button" id="reveal-load-config">加载所选</button>
-      </div>
       <div class="fields">
         <label class="field" for="reveal-key-input">AES key
           <input id="reveal-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="留空用系统敏感密钥">
@@ -394,7 +370,7 @@
           <input id="reveal-iv-input" type="text" autocomplete="off" spellcheck="false" placeholder="留空用系统敏感密钥">
         </label>
       </div>
-      <p class="muted hint">值不是用系统敏感密钥加密时（如外部 AES 密文），从列表选择或手动填写 key/iv 后重试。</p>
+      <p class="muted hint">值不是用系统敏感密钥加密时（如外部 AES 密文），手动填写 key/iv 后重试。</p>
     </div>
     <div id="reveal-value" class="reveal-box" hidden></div>
     <div id="reveal-error" class="error" hidden></div>

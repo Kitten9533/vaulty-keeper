@@ -495,6 +495,93 @@ func TestUIOptions(t *testing.T) {
 	}
 }
 
+// TestEnsureKeys exercises checkKey's three branches: key present (silent),
+// missing on non-TTY (hint only), missing on TTY with confirm (init runs).
+func TestEnsureKeys(t *testing.T) {
+	// key available → silent, init never called
+	called := false
+	out := captureStdout(t, func() {
+		checkKey("快照", "vaulty-keeper apollo init", func() bool { return true },
+			func() error { called = true; return nil })
+	})
+	if called || out != "" {
+		t.Fatalf("available key should be silent (called=%v out=%q)", called, out)
+	}
+
+	// missing + non-TTY → hint on stderr, init never called
+	called = false
+	errOut := captureStderr(t, func() {
+		checkKey("快照", "vaulty-keeper apollo init", func() bool { return false },
+			func() error { called = true; return nil })
+	})
+	if called {
+		t.Error("init must not run on non-TTY")
+	}
+	if !strings.Contains(errOut, "vaulty-keeper apollo init") {
+		t.Errorf("missing init hint, got %q", errOut)
+	}
+
+	// missing + TTY + confirm → init runs and reports created
+	asTTY(t)
+	oldConfirm := confirmKeyInit
+	confirmKeyInit = func(string) bool { return true }
+	t.Cleanup(func() { confirmKeyInit = oldConfirm })
+	called = false
+	out = captureStdout(t, func() {
+		checkKey("快照", "vaulty-keeper apollo init", func() bool { return false },
+			func() error { called = true; return nil })
+	})
+	if !called {
+		t.Error("init should run after TTY confirm")
+	}
+	if !strings.Contains(out, "已创建") {
+		t.Errorf("expected created message, got %q", out)
+	}
+
+	// missing + TTY but declined → init not called
+	confirmKeyInit = func(string) bool { return false }
+	called = false
+	captureStdout(t, func() {
+		checkKey("快照", "vaulty-keeper apollo init", func() bool { return false },
+			func() error { called = true; return nil })
+	})
+	if called {
+		t.Error("init must not run when the user declines")
+	}
+}
+
+// TestEnsureDirsAndAESConfig verifies a fresh setup creates ~/.vaulty/apollo
+// and seeds aes.json with a "default" entry on the first bare run.
+func TestEnsureDirsAndAESConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	ensureDirs()
+	apolloDir := filepath.Join(home, ".vaulty", "apollo")
+	if fi, err := os.Stat(apolloDir); err != nil || !fi.IsDir() {
+		t.Fatalf("~/.vaulty/apollo not created: %v", err)
+	}
+
+	out := captureStdout(t, func() { ensureAESConfig() })
+	p := filepath.Join(home, ".vaulty", "aes.json")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("aes.json not created: %v", err)
+	}
+	if !strings.Contains(string(b), "default") || strings.Contains(string(b), `[]`) {
+		t.Errorf("expected a seeded default entry, got %s", b)
+	}
+	if !strings.Contains(out, "已初始化") {
+		t.Errorf("expected init message, got %q", out)
+	}
+
+	// existing entries → silent, no rewrite
+	out = captureStdout(t, func() { ensureAESConfig() })
+	if out != "" {
+		t.Errorf("existing config should be silent, got %q", out)
+	}
+}
+
 func TestCompletion(t *testing.T) {
 	for _, shell := range []string{"zsh", "bash", "fish"} {
 		out := captureStdout(t, func() {

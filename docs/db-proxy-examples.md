@@ -1,7 +1,7 @@
 # vaulty-keeper 数据库隧道 · 使用示例
 
 > 全部命令都在本地 Docker 测试环境实测过（`scripts/dbtest.sh` 起的）。
-> 端口/token 每次跑脚本会变，示例里写的是当次值，套用请先 `db list` 和 `cat ~/.vaulty/bridge-token` 换成你的。
+> 端口/token 每次跑脚本会变，示例里写的是当次值。连接专属 token 用 `vaulty-keeper db connect <name>` 取；套用本文件的 `TOKEN=$(cat ~/.vaulty/bridge-token)` 写法对旧连接（或图省事）仍可用——隧道也接受全局 bridge token 兜底。
 > 配套：架构图解 `docs/db-proxy-architecture.md`。
 
 ---
@@ -29,7 +29,8 @@ vaulty-keeper serve --addr 0.0.0.0:8972
 
 # ⑤ 让 vaulty-keeper 生成带 token 的完整客户端命令，直接复制执行
 vaulty-keeper db connect pgdb
-#   # pgdb (postgres) — token 是 bridge token，不是真实数据库密码（隧道端口 15432）
+#   # pgdb (postgres) — token 是该连接的专属隧道 token，不是真实数据库密码（隧道端口 15432）
+#   # 专属 token 由 db add 自动生成，db regen <name>|--all 可轮换；旧连接回退全局 bridge token
 #   原始隧道链接（AI / 其他工具可据此自行转换）:
 #     postgresql://5d321a50...@127.0.0.1:15432/appdb
 #   psql / libpq（psql、pgAdmin、DBeaver 均可粘贴）:

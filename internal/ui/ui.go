@@ -85,7 +85,6 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("/api/sensitive/key", h.sensitiveKeyStatus)
 	mux.HandleFunc("/api/aes/gen-key", h.aesGenKey)
 	mux.HandleFunc("/api/aes/transform", h.aesTransform)
-	mux.HandleFunc("/api/aes/config", h.aesConfig)
 	mux.HandleFunc("/api/config", h.config)
 	mux.HandleFunc("/api/db/key", h.dbKeyStatus)
 	mux.HandleFunc("/api/db/list", h.dbList)
@@ -1094,52 +1093,6 @@ func (h *handler) aesTransform(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"result": out})
-}
-
-type aesConfigRequest struct {
-	Name      string `json:"name"`
-	SecretKey string `json:"secret-key"`
-	IV        string `json:"iv"`
-}
-
-func (h *handler) aesConfig(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		if !h.plaintextOnly(w) {
-			return
-		}
-		entries, err := app.AESConfigList()
-		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "aes_config_io", err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "path": app.AESConfigPath()})
-	case http.MethodPost:
-		var req aesConfigRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
-			return
-		}
-		if err := app.AESConfigAdd(req.Name, req.SecretKey, req.IV); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "aes_config_add_failed", err.Error())
-			return
-		}
-		writeJSON(w, http.StatusCreated, map[string]any{"ok": true})
-	case http.MethodDelete:
-		name := r.URL.Query().Get("name")
-		if name == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_aes_params", "缺少 name 查询参数")
-			return
-		}
-		if err := app.AESConfigRemove(name); err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "aes_config_io", err.Error())
-			return
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
-	}
 }
 
 func writeAPIError(w http.ResponseWriter, status int, code, message string) {

@@ -36,6 +36,7 @@ func bothKeys() ([]byte, []byte, error) {
 
 func Run(args []string) int {
 	if len(args) == 0 {
+		ensureKeys()
 		usage(os.Stdout)
 		return 0
 	}
@@ -74,6 +75,82 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "Usage: vaulty-keeper <command> [args] [flags]")
 	fmt.Fprintln(w)
 	printCommandTree(w)
+}
+
+// confirmKeyInit is overridable in tests to answer the init prompt without
+// touching stdin.
+var confirmKeyInit = confirmYes
+
+// ensureKeys checks that the encryption keys are initialized and, on a TTY,
+// offers to initialize any missing ones so a fresh setup is one command away.
+// Non-TTY callers just get a hint. The DB key is only checked when a db store
+// exists (db support is optional); env-override keys count as available.
+func ensureKeys() {
+	ensureDirs()
+	ensureAESConfig()
+	checkKey("快照", "vaulty-keeper apollo init", app.KeyAvailable, func() error { return app.InitKey(false) })
+	checkKey("敏感值", "vaulty-keeper sensitive init", app.SensitiveKeyAvailable, func() error { return app.InitSensitiveKey(false) })
+	if p, err := dbPath(""); err == nil {
+		if _, err := os.Stat(p); err == nil {
+			checkKey("数据库", "vaulty-keeper db init",
+				func() bool { _, err := apollo.DBKey(); return err == nil },
+				func() error { return apollo.GenerateAndStoreDBKey(false) })
+		}
+	}
+}
+
+// ensureDirs creates the data directories (~/.vaulty and ~/.vaulty/apollo)
+// with 0700 so every later write works even on a brand-new machine.
+func ensureDirs() {
+	dir, err := snapDir("")
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: 创建数据目录失败："+err.Error()))
+	}
+}
+
+// ensureAESConfig makes the named AES key/iv list usable out of the box: when
+// it is missing or empty it writes a generated "default" entry (~/.vaulty/
+// aes.json, 0600). Existing entries are never touched.
+func ensureAESConfig() {
+	entries, err := app.AESConfigList()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: 读取 AES key/iv 列表失败："+err.Error()))
+		return
+	}
+	if len(entries) > 0 {
+		return
+	}
+	key, iv, err := app.GenKey(16, 16)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: 生成 AES key/iv 失败："+err.Error()))
+		return
+	}
+	if err := app.AESConfigAdd("default", key, iv); err != nil {
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: 初始化 AES key/iv 列表失败："+err.Error()))
+		return
+	}
+	fmt.Println(dim("已初始化 AES key/iv 列表（~/.vaulty/aes.json，已生成 default 条目；用 aes list 查看，aes add / aes gen-key --name 添加更多）"))
+}
+
+func checkKey(label, cmd string, available func() bool, init func() error) {
+	if available() {
+		return
+	}
+	if !isTerminal() {
+		fmt.Fprintf(os.Stderr, "提示：%s密钥未初始化，请运行 %s\n", label, cmd)
+		return
+	}
+	if !confirmKeyInit(fmt.Sprintf("%s密钥未初始化，现在运行 %s 吗？", label, cmd)) {
+		return
+	}
+	if err := init(); err != nil {
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: "+err.Error()))
+		return
+	}
+	fmt.Println(green(fmt.Sprintf("%s密钥已创建（%s）", label, apollo.StoreName())))
 }
 
 // isTerminalFunc is overridable in tests to simulate a non-TTY stdin.
