@@ -129,7 +129,7 @@ Add this test to `internal/apollo/parser_test.go`:
 
 ```go
 func TestValidateKey(t *testing.T) {
-	for _, key := range []string{"APP_NAME", "imile.fs.oss.secret-key", "SOME-KEY"} {
+	for _, key := range []string{"APP_NAME", "app.fs.oss.secret-key", "SOME-KEY"} {
 		if err := ValidateKey(key); err != nil {
 			t.Errorf("ValidateKey(%q): %v", key, err)
 		}

@@ -65,7 +65,7 @@ DELETE /api/aes/config                  → 204 清除 aes.json
 ### 端点行为
 
 - `POST /api/init`：调用 `app.Init(force)`。`force:false` 且密钥已存在 → `409 key_exists`；`force:true` 时即使已有密钥也重新生成；成功 201。前端只在密钥不可用时显示引导按钮（不传 force）。
-- `POST /api/snapshots/{name}/reveal`：`confirm` 非 true → `400 confirm_required`。校验快照名与每个 target（`ValidateKey`）。服务端从快照内解析 AES 配置（`imile.fs.aes.secret-key` / `imile.fs.aes.iv`，与 CLI `reveal` 默认行为一致；UI 不提供手动 key/iv 覆盖，需要手动加解密时走 AES 工具区），逐 target 解密；任一失败返回结构化错误且不返回部分明文。
+- `POST /api/snapshots/{name}/reveal`：`confirm` 非 true → `400 confirm_required`。校验快照名与每个 target（`ValidateKey`）。服务端从快照内解析 AES 配置（`app.fs.aes.secret-key` / `app.fs.aes.iv`，与 CLI `reveal` 默认行为一致；UI 不提供手动 key/iv 覆盖，需要手动加解密时走 AES 工具区），逐 target 解密；任一失败返回结构化错误且不返回部分明文。
 - `POST /api/snapshots/{name}/edit`：`confirm` 非 true → `400 confirm_required`。返回排序后的 `KEY = value\n` 全量明文文本。
 - `PUT /api/snapshots/{name}/edit`：解析文本（`ParseKV`），无条目 → `400 empty_import`；全量重加密（`NewSnapshot` + `Set` + `Save`），语义与 CLI `edit` 一致。返回新快照的 safe 摘要。
 - `POST /api/aes/gen-key`：`bytes ∈ {16,24,32}`、`iv_bytes ∈ {12,16}`，否则 `400 invalid_aes_params`。返回可打印 key/iv。

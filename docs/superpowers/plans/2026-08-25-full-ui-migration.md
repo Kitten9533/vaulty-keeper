@@ -449,9 +449,9 @@ func TestReveal(t *testing.T) {
 	}
 	s := apollo.NewSnapshot("prod", "")
 	for _, kv := range []struct{ k, v string }{
-		{"imile.fs.aes.secret-key", aesKey},
-		{"imile.fs.aes.iv", aesIV},
-		{"imile.fs.oss.secret-key", enc},
+		{"app.fs.aes.secret-key", aesKey},
+		{"app.fs.aes.iv", aesIV},
+		{"app.fs.oss.secret-key", enc},
 	} {
 		if err := s.Set(key, kv.k, kv.v, nil); err != nil {
 			t.Fatal(err)
@@ -460,22 +460,22 @@ func TestReveal(t *testing.T) {
 	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
 		t.Fatal(err)
 	}
-	plain, err := Reveal(dir, "prod", key, []string{"imile.fs.oss.secret-key"}, "", "")
+	plain, err := Reveal(dir, "prod", key, []string{"app.fs.oss.secret-key"}, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plain["imile.fs.oss.secret-key"] != "REAL-SECRET" {
+	if plain["app.fs.oss.secret-key"] != "REAL-SECRET" {
 		t.Fatalf("reveal = %#v", plain)
 	}
 	enc2, _ := aesx.Encrypt("fedcba9876543210", "ponmlkjihgfedcba", "OTHER")
-	if err := s.Set(key, "imile.fs.oss.secret-key", enc2, nil); err != nil {
+	if err := s.Set(key, "app.fs.oss.secret-key", enc2, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Save(filepath.Join(dir, "prod.json")); err != nil {
 		t.Fatal(err)
 	}
-	plain2, err := Reveal(dir, "prod", key, []string{"imile.fs.oss.secret-key"}, "fedcba9876543210", "ponmlkjihgfedcba")
-	if err != nil || plain2["imile.fs.oss.secret-key"] != "OTHER" {
+	plain2, err := Reveal(dir, "prod", key, []string{"app.fs.oss.secret-key"}, "fedcba9876543210", "ponmlkjihgfedcba")
+	if err != nil || plain2["app.fs.oss.secret-key"] != "OTHER" {
 		t.Fatalf("override reveal = %#v, %v", plain2, err)
 	}
 }
@@ -664,7 +664,7 @@ func EditApply(dir, name string, snapKey []byte, text string) (int, error) {
 }
 
 // Reveal decrypts AES-protected targets using the snapshot's AES config
-// (imile.fs.aes.secret-key / imile.fs.aes.iv). Overrides take precedence over
+// (app.fs.aes.secret-key / app.fs.aes.iv). Overrides take precedence over
 // env vars, which take precedence over the snapshot. Fails without returning
 // any plaintext if any target fails.
 func Reveal(dir, name string, snapKey []byte, targets []string, aesKeyOverride, aesIVOverride string) (map[string]string, error) {
@@ -677,7 +677,7 @@ func Reveal(dir, name string, snapKey []byte, targets []string, aesKeyOverride, 
 		aesKey = os.Getenv("VAULTY_KEEPER_AES_KEY")
 	}
 	if aesKey == "" {
-		if v, ok, err := s.Get(snapKey, "imile.fs.aes.secret-key"); err != nil {
+		if v, ok, err := s.Get(snapKey, "app.fs.aes.secret-key"); err != nil {
 			return nil, err
 		} else if ok {
 			aesKey = v
@@ -688,14 +688,14 @@ func Reveal(dir, name string, snapKey []byte, targets []string, aesKeyOverride, 
 		aesIV = os.Getenv("VAULTY_KEEPER_AES_IV")
 	}
 	if aesIV == "" {
-		if v, ok, err := s.Get(snapKey, "imile.fs.aes.iv"); err != nil {
+		if v, ok, err := s.Get(snapKey, "app.fs.aes.iv"); err != nil {
 			return nil, err
 		} else if ok {
 			aesIV = v
 		}
 	}
 	if aesKey == "" || aesIV == "" {
-		return nil, errors.New("AES key/iv not found (pass --key/--iv, set VAULTY_KEEPER_AES_KEY/IV, or keep imile.fs.aes.secret-key / imile.fs.aes.iv in the snapshot)")
+		return nil, errors.New("AES key/iv not found (pass --key/--iv, set VAULTY_KEEPER_AES_KEY/IV, or keep app.fs.aes.secret-key / app.fs.aes.iv in the snapshot)")
 	}
 	plain := map[string]string{}
 	for _, k := range targets {

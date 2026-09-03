@@ -2,12 +2,24 @@
 
 个人 AI 工具箱（Go 单二进制，无运行时依赖）。所有值在本地磁盘上都是加密存储，密钥不进配置中心、不进明文文件。`vaulty-keeper ui` 提供本地 Web UI 覆盖全部快照与 AES 工具（仅本机监听）。
 
-## 安装
+## 快速开始
+
+**方式一：下载预编译二进制**（推荐，无需安装 Go）——从 [Releases](https://github.com/<your-org>/vaulty-keeper/releases) 下载对应平台的压缩包（darwin/linux/windows × amd64/arm64），解压后把 `vaulty-keeper` 放到 PATH：
 
 ```sh
+vaulty-keeper apollo init      # 首次：生成快照密钥（macOS Keychain / Windows 凭据管理器）
+vaulty-keeper sensitive init   # 首次：生成敏感值密钥
+vaulty-keeper ui               # 打开本地 Web UI
+```
+
+**方式二：源码构建**（需要 Go 1.26+）：
+
+```sh
+git clone <repo-url>
 make build          # → bin/vaulty-keeper
-make install        # 软链到 ~/.local/bin/vaulty-keeper（已在 PATH）
+make install        # 软链到 ~/.local/bin/vaulty-keeper
 make test           # 单测（含 Java↔Go 互操作向量）
+make release        # 交叉编译全平台发布包到 release/
 ```
 
 ## 手动操作
@@ -57,7 +69,7 @@ vaulty-keeper apollo import - --name prod --appid xx   # 从 stdin 读（旧写�
  vaulty-keeper apollo compare prod test --appid xx --appid-to yy   # added/removed/changed，默认全部掩码
  vaulty-keeper apollo compare prod test --json
  vaulty-keeper apollo reveal prod --appid xx SECRET_TOKEN          # 显示敏感值明文（仅 TTY）
- vaulty-keeper apollo reveal prod --appid xx imile.fs.oss.secret-key --key <aes> --iv <aes>   # 解密外部 AES 密文（仅 TTY）
+ vaulty-keeper apollo reveal prod --appid xx app.fs.oss.secret-key --key <aes> --iv <aes>   # 解密外部 AES 密文（仅 TTY）
  vaulty-keeper apollo edit prod --appid xx         # $EDITOR 打开明文编辑，保存后自动重新加密（仅 TTY）
  vaulty-keeper apollo export prod --appid xx       # 解密全量输出，供粘贴回 Apollo（仅 TTY）
  vaulty-keeper apollo export prod --appid xx --copy # 直接复制到剪贴板（pbcopy）（仅 TTY）
@@ -111,7 +123,7 @@ vaulty-keeper aes encrypt --key <k> --iv <i> 'hello'
 VAULTY_KEEPER_AES_KEY=<k> VAULTY_KEEPER_AES_IV=<i> vaulty-keeper aes decrypt '<base64>'
 
 # 解密外部 AES 密文值（仅 TTY）
-vaulty-keeper apollo reveal prod imile.fs.oss.secret-key --key <k> --iv <i>
+vaulty-keeper apollo reveal prod app.fs.oss.secret-key --key <k> --iv <i>
 ```
 
 输入可走 `--file`、参数或 stdin。`decrypt` 输出明文，**仅交互式终端可用**（脚本/AI 环境一律拒绝）。
