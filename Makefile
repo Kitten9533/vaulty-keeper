@@ -18,7 +18,7 @@ install: build
 # including the README and LICENSE), ready to attach to a GitHub release.
 release:
 	rm -rf release && mkdir -p release
-	cp README.md LICENSE release/
+	cp README.md README.zh-CN.md LICENSE release/
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
 		ext=""; \
@@ -26,13 +26,13 @@ release:
 		echo ">> building vaulty-keeper-$(VERSION)-$$os-$$arch..."; \
 		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "release/vaulty-keeper$$ext" .; \
 		if [ "$$os" = "windows" ]; then \
-			zip -jq "release/vaulty-keeper-$(VERSION)-$$os-$$arch.zip" "release/vaulty-keeper$$ext" "release/README.md" "release/LICENSE"; \
+			zip -jq "release/vaulty-keeper-$(VERSION)-$$os-$$arch.zip" "release/vaulty-keeper$$ext" "release/README.md" "release/README.zh-CN.md" "release/LICENSE"; \
 		else \
-			tar -C release -czf "release/vaulty-keeper-$(VERSION)-$$os-$$arch.tar.gz" "vaulty-keeper" "README.md" "LICENSE"; \
+			tar -C release -czf "release/vaulty-keeper-$(VERSION)-$$os-$$arch.tar.gz" "vaulty-keeper" "README.md" "README.zh-CN.md" "LICENSE"; \
 		fi; \
 		rm -f "release/vaulty-keeper$$ext"; \
 	done
-	rm -f release/README.md release/LICENSE
+	rm -f release/README.md release/README.zh-CN.md release/LICENSE
 	@echo ">> done:"
 	@ls -lh release/
 
