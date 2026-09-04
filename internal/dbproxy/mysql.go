@@ -150,7 +150,7 @@ func myAuthenticate(server net.Conn, u *url.URL) error {
 		case 0x00: // OK
 			return nil
 		case 0xff: // ERR
-			return fmt.Errorf("服务端认证失败：%s", myParseErr(p))
+			return fmt.Errorf("server authentication failed: %s", myParseErr(p))
 		case 0x01: // AuthMoreData (plugin extra data)
 			if len(p) < 2 {
 				continue
@@ -211,7 +211,7 @@ func myFullAuth(server net.Conn, pass string, seed []byte, useTLS bool, seq byte
 	keyData := bytes.TrimSpace(bytes.TrimPrefix(keyPayload, []byte{0x01}))
 	pub, err := parseRSAPublicKey(keyData)
 	if err != nil {
-		return seq, fmt.Errorf("解析服务端 RSA 公钥失败：%w", err)
+		return seq, fmt.Errorf("cannot parse server RSA public key: %w", err)
 	}
 	for i := range plain {
 		plain[i] ^= seed[i%len(seed)]
@@ -259,7 +259,7 @@ func myAuthResponse(plugin, pass string, salt []byte) ([]byte, error) {
 	case "sha256_password":
 		return []byte{0x01}, nil // full auth follows via TLS/RSA exchange
 	default:
-		return nil, fmt.Errorf("不支持的认证插件 %q（支持 mysql_native_password / caching_sha2_password）", plugin)
+		return nil, fmt.Errorf("unsupported authentication plugin %q (supported: mysql_native_password / caching_sha2_password)", plugin)
 	}
 }
 
@@ -369,7 +369,7 @@ func myHandshakeV10(serverVersion string, connID uint32, salt []byte, plugin str
 // part2 (part2's trailing NUL is not part of the salt).
 func myParseHandshakeV10(p []byte) (salt []byte, plugin string, err error) {
 	if len(p) < 32 || p[0] != 0x0a {
-		return nil, "", errors.New("非法 MySQL 握手包")
+		return nil, "", errors.New("invalid MySQL handshake packet")
 	}
 	i := 1
 	for i < len(p) && p[i] != 0 {
@@ -377,16 +377,16 @@ func myParseHandshakeV10(p []byte) (salt []byte, plugin string, err error) {
 	}
 	i++ // server version NUL
 	if i+4+8+1+2+1+2+2+1 > len(p) {
-		return nil, "", errors.New("MySQL 握手包过短")
+		return nil, "", errors.New("MySQL handshake packet too short")
 	}
-	i += 4        // connection id
+	i += 4 // connection id
 	part1Start := i
-	i += 8        // auth-plugin-data-part-1
-	i += 1        // filler
-	i += 2        // capability lower
-	i += 1        // charset
-	i += 2        // status
-	i += 2        // capability upper
+	i += 8 // auth-plugin-data-part-1
+	i += 1 // filler
+	i += 2 // capability lower
+	i += 1 // charset
+	i += 2 // status
+	i += 2 // capability upper
 	authLen := int(p[i])
 	i += 1
 	i += 10 // reserved
@@ -398,7 +398,7 @@ func myParseHandshakeV10(p []byte) (salt []byte, plugin string, err error) {
 		part2Len = 13
 	}
 	if i+part2Len > len(p) {
-		return nil, "", errors.New("MySQL 握手包盐不足")
+		return nil, "", errors.New("MySQL handshake packet has insufficient salt")
 	}
 	salt = append(salt, p[part1Start:part1Start+8]...)
 	part2 := p[i : i+part2Len]
@@ -455,11 +455,11 @@ func myHandshakeResponseBody(caps uint32, user string, authResp []byte, db, plug
 // response (fixed 32-byte header, then a NUL-terminated username).
 func myParseResponseUser(p []byte) (string, error) {
 	if len(p) < 32 {
-		return "", errors.New("客户端握手响应过短")
+		return "", errors.New("client handshake response too short")
 	}
 	end := bytes.IndexByte(p[32:], 0)
 	if end < 0 {
-		return "", errors.New("客户端握手响应缺少用户名")
+		return "", errors.New("client handshake response is missing a username")
 	}
 	return string(p[32 : 32+end]), nil
 }

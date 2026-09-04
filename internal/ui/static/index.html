@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>vaulty-keeper · 配置工作台</title>
+<title>vaulty-keeper · Config Workbench</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/app.css">
 </head>
@@ -13,59 +13,65 @@
     <div class="brand"><span class="mark">✦</span> vaulty-keeper</div>
     <button class="new" type="button" data-action="import">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      导入配置快照
+      <span data-i18n="nav.import">Import snapshot</span>
     </button>
     <div class="rail-scroll">
       <section class="rail-card">
-        <div class="rail-card-head">快照</div>
+        <div class="rail-card-head" data-i18n="rail.snapshots">Snapshots</div>
         <div id="snapshot-list"></div>
       </section>
       <section class="rail-card">
-        <div class="rail-card-head">工具</div>
+        <div class="rail-card-head" data-i18n="rail.tools">Tools</div>
         <div class="nav-item" id="nav-aes">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
-          <span>AES 加解密</span>
+          <span data-i18n="nav.aes">AES encrypt/decrypt</span>
         </div>
         <div class="nav-item" id="nav-db">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-          <span>数据库隧道</span>
+          <span data-i18n="nav.db">Database tunnels</span>
         </div>
         <div class="nav-item" id="nav-settings">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-          <span>设置</span>
+          <span data-i18n="nav.settings">Settings</span>
         </div>
       </section>
     </div>
-    <div class="foot"><div class="avatar">K</div><div><b>本地工作区</b><span>仅此设备可访问</span></div></div>
+    <div class="foot"><div class="avatar">K</div><div><b data-i18n="foot.local">Local workspace</b><span data-i18n="foot.local-sub">This device only</span></div></div>
   </aside>
   <main id="app">
     <header class="topbar">
       <div id="breadcrumb" class="crumb"></div>
-      <button class="more" type="button" aria-label="更多操作">•••</button>
+      <div class="topbar-actions">
+        <select id="lang-select" class="lang-select" aria-label="Language">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+        </select>
+        <button class="more" type="button" aria-label="More actions">•••</button>
+      </div>
     </header>
 
     <div class="view" id="view-snapshots">
       <div class="canvas">
         <div id="hero" class="hero">
           <div>
-            <h1 id="hero-title">检查配置状态。</h1>
-            <p class="sub">快照在本地加密，敏感值默认遮罩。</p>
+            <h1 id="hero-title" data-i18n="hero.snapshots.title">Check config status.</h1>
+            <p class="sub" data-i18n="hero.snapshots.sub">Snapshots are encrypted locally; sensitive values are masked by default.</p>
           </div>
-          <button class="cta" type="button" data-action="import">导入快照</button>
+          <button class="cta" type="button" data-action="import" data-i18n="hero.snapshots.import">Import snapshot</button>
         </div>
         <div id="error-region" class="error-region" hidden></div>
-        <div id="plaintext-banner" class="error-region" hidden>明文接口（导出/解密/明文编辑/AES 密钥列表）默认禁用；需要时用 <code>--allow-plaintext</code> 重启 UI。当前 URL 的令牌不要发给 AI/脚本。</div>
+        <div id="plaintext-banner" class="error-region" hidden data-i18n-html="plaintext-banner">Plaintext endpoints (export / decrypt / plaintext edit / AES key list) are disabled by default; restart the UI with <code>--allow-plaintext</code> to enable them. Do not send this URL's token to AI or scripts.</div>
         <div class="layout">
           <section>
             <div id="snapshot-context" class="context">
               <div class="env">·</div>
-              <div><strong id="context-name">—</strong><p id="context-meta">加载中…</p></div>
-              <div class="secure"><i></i>已加密</div>
+              <div><strong id="context-name">—</strong><p id="context-meta" data-i18n="context.loading">Loading…</p></div>
+              <div class="secure"><i></i><span data-i18n="context.encrypted">Encrypted</span></div>
             </div>
-            <div class="sec-head"><h2>配置</h2><span id="config-count" class="count"></span></div>
+            <div class="sec-head"><h2 data-i18n="sec.config">Config</h2><span id="config-count" class="count"></span></div>
             <div class="search" id="config-search">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-              <input id="search-input" type="search" placeholder="搜索 key 或可见值…" aria-label="搜索配置" autocomplete="off" spellcheck="false">
+              <input id="search-input" type="search" data-i18n-ph="search.ph" data-i18n-aria="search.aria" placeholder="Search key or visible value…" aria-label="Search config" autocomplete="off" spellcheck="false">
             </div>
             <table id="config-table">
               <tbody id="config-body"></tbody>
@@ -73,14 +79,14 @@
           </section>
           <aside class="assist" id="next-steps">
             <div class="card">
-              <div class="card-title">下一步</div>
-              <div class="task" data-action="compare"><button class="task-btn" type="button"><strong>比较环境</strong></button><span>检查新增、删除与变更。</span></div>
-              <div class="task" data-action="multi-compare"><button class="task-btn" type="button"><strong>横向对比多环境</strong></button><span>多环境同 key 并排对比。</span></div>
-              <div class="task" data-action="focus-search"><button class="task-btn" type="button"><strong>查看或修改单项</strong></button><span>按 key 搜索；敏感内容默认隐藏。</span></div>
-              <div class="task" data-action="bulk-edit"><button class="task-btn" type="button"><strong>明文编辑全部</strong></button><span>确认后以明文编辑并重新加密。</span></div>
-              <div class="task" data-action="export"><button class="task-btn" type="button"><strong>导出配置</strong></button><span>生成明文前需要再次确认。</span></div>
+              <div class="card-title" data-i18n="next.title">Next steps</div>
+              <div class="task" data-action="compare"><button class="task-btn" type="button"><strong data-i18n="next.compare">Compare environments</strong></button><span data-i18n="next.compare-sub">Check added, removed and changed.</span></div>
+              <div class="task" data-action="multi-compare"><button class="task-btn" type="button"><strong data-i18n="next.multi">Compare across environments</strong></button><span data-i18n="next.multi-sub">Same key side by side across environments.</span></div>
+              <div class="task" data-action="focus-search"><button class="task-btn" type="button"><strong data-i18n="next.item">View or edit an item</strong></button><span data-i18n="next.item-sub">Search by key; sensitive values are hidden by default.</span></div>
+              <div class="task" data-action="bulk-edit"><button class="task-btn" type="button"><strong data-i18n="next.edit">Plaintext-edit all</strong></button><span data-i18n="next.edit-sub">Edit in plaintext after confirmation and re-encrypt.</span></div>
+              <div class="task" data-action="export"><button class="task-btn" type="button"><strong data-i18n="next.export">Export config</strong></button><span data-i18n="next.export-sub">Requires a second confirmation before generating plaintext.</span></div>
             </div>
-            <div class="note">🔒 <b>本地优先。</b> 明文只在确认后短暂显示。</div>
+            <div class="note"><span data-i18n-html="next.note"><b>Local-first.</b> Plaintext is only shown briefly after confirmation.</span></div>
           </aside>
         </div>
       </div>
@@ -90,32 +96,32 @@
       <div class="canvas">
         <div class="hero">
           <div>
-            <h1>AES 加解密工具。</h1>
-            <p class="sub">Java CryptoUtil 兼容（AES/GCM/NoPadding）。手动输入 key/iv 加解密。</p>
+            <h1 data-i18n="aes.title">AES encrypt/decrypt.</h1>
+            <p class="sub" data-i18n="aes.sub">Java CryptoUtil compatible (AES/GCM/NoPadding). Encrypt/decrypt with a manual key/iv.</p>
           </div>
         </div>
         <div id="aes-error" class="error-region" hidden></div>
         <div class="panel">
           <div class="fields">
-            <label class="field" for="aes-key">AES key（16/24/32 字节 UTF-8）
+            <label class="field" for="aes-key"><span data-i18n="aes.key">AES key (16/24/32 bytes UTF-8)</span>
               <input id="aes-key" type="text" autocomplete="off" spellcheck="false">
             </label>
-            <label class="field" for="aes-iv">IV（UTF-8 字节）
+            <label class="field" for="aes-iv"><span data-i18n="aes.iv">IV (UTF-8 bytes)</span>
               <input id="aes-iv" type="text" autocomplete="off" spellcheck="false">
             </label>
           </div>
-          <label class="field" for="aes-input">输入
-            <textarea id="aes-input" rows="6" placeholder="明文或 base64 密文…" spellcheck="false"></textarea>
+          <label class="field" for="aes-input"><span data-i18n="aes.input">Input</span>
+            <textarea id="aes-input" rows="6" data-i18n-ph="aes.input-ph" placeholder="Plaintext or base64 ciphertext…" spellcheck="false"></textarea>
           </label>
           <div class="row-actions">
-            <button class="primary" type="button" id="aes-encrypt-btn">加密</button>
-            <button class="primary" type="button" id="aes-decrypt-btn">解密</button>
+            <button class="primary" type="button" id="aes-encrypt-btn" data-i18n="aes.encrypt">Encrypt</button>
+            <button class="primary" type="button" id="aes-decrypt-btn" data-i18n="aes.decrypt">Decrypt</button>
           </div>
-          <label class="field" for="aes-output">结果
+          <label class="field" for="aes-output"><span data-i18n="aes.output">Result</span>
             <textarea id="aes-output" rows="6" readonly spellcheck="false"></textarea>
           </label>
           <div class="row-actions">
-            <button class="ghost" type="button" id="aes-copy">复制结果</button>
+            <button class="ghost" type="button" id="aes-copy" data-i18n="aes.copy">Copy result</button>
           </div>
         </div>
       </div>
@@ -125,39 +131,39 @@
       <div class="canvas">
         <div class="hero">
           <div>
-            <h1>数据库隧道。</h1>
-            <p class="sub">注册的连接 URL 加密存储（独立 DB 密钥），隧道由 host 的 <code>vaulty-keeper serve</code> 提供；这里可注册、测试、生成客户端链接</p>
+            <h1 data-i18n="db.title">Database tunnels.</h1>
+            <p class="sub" data-i18n-html="db.sub">Registered connection URLs are encrypted at rest (dedicated DB key); tunnels are provided by <code>vaulty-keeper serve</code> on the host. Register, test and generate client links here.</p>
           </div>
         </div>
         <div id="db-error" class="error-region" hidden></div>
         <div id="db-keyline" class="db-keyline">
-          <span id="db-key-status" class="status-line">检测中…</span>
-          <button class="primary" type="button" id="db-init-btn" hidden>初始化数据库密钥</button>
+          <span id="db-key-status" class="status-line" data-i18n="checking">Checking…</span>
+          <button class="primary" type="button" id="db-init-btn" hidden data-i18n="db.init-btn">Initialize database key</button>
         </div>
         <div class="db-layout">
           <section class="db-card">
-            <div class="sec-head"><h2>新增连接</h2></div>
+            <div class="sec-head"><h2 data-i18n="db.add-card">New connection</h2></div>
             <div class="fields">
-              <label class="field" for="db-name">名称
-                <input id="db-name" type="text" autocomplete="off" spellcheck="false" placeholder="例如 mysql-orders">
+              <label class="field" for="db-name"><span data-i18n="db.name">Name</span>
+                <input id="db-name" type="text" autocomplete="off" spellcheck="false" data-i18n-ph="db.name-ph" placeholder="e.g. mysql-orders">
               </label>
-              <label class="field" for="db-port">隧道端口（可选，留空自动分配）
+              <label class="field" for="db-port"><span data-i18n="db.port">Tunnel port (optional, auto-assigned when empty)</span>
                 <input id="db-port" type="number" min="1" max="65535" autocomplete="off" spellcheck="false" placeholder="15441">
               </label>
             </div>
-            <label class="field" for="db-url">数据库 URL（含账号密码，浏览器内加密后传输）
+            <label class="field" for="db-url"><span data-i18n="db.url">Database URL (with credentials; encrypted in the browser before sending)</span>
               <textarea id="db-url" rows="3" placeholder="postgres://user:pass@host:5432/dbname&#10;mysql://user:pass@host:3306/dbname&#10;redis://:pass@host:6379/0" spellcheck="false"></textarea>
             </label>
             <div class="row-actions">
-              <button class="ghost" type="button" id="db-test-btn">测试连接</button>
-              <button class="primary" type="button" id="db-add-btn">注册连接</button>
+              <button class="ghost" type="button" id="db-test-btn" data-i18n="db.test-btn">Test connection</button>
+              <button class="primary" type="button" id="db-add-btn" data-i18n="db.add-btn">Register connection</button>
             </div>
             <div id="db-form-result" class="db-form-result" hidden></div>
           </section>
           <section class="db-card">
-            <div class="sec-head"><h2>连接</h2><span class="sec-actions"><button class="ghost" type="button" id="db-regen-all-btn" title="所有连接的隧道 token 重新生成，旧链接立即失效">全部重新生成</button><span id="db-count" class="count"></span></span></div>
+            <div class="sec-head"><h2 data-i18n="db.list-card">Connections</h2><span class="sec-actions"><button class="ghost" type="button" id="db-regen-all-btn" data-i18n-title="db.regen-all-title" data-i18n="db.regen-all">Regenerate all</button><span id="db-count" class="count"></span></span></div>
             <table class="aes-table" id="db-table">
-              <thead><tr><th>名称</th><th>类型</th><th>端口</th><th>操作</th></tr></thead>
+              <thead><tr><th data-i18n="db.th.name">Name</th><th data-i18n="db.th.type">Type</th><th data-i18n="db.th.state">State</th><th data-i18n="db.th.port">Port</th><th data-i18n="db.th.actions">Actions</th></tr></thead>
               <tbody id="db-body"></tbody>
             </table>
             <div id="db-empty" class="db-empty" hidden></div>
@@ -170,21 +176,21 @@
       <div class="canvas">
         <div class="hero">
           <div>
-            <h1>设置。</h1>
-            <p class="sub">本地密钥与 AES 配置管理。</p>
+            <h1 data-i18n="settings.title">Settings.</h1>
+            <p class="sub" data-i18n="settings.sub">Local keys and AES config management.</p>
           </div>
         </div>
         <div id="settings-error" class="error-region" hidden></div>
         <div class="panel">
-          <div class="sec-head"><h2>快照密钥</h2></div>
-          <div id="key-status" class="status-line">检测中…</div>
+          <div class="sec-head"><h2 data-i18n="settings.snap-key">Snapshot key</h2></div>
+          <div id="key-status" class="status-line" data-i18n="checking">Checking…</div>
           <div class="row-actions">
-            <button class="primary" type="button" id="init-key-btn" hidden>生成快照密钥</button>
+            <button class="primary" type="button" id="init-key-btn" hidden data-i18n="settings.init-snap">Generate snapshot key</button>
           </div>
-          <div class="sec-head"><h2>敏感值密钥</h2></div>
-          <div id="sensitive-key-status" class="status-line">检测中…</div>
+          <div class="sec-head"><h2 data-i18n="settings.sensitive-key">Sensitive-value key</h2></div>
+          <div id="sensitive-key-status" class="status-line" data-i18n="checking">Checking…</div>
           <div class="row-actions">
-            <button class="primary" type="button" id="init-sensitive-btn" hidden>生成敏感值密钥</button>
+            <button class="primary" type="button" id="init-sensitive-btn" hidden data-i18n="settings.init-sensitive">Generate sensitive-value key</button>
           </div>
         </div>
       </div>
@@ -194,82 +200,93 @@
 
 <dialog id="import-dialog" aria-labelledby="import-title">
   <form id="import-form" class="dialog">
-    <h3 id="import-title">导入配置快照</h3>
-    <label class="field" for="import-name">环境
-      <input id="import-name" type="text" placeholder="例如 prod" autocomplete="off" spellcheck="false">
+    <h3 id="import-title" data-i18n="dialog.import.title">Import snapshot</h3>
+    <label class="field" for="import-name"><span data-i18n="dialog.import.env">Environment</span>
+      <input id="import-name" type="text" data-i18n-ph="dialog.import.env-ph" placeholder="e.g. prod" autocomplete="off" spellcheck="false">
     </label>
-    <label class="field" for="import-appid">应用 ID（必填）
-      <input id="import-appid" type="text" placeholder="例如 merdi-portal" autocomplete="off" spellcheck="false">
+    <label class="field" for="import-appid"><span data-i18n="dialog.import.appid">App ID (required)</span>
+      <input id="import-appid" type="text" data-i18n-ph="dialog.import.appid-ph" placeholder="e.g. merdi-portal" autocomplete="off" spellcheck="false">
     </label>
     <div id="import-dupe" class="warn-line" hidden></div>
-    <label class="field" for="import-text">粘贴 key=value 配置
+    <label class="field" for="import-text"><span data-i18n="dialog.import.text">Paste key=value config</span>
       <textarea id="import-text" rows="8" placeholder="APP_NAME = merdi&#10;SECRET_TOKEN = ..." spellcheck="false"></textarea>
     </label>
     <div id="import-preview" class="preview" hidden></div>
     <div id="import-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="ghost" id="import-preview-btn">预览</button>
-      <button type="submit" class="primary" id="import-confirm-btn" hidden>确认导入</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="ghost" id="import-preview-btn" data-i18n="dialog.import.preview">Preview</button>
+      <button type="submit" class="primary" id="import-confirm-btn" hidden data-i18n="dialog.import.confirm">Import</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="entry-dialog" aria-labelledby="entry-title">
   <form id="entry-form" class="dialog">
-    <h3 id="entry-title">编辑配置项</h3>
+    <h3 id="entry-title" data-i18n="dialog.entry.title">Edit item</h3>
     <div class="entry-head">
       <span class="env" id="entry-env">k</span>
       <code id="entry-key" class="entry-key"></code>
     </div>
-    <p id="entry-warning" class="warning" hidden>当前为敏感值，无法显示。输入新值将替换它；留空并保存不修改。</p>
-    <label class="field" for="entry-value">值
+    <p id="entry-warning" class="warning" hidden data-i18n="dialog.entry.warning">This is a sensitive value and cannot be shown. Entering a new value replaces it; saving an empty value keeps it unchanged.</p>
+    <label class="field" for="entry-value"><span data-i18n="dialog.entry.value">Value</span>
       <input id="entry-value" type="text" autocomplete="off" spellcheck="false">
     </label>
     <div id="entry-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="danger" id="entry-delete-btn">删除</button>
-      <button type="submit" class="primary" id="entry-save-btn">保存</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="danger" id="entry-delete-btn" data-i18n="common.delete">Delete</button>
+      <button type="submit" class="primary" id="entry-save-btn" data-i18n="common.save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="confirm-dialog" aria-labelledby="confirm-title">
+  <form method="dialog" class="dialog">
+    <h3 id="confirm-title" data-i18n="common.confirm">Confirm</h3>
+    <p id="confirm-msg"></p>
+    <div class="actions">
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="primary" id="confirm-ok-btn" data-i18n="common.ok">OK</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="delete-dialog" aria-labelledby="delete-title">
   <form method="dialog" class="dialog">
-    <h3 id="delete-title">删除配置项</h3>
-    <p>确定要删除 <code id="delete-key"></code> 吗？此操作不可撤销。</p>
+    <h3 id="delete-title" data-i18n="dialog.delete.title">Delete item</h3>
+    <p data-i18n-html="dialog.delete.confirm">Delete <code id="delete-key"></code>? This cannot be undone.</p>
     <div id="delete-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="danger" id="delete-confirm-btn">删除</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="danger" id="delete-confirm-btn" data-i18n="common.delete">Delete</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="snap-delete-dialog" aria-labelledby="snap-delete-title">
   <form method="dialog" class="dialog">
-    <h3 id="snap-delete-title">删除快照</h3>
-    <p>确定删除 <code id="snap-delete-name"></code> / <code id="snap-delete-appid"></code> 快照吗？此操作不可撤销。</p>
+    <h3 id="snap-delete-title" data-i18n="dialog.snap-delete.title">Delete snapshot</h3>
+    <p data-i18n-html="dialog.snap-delete.confirm">Delete snapshot <code id="snap-delete-name"></code> / <code id="snap-delete-appid"></code>? This cannot be undone.</p>
     <div id="snap-delete-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="danger" id="snap-delete-confirm-btn">删除</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="danger" id="snap-delete-confirm-btn" data-i18n="common.delete">Delete</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="compare-dialog" aria-labelledby="compare-title">
   <form method="dialog" class="dialog">
-    <h3 id="compare-title">比较环境</h3>
-    <p class="muted">将 <code id="compare-from"></code> 与以下环境对比：</p>
-    <label class="field" for="compare-target">目标环境
+    <h3 id="compare-title" data-i18n="dialog.compare.title">Compare environments</h3>
+    <p class="muted" data-i18n-html="dialog.compare.sub">Compare <code id="compare-from"></code> with:</p>
+    <label class="field" for="compare-target"><span data-i18n="dialog.compare.target">Target environment</span>
       <select id="compare-target"></select>
     </label>
     <div id="compare-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="primary" id="compare-confirm-btn">开始对比</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="primary" id="compare-confirm-btn" data-i18n="dialog.compare.start">Compare</button>
     </div>
   </form>
 </dialog>
@@ -277,16 +294,16 @@
 <dialog id="compare-result-dialog" aria-labelledby="compare-result-title">
   <div class="dialog result-dialog">
     <div class="result-head">
-      <h3 id="compare-result-title">配置对比</h3>
+      <h3 id="compare-result-title" data-i18n="dialog.compare-result.title">Config diff</h3>
       <div class="result-actions">
-        <button type="button" class="ghost" id="compare-copy-btn">复制差异</button>
-        <button type="button" class="ghost" data-close>关闭</button>
+        <button type="button" class="ghost" id="compare-copy-btn" data-i18n="dialog.compare-result.copy">Copy diff</button>
+        <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
       </div>
     </div>
     <div id="compare-refs" class="compare-refs" hidden></div>
     <div class="search" id="compare-filter-box">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-      <input id="compare-filter" type="search" placeholder="过滤差异 key…" autocomplete="off" spellcheck="false">
+      <input id="compare-filter" type="search" data-i18n-ph="dialog.compare-result.filter-ph" placeholder="Filter diff keys…" autocomplete="off" spellcheck="false">
     </div>
     <div id="compare-body" class="diff"></div>
   </div>
@@ -294,13 +311,13 @@
 
 <dialog id="multi-compare-dialog" aria-labelledby="multi-compare-title">
   <form method="dialog" class="dialog">
-    <h3 id="multi-compare-title">横向对比多环境</h3>
-    <p class="muted">选择 2 个以上快照，按 key 并排对比各环境取值。</p>
+    <h3 id="multi-compare-title" data-i18n="dialog.multi.title">Compare across environments</h3>
+    <p class="muted" data-i18n="dialog.multi.sub">Select 2+ snapshots; compare each key side by side across environments.</p>
     <div id="multi-ref-list" class="check-list"></div>
     <div id="multi-compare-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="primary" id="multi-compare-confirm-btn">开始对比</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="primary" id="multi-compare-confirm-btn" data-i18n="dialog.compare.start">Compare</button>
     </div>
   </form>
 </dialog>
@@ -308,12 +325,12 @@
 <dialog id="multi-result-dialog" aria-labelledby="multi-result-title">
   <div class="dialog result-dialog">
     <div class="result-head">
-      <h3 id="multi-result-title">横向对比</h3>
+      <h3 id="multi-result-title" data-i18n="dialog.multi-result.title">Cross-environment compare</h3>
       <div class="result-actions">
-        <button type="button" class="ghost" id="multi-report-btn">差异报告</button>
-        <button type="button" class="ghost" id="multi-copy-btn">复制为表格（Tab 分隔）</button>
-        <button type="button" class="ghost" id="multi-csv-btn">复制 CSV（逗号分隔）</button>
-        <button type="button" class="ghost" data-close>关闭</button>
+        <button type="button" class="ghost" id="multi-report-btn" data-i18n="dialog.multi-result.report">Diff report</button>
+        <button type="button" class="ghost" id="multi-copy-btn" data-i18n="dialog.multi-result.copy-tsv">Copy as table (Tab-separated)</button>
+        <button type="button" class="ghost" id="multi-csv-btn" data-i18n="dialog.multi-result.copy-csv">Copy CSV (comma-separated)</button>
+        <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
       </div>
     </div>
     <div id="multi-table-wrap" class="table-wrap"></div>
@@ -323,10 +340,10 @@
 <dialog id="multi-report-dialog" aria-labelledby="multi-report-title">
   <div class="dialog result-dialog">
     <div class="result-head">
-      <h3 id="multi-report-title">差异报告</h3>
+      <h3 id="multi-report-title" data-i18n="dialog.multi-report.title">Diff report</h3>
       <div class="result-actions">
-        <button type="button" class="ghost" id="multi-report-copy-btn">复制报告</button>
-        <button type="button" class="ghost" data-close>关闭</button>
+        <button type="button" class="ghost" id="multi-report-copy-btn" data-i18n="dialog.multi-report.copy">Copy report</button>
+        <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
       </div>
     </div>
     <pre id="multi-report-body" class="report-body"></pre>
@@ -336,8 +353,8 @@
 <dialog id="key-compare-dialog" aria-labelledby="key-compare-title">
   <div class="dialog result-dialog">
     <div class="result-head">
-      <h3 id="key-compare-title">单 key 对比</h3>
-      <button type="button" class="ghost" data-close>关闭</button>
+      <h3 id="key-compare-title" data-i18n="dialog.key-compare.title">Key comparison</h3>
+      <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
     </div>
     <div id="key-compare-body" class="diff"></div>
   </div>
@@ -345,63 +362,63 @@
 
 <dialog id="export-dialog" aria-labelledby="export-title">
   <form method="dialog" class="dialog">
-    <h3 id="export-title">导出配置</h3>
-    <p>将生成 <code id="export-name"></code> 的明文 key=value 文件，并在本机浏览器中下载。</p>
-    <p class="warning">⚠ 明文包含敏感值，请仅在本机查看，不要转发。</p>
+    <h3 id="export-title" data-i18n="dialog.export.title">Export config</h3>
+    <p data-i18n-html="dialog.export.sub">This generates a plaintext key=value file of <code id="export-name"></code> and downloads it in the browser.</p>
+    <p class="warning" data-i18n="dialog.export.warning">⚠ The plaintext includes sensitive values; view on this machine only, do not forward.</p>
     <div id="export-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="danger" id="export-copy-btn">复制到剪贴板</button>
-      <button type="button" class="danger" id="export-confirm-btn">确认导出</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="danger" id="export-copy-btn" data-i18n="dialog.export.copy">Copy to clipboard</button>
+      <button type="button" class="danger" id="export-confirm-btn" data-i18n="dialog.export.confirm">Export</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="reveal-dialog" aria-labelledby="reveal-title">
   <form method="dialog" class="dialog">
-    <h3 id="reveal-title">显示</h3>
-    <p class="warning">⚠ 将显示 <code id="reveal-key"></code> 的明文值，请仅在本机查看。</p>
+    <h3 id="reveal-title" data-i18n="dialog.reveal.title">Reveal</h3>
+    <p class="warning" data-i18n-html="dialog.reveal.warning">⚠ This shows the plaintext of <code id="reveal-key"></code>; view on this machine only.</p>
     <div id="reveal-advanced" class="reveal-advanced" hidden>
       <div class="fields">
-        <label class="field" for="reveal-key-input">AES key
-          <input id="reveal-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="留空用系统敏感密钥">
+        <label class="field" for="reveal-key-input"><span data-i18n="dialog.reveal.aes-key">AES key</span>
+          <input id="reveal-key-input" type="password" autocomplete="off" spellcheck="false" data-i18n-ph="dialog.reveal.key-ph" placeholder="leave empty to use the system sensitive key">
         </label>
-        <label class="field" for="reveal-iv-input">IV
-          <input id="reveal-iv-input" type="text" autocomplete="off" spellcheck="false" placeholder="留空用系统敏感密钥">
+        <label class="field" for="reveal-iv-input"><span data-i18n="dialog.reveal.iv">IV</span>
+          <input id="reveal-iv-input" type="text" autocomplete="off" spellcheck="false" data-i18n-ph="dialog.reveal.key-ph" placeholder="leave empty to use the system sensitive key">
         </label>
       </div>
-      <p class="muted hint">值不是用系统敏感密钥加密时（如外部 AES 密文），手动填写 key/iv 后重试。</p>
+      <p class="muted hint" data-i18n="dialog.reveal.hint">If the value is not encrypted with the system sensitive key (e.g. external AES ciphertext), fill in key/iv manually and retry.</p>
     </div>
     <div id="reveal-value" class="reveal-box" hidden></div>
     <div id="reveal-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>关闭</button>
-      <button type="button" class="danger" id="reveal-confirm-btn">显示</button>
+      <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
+      <button type="button" class="danger" id="reveal-confirm-btn" data-i18n="dialog.reveal.show">Reveal</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="edit-dialog" aria-labelledby="edit-title">
   <form id="edit-form" class="dialog">
-    <h3 id="edit-title">明文编辑</h3>
-    <p class="warning">⚠ 将以明文编辑 <code id="edit-name"></code> 的全部条目，保存后重新加密。</p>
-    <label class="field" for="edit-text">配置内容
+    <h3 id="edit-title" data-i18n="dialog.edit.title">Plaintext edit</h3>
+    <p class="warning" data-i18n-html="dialog.edit.warning">⚠ This edits every entry of <code id="edit-name"></code> in plaintext; it re-encrypts on save.</p>
+    <label class="field" for="edit-text"><span data-i18n="dialog.edit.text">Config content</span>
       <textarea id="edit-text" rows="14" spellcheck="false"></textarea>
     </label>
     <div id="edit-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="submit" class="primary" id="edit-save-btn" hidden>保存并重新加密</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="submit" class="primary" id="edit-save-btn" hidden data-i18n="dialog.edit.save">Save and re-encrypt</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="summary-dialog" aria-labelledby="summary-title">
   <form method="dialog" class="dialog">
-    <h3 id="summary-title">安全 AI 摘要</h3>
-    <p>安全摘要仅基于可见值与本机元数据生成，不包含原始密钥。此能力在当前版本为占位，将在后续版本提供。</p>
+    <h3 id="summary-title" data-i18n="dialog.summary.title">Safe AI summary</h3>
+    <p data-i18n="dialog.summary.text">The summary is generated from visible values and local metadata only; no raw secrets included. This is a placeholder in the current version.</p>
     <div class="actions">
-      <button type="button" class="ghost" data-close>关闭</button>
+      <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
     </div>
   </form>
 </dialog>
@@ -409,9 +426,9 @@
 <dialog id="db-connect-dialog" aria-labelledby="db-connect-title">
   <div class="dialog result-dialog">
     <div class="result-head">
-      <h3 id="db-connect-title">连接信息</h3>
+      <h3 id="db-connect-title" data-i18n="dialog.db-connect.title">Connection info</h3>
       <div class="result-actions">
-        <button type="button" class="ghost" data-close>关闭</button>
+        <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
       </div>
     </div>
     <div id="db-connect-head" class="db-connect-head"></div>
@@ -423,39 +440,49 @@
 <dialog id="db-show-dialog" aria-labelledby="db-show-title">
   <div class="dialog result-dialog">
     <div class="result-head">
-      <h3 id="db-show-title">真实连接信息</h3>
+      <h3 id="db-show-title" data-i18n="dialog.db-show.title">Real connection info</h3>
       <div class="result-actions">
-        <button type="button" class="ghost" data-close>关闭</button>
+        <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
       </div>
     </div>
-    <p class="muted">仅你的浏览器可见，请勿转发给他人。</p>
+    <p class="muted" data-i18n="dialog.db-show.sub">Only visible in your browser; do not forward.</p>
     <div id="db-show-url" class="reveal-box"></div>
     <div class="actions">
-      <button type="button" class="ghost" id="db-show-copy-btn">复制</button>
+      <button type="button" class="ghost" id="db-show-copy-btn" data-i18n="common.copy">Copy</button>
     </div>
   </div>
 </dialog>
 
 <dialog id="db-delete-dialog" aria-labelledby="db-delete-title">
   <form method="dialog" class="dialog">
-    <h3 id="db-delete-title">删除连接</h3>
-    <p>确定删除连接 <code id="db-delete-name"></code> 吗？隧道将随之消失，此操作不可撤销。</p>
+    <h3 id="db-delete-title" data-i18n="dialog.db-delete.title">Delete connection</h3>
+    <p data-i18n-html="dialog.db-delete.confirm">Delete connection <code id="db-delete-name"></code>? The tunnel goes away with it; this cannot be undone.</p>
     <div id="db-delete-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="danger" id="db-delete-confirm-btn">删除</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="danger" id="db-delete-confirm-btn" data-i18n="common.delete">Delete</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="db-regen-dialog" aria-labelledby="db-regen-title">
   <form method="dialog" class="dialog">
-    <h3 id="db-regen-title">重新生成隧道 token</h3>
+    <h3 id="db-regen-title" data-i18n="dialog.db-regen.title">Regenerate tunnel token</h3>
     <p id="db-regen-desc"></p>
     <div id="db-regen-error" class="error" hidden></div>
     <div class="actions">
-      <button type="button" class="ghost" data-close>取消</button>
-      <button type="button" class="danger" id="db-regen-confirm-btn">重新生成</button>
+      <button type="button" class="ghost" data-close data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="danger" id="db-regen-confirm-btn" data-i18n="dialog.db-regen.confirm">Regenerate</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="db-error-dialog" aria-labelledby="db-error-title">
+  <form method="dialog" class="dialog">
+    <h3 id="db-error-title" data-i18n="dialog.db-error.title">Failed to register connection</h3>
+    <div id="db-error-msg" class="error" hidden></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close data-i18n="common.close">Close</button>
     </div>
   </form>
 </dialog>

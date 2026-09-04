@@ -55,7 +55,7 @@ func SnapshotKey() ([]byte, error) {
 	}
 	v, err := keyStoreGet(KeychainAccount)
 	if err != nil {
-		return nil, fmt.Errorf("未找到快照密钥（运行 'vaulty-keeper apollo init' 或设置 %s）：%w", EnvKey, err)
+		return nil, fmt.Errorf("snapshot key not found (run 'vaulty-keeper apollo init' or set %s): %w", EnvKey, err)
 	}
 	return decodeKey(v)
 }
@@ -69,7 +69,7 @@ func SensitiveKey() ([]byte, error) {
 	}
 	v, err := keyStoreGet(SensitiveKeychainAccount)
 	if err != nil {
-		return nil, fmt.Errorf("未找到敏感值密钥（运行 'vaulty-keeper sensitive init' 或设置 %s）：%w", EnvSensitiveKey, err)
+		return nil, fmt.Errorf("sensitive-value key not found (run 'vaulty-keeper sensitive init' or set %s): %w", EnvSensitiveKey, err)
 	}
 	return decodeKey(v)
 }
@@ -79,7 +79,7 @@ func SensitiveKey() ([]byte, error) {
 func GenerateAndStoreKey(force bool) error {
 	if !force {
 		if _, err := keyStoreGet(KeychainAccount); err == nil {
-			return errors.New("系统密钥库（" + StoreName() + "）中已存在快照密钥，用 --force 重新生成")
+			return errors.New("a snapshot key already exists in the system keychain (" + StoreName() + "); use --force to regenerate")
 		}
 	}
 	key := make([]byte, 32)
@@ -94,7 +94,7 @@ func GenerateAndStoreKey(force bool) error {
 func GenerateAndStoreSensitiveKey(force bool) error {
 	if !force {
 		if _, err := keyStoreGet(SensitiveKeychainAccount); err == nil {
-			return errors.New("系统密钥库（" + StoreName() + "）中已存在敏感值密钥，用 --force 重新生成")
+			return errors.New("a sensitive-value key already exists in the system keychain (" + StoreName() + "); use --force to regenerate")
 		}
 	}
 	key := make([]byte, 32)
@@ -112,7 +112,7 @@ func DBKey() ([]byte, error) {
 	}
 	v, err := keyStoreGet(DBKeychainAccount)
 	if err != nil {
-		return nil, fmt.Errorf("未找到数据库密钥（运行 'vaulty-keeper db init' 或设置 %s）：%w", EnvDBKey, err)
+		return nil, fmt.Errorf("database key not found (run 'vaulty-keeper db init' or set %s): %w", EnvDBKey, err)
 	}
 	return decodeKey(v)
 }
@@ -122,7 +122,7 @@ func DBKey() ([]byte, error) {
 func GenerateAndStoreDBKey(force bool) error {
 	if !force {
 		if _, err := keyStoreGet(DBKeychainAccount); err == nil {
-			return errors.New("系统密钥库（" + StoreName() + "）中已存在数据库密钥，用 --force 重新生成")
+			return errors.New("a database key already exists in the system keychain (" + StoreName() + "); use --force to regenerate")
 		}
 	}
 	key := make([]byte, 32)
@@ -135,10 +135,10 @@ func GenerateAndStoreDBKey(force bool) error {
 func decodeKey(s string) ([]byte, error) {
 	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
 	if err != nil {
-		return nil, fmt.Errorf("密钥必须是 base64 编码：%w", err)
+		return nil, fmt.Errorf("key must be base64-encoded: %w", err)
 	}
 	if len(b) != 32 {
-		return nil, fmt.Errorf("密钥必须解码为 32 字节，实际为 %d 字节", len(b))
+		return nil, fmt.Errorf("key must decode to 32 bytes, got %d", len(b))
 	}
 	return b, nil
 }

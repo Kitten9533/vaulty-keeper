@@ -32,16 +32,23 @@ vaulty-keeper db connect pgdb
 #   # pgdb (postgres) — token 是该连接的专属隧道 token，不是真实数据库密码（隧道端口 15432）
 #   # 专属 token 由 db add 自动生成，db regen <name>|--all 可轮换；旧连接回退全局 bridge token
 #   原始隧道链接（AI / 其他工具可据此自行转换）:
-#     postgresql://5d321a50...@127.0.0.1:15432/appdb
+#     postgresql://5d321a50...:x@127.0.0.1:15432/appdb
 #   psql / libpq（psql、pgAdmin、DBeaver 均可粘贴）:
-#     postgresql://5d321a50...@127.0.0.1:15432/appdb
+#     postgresql://5d321a50...:x@127.0.0.1:15432/appdb
 #   DBeaver / DataGrip / IntelliJ（JDBC）:
-#     jdbc:postgresql://127.0.0.1:15432/appdb?user=5d321a50...
+#     jdbc:postgresql://127.0.0.1:15432/appdb?user=5d321a50...&password=x
 #   pgAdmin4（填字段）: Host=127.0.0.1 Port=15432 Database=appdb Username=5d321a50... 密码留空
 vaulty-keeper db connect cache
 #   ... Redis Insight / DBeaver URL + redis-cli 命令
 vaulty-keeper db connect pgdb --cmd        # 只要单行命令（脚本用）
 vaulty-keeper db connect pgdb --container  # 换成 host.docker.internal
+
+# 隧道开关：默认开启；不用的连接用 db off 关掉（端口停止监听，serve 约 2 秒内生效）
+vaulty-keeper db off pgdb
+#   连接 "pgdb" 的隧道已关闭（'vaulty-keeper db on pgdb' 重新开启）
+vaulty-keeper db list            # pgdb (postgres) :15432 [关]
+vaulty-keeper db on pgdb
+vaulty-keeper db off --all       # 全部关闭 / 全部开启（--all）
 ```
 
 ## 2 · 多个同类连接（3 个 MySQL，各自独立隧道）
@@ -86,11 +93,11 @@ vaulty-keeper db connect mysql-reporting  # mysql ... -P 15443 ... shop_reportin
 ```sh
 TOKEN=$(cat ~/.vaulty/bridge-token)
 # 本机
-psql "postgresql://$TOKEN@127.0.0.1:15432/appdb"
+psql "postgresql://$TOKEN:x@127.0.0.1:15432/appdb"
 # 容器/AI 隔离域
-psql "postgresql://$TOKEN@host.docker.internal:15432/appdb"
+psql "postgresql://$TOKEN:x@host.docker.internal:15432/appdb"
 ```
-- token 放 **user** 字段，**不用密码**（隧道 trust 风格放行）
+- token 放 **user** 字段，密码字段填占位 `x`（隧道 trust 风格放行，密码被忽略）
 - 连上后实际会话是注册 URL 里的真实账号（如 `app`），库也是注册的库
 
 ### mysql（MySQL）
@@ -106,21 +113,24 @@ mysql -h 127.0.0.1 -P 15441 -u "$TOKEN" -px --ssl-mode=DISABLED shop
 TOKEN=$(cat ~/.vaulty/bridge-token)
 redis-cli -h 127.0.0.1 -p 15434 -a "$TOKEN" --no-auth-warning
 ```
-- token 放 **AUTH 首命令**（URL 形式 `redis://:$TOKEN@127.0.0.1:15434/0` 也支持）
+- token 放 **AUTH 首命令**（URL 形式 `redis://x:$TOKEN@127.0.0.1:15434/0` 也支持，user 字段占位）
 
 ### GUI（DBeaver / pgAdmin4 / Redis Insight）
 | 软件 | 填法 |
 |---|---|
-| DBeaver | JDBC URL：`jdbc:postgresql://127.0.0.1:15432/appdb?user=<TOKEN>` |
+| DBeaver | JDBC URL：`jdbc:postgresql://127.0.0.1:15432/appdb?user=<TOKEN>&password=x` |
 | pgAdmin4 | Host `127.0.0.1` / Port `15432` / DB `appdb` / Username `<TOKEN>` / 密码留空 |
-| Redis Insight | 连接 URL：`redis://:<TOKEN>@127.0.0.1:15434/0` |
+| Redis Insight | 连接 URL：`redis://x:<TOKEN>@127.0.0.1:15434/0` |
+
+> 所有隧道链接都带 **user+password**：token 在 PG/MySQL 的 user 字段 / Redis 的 AUTH 密码里，
+> 另一个字段是占位 `x`（隧道忽略），纯为满足"两个字段都要"的工具/解析器。
 
 ## 4 · 容器内 AI 视角（模拟）
 
 ```sh
 # 容器里（agent 隔离域 / 任意容器）连 host 隧道：
 TOKEN=...   # VAULTY_KEEPER_BRIDGE_TOKEN，由 compose 注入
-psql "postgresql://$TOKEN@host.docker.internal:15432/appdb"
+psql "postgresql://$TOKEN:x@host.docker.internal:15432/appdb"
 redis-cli -h host.docker.internal -p 15434 -a "$TOKEN"
 # 查隧道清单（不配 DB 密钥也能读，走掩码桥）
 vaulty-keeper remote dblist
@@ -147,15 +157,15 @@ printf 'mysql://root:rootpass@127.0.0.1:59919/shop' | vaulty-keeper db add mysql
 ```sh
 TOKEN=$(cat ~/.vaulty/bridge-token)
 # 负向：错 token 一律拒绝
-psql "postgresql://WRONG@127.0.0.1:15432/appdb" -c "SELECT 1;"
+psql "postgresql://WRONG:x@127.0.0.1:15432/appdb" -c "SELECT 1;"
 #   server closed the connection
 
 # 能看到真实账号名（真实会话固有属性）
-psql "postgresql://$TOKEN@127.0.0.1:15432/appdb" -c "SELECT current_user;"
+psql "postgresql://$TOKEN:x@127.0.0.1:15432/appdb" -c "SELECT current_user;"
 #   app
 
 # 拿不到密码：受限账号读哈希被拒
-psql "postgresql://$TOKEN@127.0.0.1:15437/appdb" -c "SELECT rolpassword FROM pg_authid;"
+psql "postgresql://$TOKEN:x@127.0.0.1:15437/appdb" -c "SELECT rolpassword FROM pg_authid;"
 #   ERROR: permission denied for table pg_authid
 
 # 审计日志（成功/拒绝，无 SQL/凭据）

@@ -20,17 +20,17 @@ func StoreName() string { return "Secret Service（gnome-keyring / kwallet）" }
 func keyStoreGetImpl(account string) (string, error) {
 	v, err := keyring.Get(KeychainService, account)
 	if errors.Is(err, keyring.ErrNotFound) {
-		return "", fmt.Errorf("密钥 %s 不存在于 Secret Service（先运行对应 init 命令，或改用环境变量 %s / %s / %s）", account, EnvKey, EnvSensitiveKey, EnvDBKey)
+		return "", fmt.Errorf("key %s not found in Secret Service (run the matching init command first, or use the environment variables %s / %s / %s)", account, EnvKey, EnvSensitiveKey, EnvDBKey)
 	}
 	if err != nil {
-		return "", fmt.Errorf("Secret Service 不可用（需要 gnome-keyring/kwallet 与桌面会话；无头服务器请改用环境变量 %s / %s / %s）：%w", EnvKey, EnvSensitiveKey, EnvDBKey, err)
+		return "", fmt.Errorf("Secret Service unavailable (needs gnome-keyring/kwallet with a desktop session; on headless servers use the environment variables %s / %s / %s): %w", EnvKey, EnvSensitiveKey, EnvDBKey, err)
 	}
 	return v, nil
 }
 
 func keyStoreSetImpl(account, pass string) error {
 	if err := keyring.Set(KeychainService, account, pass); err != nil {
-		return fmt.Errorf("Secret Service 不可用（需要 gnome-keyring/kwallet 与桌面会话；无头服务器请改用环境变量 %s / %s / %s）：%w", EnvKey, EnvSensitiveKey, EnvDBKey, err)
+		return fmt.Errorf("Secret Service unavailable (needs gnome-keyring/kwallet with a desktop session; on headless servers use the environment variables %s / %s / %s): %w", EnvKey, EnvSensitiveKey, EnvDBKey, err)
 	}
 	return nil
 }

@@ -43,16 +43,18 @@ var connNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 // serialized, logged, or returned to a tunnel client (json:"-" is a hard
 // guarantee it never appears in any JSON output). Token is the connection's
 // dedicated tunnel token (empty for legacy entries, which then use the global
-// bridge token). Broken marks an entry whose ciphertext cannot be decrypted
-// with the current key (stale key); it is still listed so it can be removed,
-// but has no usable URL.
+// bridge token). Disabled marks a connection whose tunnel is turned off with
+// `db off`; its port is not listened on until `db on`. Broken marks an entry
+// whose ciphertext cannot be decrypted with the current key (stale key); it is
+// still listed so it can be removed, but has no usable URL.
 type Conn struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	URL    string `json:"-"`
-	Port   int    `json:"port"`
-	Token  string `json:"-"`
-	Broken bool   `json:"broken,omitempty"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	URL      string `json:"-"`
+	Port     int    `json:"port"`
+	Token    string `json:"-"`
+	Disabled bool   `json:"disabled,omitempty"`
+	Broken   bool   `json:"broken,omitempty"`
 }
 
 // storedConn is the on-disk representation: ciphertext plus the allocated
@@ -61,7 +63,9 @@ type Conn struct {
 // precisely instead of surfacing as a cryptic "message authentication failed".
 // Type is stored in plaintext so listing needs no decryption (a stale-key
 // entry cannot block the whole list). TokenEnc/TokenNonce hold the
-// connection's dedicated tunnel token, sealed with the same DB key.
+// connection's dedicated tunnel token, sealed with the same DB key. Disabled
+// persists the `db off` state; the zero value (absent in old files) means the
+// tunnel is on, so legacy connections keep working after an upgrade.
 type storedConn struct {
 	URLEnc     string `json:"url_cipher"`
 	Nonce      string `json:"nonce"`
@@ -70,6 +74,7 @@ type storedConn struct {
 	Port       int    `json:"port,omitempty"`
 	TokenEnc   string `json:"token_cipher,omitempty"`
 	TokenNonce string `json:"token_nonce,omitempty"`
+	Disabled   bool   `json:"disabled,omitempty"`
 }
 
 type store struct {
@@ -84,7 +89,7 @@ func DefaultPath(home string) string {
 // ValidateConnName checks a connection name: same charset as snapshot names.
 func ValidateConnName(name string) error {
 	if !connNameRe.MatchString(name) {
-		return errors.New("连接名必须以字母或数字开头，且只能包含字母、数字、点、横线或下划线")
+		return errors.New("connection name must start with a letter or digit and contain only letters, digits, dots, dashes or underscores")
 	}
 	return nil
 }
@@ -93,7 +98,7 @@ func ValidateConnName(name string) error {
 func ConnTypeFromURL(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("无法解析数据库 URL：%w", err)
+		return "", fmt.Errorf("cannot parse database URL: %w", err)
 	}
 	switch u.Scheme {
 	case "postgres", "postgresql":
@@ -103,7 +108,7 @@ func ConnTypeFromURL(raw string) (string, error) {
 	case "redis", "rediss":
 		return "redis", nil
 	default:
-		return "", fmt.Errorf("不支持的数据库 URL scheme %q（支持 postgres/postgresql、mysql、redis/rediss）", u.Scheme)
+		return "", fmt.Errorf("unsupported database URL scheme %q (supported: postgres/postgresql, mysql, redis/rediss)", u.Scheme)
 	}
 }
 
@@ -175,7 +180,7 @@ func encryptConn(key []byte, raw string) (storedConn, error) {
 func (s storedConn) decryptConn(key []byte) (string, error) {
 	pt, err := open(key, s.URLEnc, s.Nonce)
 	if err != nil {
-		return "", fmt.Errorf("解密连接失败：%w", err)
+		return "", fmt.Errorf("cannot decrypt connection: %w", err)
 	}
 	return pt, nil
 }
@@ -200,7 +205,7 @@ func load(path string, key []byte) (*store, error) {
 	}
 	var s store
 	if err := json.Unmarshal(b, &s); err != nil {
-		return nil, fmt.Errorf("读取 %s 失败：%w", path, err)
+		return nil, fmt.Errorf("cannot read %s: %w", path, err)
 	}
 	if s.Conns == nil {
 		s.Conns = map[string]storedConn{}
@@ -231,7 +236,7 @@ func allocPort(s *store, requested, base int) (int, error) {
 	}
 	if requested != 0 {
 		if used[requested] {
-			return 0, fmt.Errorf("端口 %d 已被其他连接占用", requested)
+			return 0, fmt.Errorf("port %d is already used by another connection", requested)
 		}
 		return requested, nil
 	}
@@ -299,7 +304,7 @@ func RegenToken(path string, key []byte, name string) (string, error) {
 	}
 	sc, ok := s.Conns[name]
 	if !ok {
-		return "", fmt.Errorf("连接 %q 不存在", name)
+		return "", fmt.Errorf("connection %q does not exist", name)
 	}
 	tok, err := newToken()
 	if err != nil {
@@ -354,10 +359,57 @@ func Remove(path string, key []byte, name string) error {
 		return err
 	}
 	if _, ok := s.Conns[name]; !ok {
-		return fmt.Errorf("连接 %q 不存在", name)
+		return fmt.Errorf("connection %q does not exist", name)
 	}
 	delete(s.Conns, name)
 	return s.save(path)
+}
+
+// SetTunnel turns a connection's tunnel on (disabled=false) or off
+// (disabled=true). It only touches the Disabled flag — it never needs to
+// decrypt the URL, so even a broken (stale-key) entry can be disabled. The
+// running serve picks the change up on its next db.json sync (≤2s).
+func SetTunnel(path string, key []byte, name string, disabled bool) error {
+	if err := ValidateConnName(name); err != nil {
+		return err
+	}
+	s, err := load(path, key)
+	if err != nil {
+		return err
+	}
+	sc, ok := s.Conns[name]
+	if !ok {
+		return fmt.Errorf("connection %q does not exist", name)
+	}
+	sc.Disabled = disabled
+	s.Conns[name] = sc
+	return s.save(path)
+}
+
+// SetTunnelAll applies the tunnel state to every connection and returns the
+// names that were updated.
+func SetTunnelAll(path string, key []byte, disabled bool) ([]string, error) {
+	s, err := load(path, key)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(s.Conns))
+	for n, sc := range s.Conns {
+		if sc.Disabled == disabled {
+			continue
+		}
+		sc.Disabled = disabled
+		s.Conns[n] = sc
+		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return names, nil
+	}
+	sort.Strings(names)
+	if err := s.save(path); err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // List returns connection metadata (never the URL), sorted by name. A single
@@ -377,7 +429,7 @@ func List(path string, key []byte) ([]Conn, error) {
 	out := make([]Conn, 0, len(names))
 	for _, n := range names {
 		sc := s.Conns[n]
-		c := Conn{Name: n, Type: sc.Type, Port: sc.Port}
+		c := Conn{Name: n, Type: sc.Type, Port: sc.Port, Disabled: sc.Disabled}
 		raw, derr := sc.decryptConn(key)
 		if derr != nil {
 			c.Broken = true // stale key / corrupt entry: still listed so it can be removed
@@ -404,7 +456,7 @@ func Resolve(path string, key []byte, name string) (Conn, error) {
 	}
 	sc, ok := s.Conns[name]
 	if !ok {
-		return Conn{}, fmt.Errorf("连接 %q 不存在（用 'vaulty-keeper db add' 注册）", name)
+		return Conn{}, fmt.Errorf("connection %q does not exist (register it with 'vaulty-keeper db add')", name)
 	}
 	raw, err := sc.decryptConn(key)
 	if err != nil {
@@ -418,10 +470,10 @@ func Resolve(path string, key []byte, name string) (Conn, error) {
 	if sc.TokenEnc != "" {
 		tok, err = open(key, sc.TokenEnc, sc.TokenNonce)
 		if err != nil {
-			return Conn{}, fmt.Errorf("连接 %q 的隧道令牌无法解密（%v）；用 'vaulty-keeper db regen %s' 重新生成", name, err, name)
+			return Conn{}, fmt.Errorf("cannot decrypt the tunnel token of connection %q (%v); regenerate it with 'vaulty-keeper db regen %s'", name, err, name)
 		}
 	}
-	return Conn{Name: name, Type: typ, URL: raw, Port: sc.Port, Token: tok}, nil
+	return Conn{Name: name, Type: typ, URL: raw, Port: sc.Port, Token: tok, Disabled: sc.Disabled}, nil
 }
 
 // keyMismatchErr rewrites a decrypt failure into a precise diagnosis when the
@@ -430,7 +482,7 @@ func Resolve(path string, key []byte, name string) (Conn, error) {
 // message.
 func keyMismatchErr(name string, sc storedConn, key []byte, err error) error {
 	if sc.KeyID != "" && sc.KeyID != keyID(key) {
-		return fmt.Errorf("密钥不匹配：连接 %q 是用 key_id=%s 加密的，当前密钥 key_id=%s（Keychain 密钥可能被换过；用 'vaulty-keeper db add %s' 重新注册即可）", name, sc.KeyID, keyID(key), name)
+		return fmt.Errorf("key mismatch: connection %q was encrypted with key_id=%s but the current key is key_id=%s (the Keychain key may have been replaced; re-register with 'vaulty-keeper db add %s')", name, sc.KeyID, keyID(key), name)
 	}
-	return fmt.Errorf("连接 %q 无法解密（%v）；可能用旧密钥注册——重新注册：'vaulty-keeper db add %s'，或删除：'vaulty-keeper db rm %s --yes'", name, err, name, name)
+	return fmt.Errorf("cannot decrypt connection %q (%v); it may have been registered with an old key — re-register it with 'vaulty-keeper db add %s' or remove it with 'vaulty-keeper db rm %s --yes'", name, err, name, name)
 }

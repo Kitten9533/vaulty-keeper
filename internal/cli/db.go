@@ -17,6 +17,7 @@ import (
 	"vaulty-keeper/internal/apollo"
 	"vaulty-keeper/internal/bridge"
 	"vaulty-keeper/internal/dbproxy"
+	"vaulty-keeper/internal/i18n"
 )
 
 // dbPath resolves the store file: --dir overrides, else VAULTY_KEEPER_DB_DIR, else
@@ -60,6 +61,10 @@ func runDB(args []string) int {
 		return dbTest(rest)
 	case "regen":
 		return dbRegen(rest)
+	case "on":
+		return dbTunnelOn(rest)
+	case "off":
+		return dbTunnelOff(rest)
 	case "show":
 		return dbShow(rest)
 	case "help", "-h", "--help":
@@ -75,12 +80,7 @@ func runDB(args []string) int {
 func dbUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	printDomainUsage(w, "db")
-	fmt.Fprintf(w, `
-数据库 URL 加密落盘（独立 DB 密钥），永不向脚本/AI 显示。'vaulty-keeper serve'
-为每个连接起一条 TCP 隧道；隔离容器内用原生客户端（psql/mysql/redis-cli）
-连隧道端口，token 作用户名/AUTH 密码——token 不是真实数据库密码。
-'db test' 验证注册的 URL 可认证（不打印它）；'db show' 只在你自己的终端打印。
-`)
+	fmt.Fprint(w, i18n.T("help.usage.db"))
 }
 
 func dbInit(args []string) int {
@@ -94,20 +94,20 @@ func dbInit(args []string) int {
 		// A key already exists: regenerating silently makes every existing
 		// connection in db.json undecryptable (the old key is gone).
 		if _, err := apollo.DBKey(); err == nil {
-			msg := "db init --force 会用新密钥覆盖 Keychain 中的数据库密钥，已有的数据库连接将无法再解密，需要重新 db add。确认？"
+			msg := i18n.T("db.init-force-warning")
 			if !isTTY(os.Stdin.Fd()) {
 				if !*yes {
-					return fail("db init: %s（非 TTY 下请加 --yes 确认）", msg)
+					return fail("db init: %s", i18n.T("db.init-force-non-tty", msg))
 				}
 			} else if !confirmYes(msg) {
-				return fail("db init: 已取消")
+				return fail("db init: %s", i18n.T("db.init-cancelled"))
 			}
 		}
 	}
 	if err := apollo.GenerateAndStoreDBKey(*force); err != nil {
 		return fail("db init: %v", err)
 	}
-	fmt.Println("数据库密钥已创建")
+	fmt.Println(i18n.T("db.key-created"))
 	return 0
 }
 
@@ -128,12 +128,12 @@ func dbAdd(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db add: 用法：echo '<url>' | vaulty-keeper db add <name> [--port <port>] [--test]")
+		return fail("db add: %s", i18n.T("db.add-usage"))
 	}
 	name := fs.Arg(0)
 	raw := readDSN()
 	if raw == "" {
-		return fail("db add: 请通过 stdin 提供数据库 URL（printf 'postgres://u:p@host:5432/db' | vaulty-keeper db add %s）", name)
+		return fail("db add: %s", i18n.T("db.add-stdin-required", name))
 	}
 	typ, err := dbproxy.ConnTypeFromURL(raw)
 	if err != nil {
@@ -141,7 +141,7 @@ func dbAdd(args []string) int {
 	}
 	if *test {
 		if err := dbproxy.TestConn(dbproxy.Conn{Name: name, URL: raw, Type: typ}); err != nil {
-			return fail("db add: 连接测试失败：%v（不会保存；请修正 URL 后重试，或去掉 --test 强制保存）", err)
+			return fail("db add: %s", i18n.T("db.add-test-failed", err.Error()))
 		}
 	}
 	path, err := dbPath(*dir)
@@ -155,7 +155,7 @@ func dbAdd(args []string) int {
 	if err := dbproxy.Add(path, key, name, raw, *port); err != nil {
 		return fail("db add: %v", err)
 	}
-	fmt.Printf("连接 %q（%s）已加密保存\n", name, typ)
+	fmt.Println(i18n.T("db.added", name, typ))
 	return 0
 }
 
@@ -188,7 +188,7 @@ func dbList(args []string) int {
 		if remote := remoteDBList(); remote != nil {
 			conns = remote
 		} else {
-			return fail("db list: %s（且未配置掩码代理 VAULTY_KEEPER_BRIDGE_ADDR/TOKEN）", dbListHint(path, localErr))
+			return fail("db list: %s", dbListHint(path, localErr)+i18n.T("db.list-no-bridge"))
 		}
 	}
 	if *jsonOut {
@@ -200,7 +200,11 @@ func dbList(args []string) int {
 		return 0
 	}
 	for _, c := range conns {
-		fmt.Printf("%s (%s) :%d\n", c.Name, c.Type, c.Port)
+		if c.Disabled {
+			fmt.Printf("%s (%s) :%d [%s]\n", c.Name, c.Type, c.Port, i18n.T("db.off-mark"))
+		} else {
+			fmt.Printf("%s (%s) :%d\n", c.Name, c.Type, c.Port)
+		}
 	}
 	return 0
 }
@@ -217,15 +221,15 @@ func localConns(path string) ([]dbproxy.Conn, error) {
 // dbListHint explains a local db list failure with an actionable message
 // (missing store vs key mismatch) and the store path.
 func dbListHint(path string, err error) string {
-	base := fmt.Sprintf("本地读取失败：%v", err)
+	base := i18n.T("db.list-hint-base", err.Error())
 	if _, serr := os.Stat(path); os.IsNotExist(serr) {
-		return fmt.Sprintf("%s 不存在，请先 'vaulty-keeper db add <name>' 注册，或 --dir / VAULTY_KEEPER_DB_DIR 指向已有环境", path)
+		return i18n.T("db.list-hint-missing", path)
 	}
-	if strings.Contains(err.Error(), "未找到数据库密钥") {
-		return base + "：请先运行 'vaulty-keeper db init'（或设置 VAULTY_KEEPER_DB_KEY）"
+	if strings.Contains(err.Error(), "database key not found") {
+		return i18n.T("db.list-hint-nokey", base)
 	}
-	if strings.Contains(err.Error(), "解密") || strings.Contains(err.Error(), "cipher") {
-		return fmt.Sprintf("%s 存在但解密失败（密钥不匹配）：该文件是用不同的 VAULTY_KEEPER_DB_KEY / Keychain 密钥创建的；请检查环境变量，或换用 --dir / VAULTY_KEEPER_DB_DIR 指向正确的 store", path)
+	if strings.Contains(err.Error(), "decrypt") || strings.Contains(err.Error(), "cipher") {
+		return i18n.T("db.list-hint-mismatch", path)
 	}
 	return base
 }
@@ -244,9 +248,10 @@ func remoteDBList() []dbproxy.Conn {
 	}
 	var res struct {
 		Connections []struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-			Port int    `json:"port"`
+			Name     string `json:"name"`
+			Type     string `json:"type"`
+			Port     int    `json:"port"`
+			Disabled bool   `json:"disabled"`
 		} `json:"connections"`
 	}
 	if err := json.Unmarshal(body, &res); err != nil {
@@ -254,7 +259,7 @@ func remoteDBList() []dbproxy.Conn {
 	}
 	out := make([]dbproxy.Conn, 0, len(res.Connections))
 	for _, c := range res.Connections {
-		out = append(out, dbproxy.Conn{Name: c.Name, Type: c.Type, Port: c.Port})
+		out = append(out, dbproxy.Conn{Name: c.Name, Type: c.Type, Port: c.Port, Disabled: c.Disabled})
 	}
 	return out
 }
@@ -267,10 +272,10 @@ func dbRM(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db rm: 用法：vaulty-keeper db rm <name> [--yes]")
+		return fail("db rm: %s", i18n.T("db.rm-usage"))
 	}
 	if !isTTY(os.Stdin.Fd()) && !*yes {
-		return fail("db rm: 非 TTY 下需要确认（用 --yes）")
+		return fail("db rm: %s", i18n.T("cli.rm-non-tty"))
 	}
 	name := fs.Arg(0)
 	path, err := dbPath(*dir)
@@ -284,7 +289,7 @@ func dbRM(args []string) int {
 	if err := dbproxy.Remove(path, key, name); err != nil {
 		return fail("db rm: %v", err)
 	}
-	fmt.Printf("连接 %q 已删除\n", name)
+	fmt.Println(i18n.T("db.removed", name))
 	return 0
 }
 
@@ -298,7 +303,7 @@ func dbTest(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db test: 用法：vaulty-keeper db test <name>")
+		return fail("db test: %s", i18n.T("db.test-usage"))
 	}
 	name := fs.Arg(0)
 	path, err := dbPath(*dir)
@@ -315,19 +320,19 @@ func dbTest(args []string) int {
 	}
 	if err := dbproxy.TestConn(conn); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: %s: %v\n", name, err)
-		fmt.Fprintf(os.Stderr, "修复：printf '<正确URL>' | vaulty-keeper db add %s（端口保持不变）\n", name)
+		fmt.Fprintf(os.Stderr, "%s\n", i18n.T("db.test-fix", name))
 		return 1
 	}
 	user := ""
 	if u, perr := url.Parse(conn.URL); perr == nil && u.User != nil {
 		user = u.User.Username()
 	}
-	fmt.Printf("OK: %s (%s)", name, conn.Type)
+	fmt.Printf(i18n.T("db.ok"), name, conn.Type)
 	if user != "" {
-		fmt.Printf(" user=%s", user)
+		fmt.Printf(i18n.T("db.ok-user"), user)
 	}
 	if db := strings.TrimPrefix(mustURLPath(conn.URL), "/"); db != "" {
-		fmt.Printf(" db=%s", db)
+		fmt.Printf(i18n.T("db.ok-db"), db)
 	}
 	fmt.Printf("\n")
 	return 0
@@ -354,10 +359,10 @@ func dbRegen(args []string) int {
 		return code
 	}
 	if *all && fs.NArg() != 0 {
-		return fail("db regen: --all 时不接受连接名")
+		return fail("db regen: %s", i18n.T("db.regen-no-name-with-all"))
 	}
 	if !*all && fs.NArg() != 1 {
-		return fail("db regen: 用法：vaulty-keeper db regen <name> 或 vaulty-keeper db regen --all")
+		return fail("db regen: %s", i18n.T("db.regen-usage"))
 	}
 	path, err := dbPath(*dir)
 	if err != nil {
@@ -373,10 +378,10 @@ func dbRegen(args []string) int {
 			return fail("db regen: %v", err)
 		}
 		if len(names) == 0 {
-			fmt.Println("没有可重新生成 token 的连接")
+			fmt.Println(i18n.T("db.regen-none"))
 			return 0
 		}
-		fmt.Printf("已为 %d 个连接重新生成 token：%s\n", len(names), strings.Join(names, ", "))
+		fmt.Println(i18n.T("db.regen-done", len(names), strings.Join(names, ", ")))
 		return 0
 	}
 	name := fs.Arg(0)
@@ -393,9 +398,65 @@ func dbRegen(args []string) int {
 		return fail("db regen: %v", err)
 	}
 	db := strings.TrimPrefix(u.Path, "/")
-	fmt.Printf("连接 %q 的新隧道 token：%s\n", name, tok)
-	fmt.Printf("新链接（本机）：%s\n", rawTunnelURL(conn.Type, tok, "127.0.0.1", conn.Port, db))
-	fmt.Printf("新链接（容器）：%s\n", rawTunnelURL(conn.Type, tok, "host.docker.internal", conn.Port, db))
+	fmt.Println(i18n.T("db.regen-token", name, tok))
+	fmt.Println(i18n.T("db.regen-link-local", dbproxy.RawTunnelURL(conn.Type, tok, "127.0.0.1", conn.Port, db)))
+	fmt.Println(i18n.T("db.regen-link-container", dbproxy.RawTunnelURL(conn.Type, tok, "host.docker.internal", conn.Port, db)))
+	return 0
+}
+
+// dbTunnelOn/Off turn a connection's tunnel on (`db on`) or off (`db off`),
+// per connection or for every connection with --all. The running serve picks
+// the change up within ~2s (it syncs db.json), so no restart is needed. Safe
+// for AI/scripts: only the on/off flag changes, never any plaintext.
+func dbTunnelOn(args []string) int  { return dbTunnelSet(args, false, "on") }
+func dbTunnelOff(args []string) int { return dbTunnelSet(args, true, "off") }
+
+func dbTunnelSet(args []string, disabled bool, verb string) int {
+	fs := flag.NewFlagSet("db", flag.ContinueOnError)
+	dir := fs.String("dir", "", "store directory")
+	all := fs.Bool("all", false, "apply to every connection")
+	if code, helped := parseFlags(fs, args); helped || code != 0 {
+		return code
+	}
+	if *all && fs.NArg() != 0 {
+		return fail("db %s: %s", verb, i18n.T("db.tunnel-no-name"))
+	}
+	if !*all && fs.NArg() != 1 {
+		return fail("db %s: %s", verb, i18n.T("db.tunnel-usage", verb, verb))
+	}
+	path, err := dbPath(*dir)
+	if err != nil {
+		return fail("db %s: %v", verb, err)
+	}
+	key, err := apollo.DBKey()
+	if err != nil {
+		return fail("db %s: %v", verb, err)
+	}
+	if *all {
+		names, err := dbproxy.SetTunnelAll(path, key, disabled)
+		if err != nil {
+			return fail("db %s: %v", verb, err)
+		}
+		if len(names) == 0 {
+			fmt.Println(i18n.T("db.tunnel-none"))
+			return 0
+		}
+		if disabled {
+			fmt.Println(i18n.T("db.tunnel-done-off", len(names), strings.Join(names, ", ")))
+		} else {
+			fmt.Println(i18n.T("db.tunnel-done-on", len(names), strings.Join(names, ", ")))
+		}
+		return 0
+	}
+	name := fs.Arg(0)
+	if err := dbproxy.SetTunnel(path, key, name, disabled); err != nil {
+		return fail("db %s: %v", verb, err)
+	}
+	if disabled {
+		fmt.Println(i18n.T("db.tunnel-off-done", name, name))
+	} else {
+		fmt.Println(i18n.T("db.tunnel-on-done", name))
+	}
 	return 0
 }
 
@@ -408,10 +469,10 @@ func dbShow(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db show: 用法：vaulty-keeper db show <name>")
+		return fail("db show: %s", i18n.T("db.show-usage"))
 	}
 	if !isTTY(os.Stdin.Fd()) {
-		return fail("db show: 仅可在交互式终端使用（真实连接信息只在你的终端里显示）")
+		return fail("db show: %s", i18n.T("db.show-tty-only"))
 	}
 	name := fs.Arg(0)
 	path, err := dbPath(*dir)
@@ -426,11 +487,11 @@ func dbShow(args []string) int {
 	if err != nil {
 		return fail("db show: %v", err)
 	}
-	fmt.Printf("name: %s\n", conn.Name)
-	fmt.Printf("type: %s\n", conn.Type)
-	fmt.Printf("port: %d\n", conn.Port)
-	fmt.Printf("url:  %s\n", conn.URL)
-	fmt.Fprintln(os.Stderr, "⚠ 真实连接信息仅在你的终端可见；不要把这段输出发给 AI/脚本或存入日志")
+	fmt.Printf(i18n.T("db.show-name")+"\n", conn.Name)
+	fmt.Printf(i18n.T("db.show-type")+"\n", conn.Type)
+	fmt.Printf(i18n.T("db.show-port")+"\n", conn.Port)
+	fmt.Printf(i18n.T("db.show-url")+"\n", conn.URL)
+	fmt.Fprintln(os.Stderr, i18n.T("db.show-warn"))
 	return 0
 }
 
@@ -448,7 +509,7 @@ func dbConnect(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db connect: 用法：vaulty-keeper db connect <name> [--container] [--cmd]")
+		return fail("db connect: %s", i18n.T("db.connect-usage"))
 	}
 	name := fs.Arg(0)
 	path, err := dbPath(*dir)
@@ -462,6 +523,9 @@ func dbConnect(args []string) int {
 	conn, err := dbproxy.Resolve(path, key, name)
 	if err != nil {
 		return fail("db connect: %v", err)
+	}
+	if conn.Disabled {
+		fmt.Fprintln(os.Stderr, i18n.T("db.connect-warn-off", name, name))
 	}
 	// Prefer the connection's dedicated token; fall back to the global bridge
 	// token for legacy connections that predate per-connection tokens.
@@ -490,54 +554,25 @@ func dbConnect(args []string) int {
 	}
 
 	// Rich view: raw tunnel link + ready-made links for common clients.
-	fmt.Printf("# %s (%s) — token 是 bridge token，不是真实数据库密码（隧道端口 %d）\n", name, conn.Type, conn.Port)
-	raw := rawTunnelURL(conn.Type, token, h, conn.Port, db)
-	fmt.Println("原始隧道链接（AI / 其他工具可据此自行转换）:")
+	fmt.Println(i18n.T("db.connect-head", name, conn.Type, conn.Port))
+	raw, links, err := dbproxy.TunnelLinks(conn.Type, token, h, conn.Port, db, i18n.T)
+	if err != nil {
+		return fail("db connect: %s", i18n.T("db.connect-unsupported", conn.Type))
+	}
+	fmt.Println(i18n.T("db.connect-raw"))
 	fmt.Printf("  %s\n", raw)
-	switch conn.Type {
-	case "postgres":
-		fmt.Println("psql —— PostgreSQL 自带的命令行客户端（装 PG 就有）：")
-		fmt.Printf("  %s\n", raw)
-		fmt.Println("DBeaver / DataGrip —— 通用数据库图形工具（贴 JDBC 链接）：")
-		fmt.Printf("  jdbc:postgresql://%s:%d/%s?user=%s\n", h, conn.Port, db, token)
-		fmt.Println("pgAdmin4 —— PostgreSQL 官方图形工具（填字段，不支持贴 URL）：")
-		fmt.Printf("  Host=%s Port=%d Database=%s Username=%s 密码留空\n", h, conn.Port, db, token)
-	case "mysql":
-		fmt.Println("DBeaver / DataGrip —— 通用数据库图形工具（贴 JDBC 链接）：")
-		fmt.Printf("  jdbc:mysql://%s:%d/%s?user=%s&password=x\n", h, conn.Port, db, token)
-		fmt.Println("MySQL Workbench —— MySQL 官方图形工具（填字段，不支持贴 URL）：")
-		fmt.Printf("  Hostname=%s Port=%d Default Schema=%s Username=%s 密码任意\n", h, conn.Port, db, token)
-		fmt.Println("mysql —— MySQL 自带的命令行客户端（装 MySQL 就有）：")
-		fmt.Printf("  mysql -h %s -P %d -u %s -px --ssl-mode=DISABLED %s\n", h, conn.Port, token, db)
-	case "redis":
-		fmt.Println("Redis Insight —— Redis 官方图形工具（贴 URL）：")
-		fmt.Printf("  %s\n", raw)
-		fmt.Println("redis-cli —— Redis 自带的命令行客户端（装 Redis 就有）：")
-		fmt.Printf("  redis-cli -h %s -p %d -a %s --no-auth-warning\n", h, conn.Port, token)
-	default:
-		return fail("db connect: 不支持的数据库类型 %q", conn.Type)
+	for _, l := range links {
+		fmt.Println(i18n.T("db.connect-" + l.Kind))
+		fmt.Printf("  %s\n", l.Value)
 	}
 	return 0
-}
-
-// rawTunnelURL builds the canonical token-based tunnel URL.
-func rawTunnelURL(typ, token, host string, port int, db string) string {
-	switch typ {
-	case "postgres":
-		return fmt.Sprintf("postgresql://%s@%s:%d/%s", token, host, port, db)
-	case "mysql":
-		return fmt.Sprintf("mysql://%s:x@%s:%d/%s", token, host, port, db)
-	case "redis":
-		return fmt.Sprintf("redis://:%s@%s:%d/%s", token, host, port, db)
-	}
-	return ""
 }
 
 // printConnCommand prints a single executable client command (for --cmd).
 func printConnCommand(typ, token, host string, port int, db string) {
 	switch typ {
 	case "postgres":
-		fmt.Printf("psql \"postgresql://%s@%s:%d/%s\"\n", token, host, port, db)
+		fmt.Printf("psql \"postgresql://%s:x@%s:%d/%s\"\n", token, host, port, db)
 	case "mysql":
 		fmt.Printf("mysql -h %s -P %d -u %s -px --ssl-mode=DISABLED %s\n", host, port, token, db)
 	case "redis":
@@ -556,7 +591,7 @@ func bridgeToken() (string, error) {
 	}
 	b, err := os.ReadFile(bridge.TokenPath(home))
 	if err != nil {
-		return "", errors.New("未找到 bridge token（请先运行 'vaulty-keeper serve'，或导出 " + bridge.EnvToken + "）")
+		return "", errors.New(i18n.T("db.bridge-token-missing", bridge.EnvToken))
 	}
 	return strings.TrimSpace(string(b)), nil
 }
@@ -572,10 +607,10 @@ func dbShell(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("db shell: 用法：vaulty-keeper db shell <name>")
+		return fail("db shell: %s", i18n.T("db.shell-usage"))
 	}
 	if !isTTY(os.Stdin.Fd()) {
-		return fail("db shell: 仅可在交互式终端使用（连接信息只在你的终端里可见）")
+		return fail("db shell: %s", i18n.T("db.shell-tty-only"))
 	}
 	name := fs.Arg(0)
 	path, err := dbPath(*dir)
@@ -629,7 +664,7 @@ func openShell(conn dbproxy.Conn) error {
 		env := append(os.Environ(), "REDISCLI_AUTH="+pass)
 		return runClient("redis-cli", args, env)
 	default:
-		return fmt.Errorf("不支持的数据库类型 %q", conn.Type)
+		return fmt.Errorf("%s", i18n.T("db.connect-unsupported", conn.Type))
 	}
 }
 
@@ -641,7 +676,7 @@ func runClient(bin string, args []string, env []string) error {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return fmt.Errorf("未找到 %s（请先安装该客户端）", bin)
+			return fmt.Errorf("%s", i18n.T("db.shell-bin-missing", bin))
 		}
 		return err
 	}

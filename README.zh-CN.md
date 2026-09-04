@@ -49,6 +49,26 @@ vaulty-keeper ui --allow-plaintext    # 显式开启明文接口（见下）
 - 覆盖全部功能：快照浏览/搜索/增删改、导入、环境对比、明文编辑、导出（下载或复制）、AES 加解密（手动 key/iv）、快照密钥与敏感值密钥初始化、**数据库隧道**（注册/测试连接、生成各客户端链接、重新生成隧道 token、`--allow-plaintext` 下查看真实 URL）。
 - 明文出口（显示 / 明文编辑 / 导出 / AES 解密）均需二次确认后才显示，响应 `Cache-Control: no-store`，浏览器不持久化明文。
 - 浏览器端不持久化快照内容。
+- UI **默认英文**，顶栏选择器可切换中文/英文；选择会记在浏览器 `localStorage` 并同步到共享偏好文件，CLI 输出语言跟随（见下「语言（UI 与 CLI）」）。
+
+## 语言（UI 与 CLI）
+
+整个工具双语（English / 中文），UI 与 CLI 共用同一套语言设置：
+
+- **Web UI 默认英文**；顶栏选择器切换中文/英文。选择按浏览器记在 `localStorage`，并同步写入共享偏好文件 `~/.vaulty/prefs.json`（0600）。新浏览器首次打开（无本地记录）会采用共享设置（例如 CLI 侧设置的语言）。
+- **CLI 输出与 UI 同语言**：命令树、`-h` 帮助、usage 段落、运行时消息与交互提示全部双语。
+- `vaulty-keeper lang` 打印当前语言；`vaulty-keeper lang zh|en` 写入共享偏好（非 TTY 也可用）。
+- `VAULTY_KEEPER_LANG=en|zh` 环境变量优先级最高。
+- 解析顺序：`VAULTY_KEEPER_LANG` → `~/.vaulty/prefs.json` → 默认 `en`。
+
+```sh
+vaulty-keeper lang            # → language: en
+vaulty-keeper lang zh         # 切到中文，与 Web UI 互通
+vaulty-keeper lang            # → 语言：zh
+vaulty-keeper help            # 帮助树此时也是中文
+```
+
+shell 补全描述与底层库错误保持英文；中文终端下看到的是「中文提示 + 英文底层细节」，与中文版 UI 的行为一致。
 
 ## vaulty-keeper apollo — Apollo 快照工具
 
@@ -152,6 +172,7 @@ vaulty-keeper serve --addr 0.0.0.0:8970       # 掩码代理（host 持有密钥
 vaulty-keeper remote list|get|compare ...     # 通过掩码代理读（形态与 apollo 子命令一致）
 vaulty-keeper db <init|add|list|test|connect|show|rm|shell|regen> ... # 加密数据库连接 + 隧道（见「数据库隧道代理」）
 vaulty-keeper completion zsh | source /dev/stdin   # 或 bash / fish，加到 shell 配置
+vaulty-keeper lang [en|zh]    # 查看或设置共享的 UI/CLI 语言
 vaulty-keeper version
 ```
 
@@ -276,14 +297,17 @@ printf 'postgres://app:pass@db.example.com:5432/orders' \
 vaulty-keeper db list                                                          # orders (postgres) :15432
 vaulty-keeper db regen orders                                                  # 轮换该连接的隧道 token，旧 token 立即失效
 vaulty-keeper db regen --all                                                   # 轮换所有连接的隧道 token
+vaulty-keeper db off orders [--all]                                            # 关闭隧道，端口停止监听（serve 约 2 秒内生效）
+vaulty-keeper db on orders [--all]                                             # 重新开启隧道
 vaulty-keeper serve --addr 0.0.0.0:8970                                        # 同时起掩码桥 + 隧道
 ```
 
 - 类型从 URL scheme 自动识别：`postgres://`/`postgresql://`、`mysql://`、`redis://`/`rediss://`
 - **同类可配多个**：每个连接一个名字 + 一个独立隧道端口，数量不限（如 3 个 MySQL：`mysql-orders`/`mysql-billing`/`mysql-reporting`，`db add` 时各指定/自动分配端口），`db connect <name>` 逐个取命令
 - 容器/隔离域内用 `vaulty-keeper db list`（无本地 store 时自动经桥读取）或 `vaulty-keeper remote dblist` 查隧道端口，再用原生客户端连（`$TOKEN` 取 `vaulty-keeper db connect <name>` 打印的连接专属 token；旧连接无专属 token 时回退全局 `VAULTY_KEEPER_BRIDGE_TOKEN`）
-- **热加载**：`serve` 每 2 秒同步 `db.json`——`db add`/`db rm`/`db regen` 后隧道自动开/关，**不用重启 serve**
-- `vaulty-keeper db connect <name>` 直接打印**带 token 的完整客户端命令**（psql/mysql/redis-cli，token 已填好），`--container` 换成 `host.docker.internal`，`--host` 指定其他主机、`--cmd` 只输出单行命令
+- **热加载**：`serve` 每 2 秒同步 `db.json`——`db add`/`db rm`/`db regen`/`db on`/`db off` 后隧道自动开/关，**不用重启 serve**
+- **隧道默认开启**；`db off <name>|--all` 按连接关闭（端口停止监听），`db on` 重新开启；`db list`/`remote dblist` 显示 `[关]` 标记；UI 连接表格每行有「开启/关闭隧道」按钮
+- `vaulty-keeper db connect <name>` 直接打印**带 token 的完整客户端命令**（psql/mysql/redis-cli，token 已填好），`--container` 换成 `host.docker.internal`，`--host` 指定其他主机、`--cmd` 只输出单行命令；隧道链接统一带 **user+password**（token 在 PG/MySQL 的 user 字段、Redis 的 AUTH 密码，另一字段是占位 `x`，被隧道忽略），GUI 工具不挑字段
 - `vaulty-keeper db regen <name>|--all` 轮换隧道 token：每条连接有**专属 token**（128 位随机，随 URL 一起加密落盘），`db add` 时自动生成；token 泄露时单独轮换即可，全局 bridge token 不受影响
 - **凭据注入**：PG 假 server 直接放行（trust 风格，token 在 user 字段）；MySQL 握手时把真实密码的认证应答换进去（支持 `mysql_native_password` / `caching_sha2_password`）；Redis 代理代发真实 `AUTH`。客户端永远不需要真实密码
 - **TLS**：PG 按 URL 的 `sslmode`（require/verify-ca/verify-full/prefer）、MySQL 用 `?tls=true`、Redis 用 `rediss://` 连接真实库；客户端↔代理为本机/局域网明文
@@ -294,6 +318,7 @@ vaulty-keeper serve --addr 0.0.0.0:8970                                        #
 **安全边界**
 
 - 隧道监听地址跟随 `--addr`：默认 `127.0.0.1`；容器要连需 `0.0.0.0`（局域网可达），**由 token 门控兜底**——token 在 PG/MySQL 的 username 字段、Redis 的 AUTH 首命令里校验（连接专属 token 或全局 bridge token 任一匹配），无 token 的局域网用户连上即被断开
+- 不需要暴露的连接用 `db off` 关闭（端口完全停止监听），需要时 `db on` 恢复；隧道默认开启、状态随 db.json 持久化
 - 真实 URL/凭据只存在于 host 内存，db.json 无明文、日志不记录、任何回包不含
 - 隧道 token 为连接专属（128 位随机，随 URL 一并加密落盘），`db regen` 可轮换；旧连接回退全局 bridge token（掩码桥用，128 位随机）+ 失败限速；token 泄露给 AI 是设计内的（AI 本就该能用），防的是"无 token 的第三方"
 
@@ -348,7 +373,7 @@ cat /tmp/vaulty-keeper-dbtest-serve.log | grep dbproxy:
 | 掩码代理 | `vaulty-keeper serve`（host 持有密钥）+ `vaulty-keeper remote`（容器/隔离域内）——容器侧只拿到 `*** (n chars)` + 长度 + 指纹，**即使 `set --plain` 标记安全的 key 也不回明文**；token 门控 + 限速 |
 | AI 读 | **反转默认**：`get`/`list`/`compare` 非 TTY 下默认全部掩码 `*** (n chars)`，不靠 key 名猜测；只有 `set --plain` / `mark --plain` 显式标记为安全的 key 才输出明文。明文出口（reveal、export、edit、`--reveal`、`aes decrypt`）**非交互终端一律拒绝，即使 `--yes`**——只在用户本人 TTY 可用 |
 | AI 写 | `set`/`unset`/`mark`/`import` 安全（写入即加密），无需 `--yes` |
-| DB 隧道 | `vaulty-keeper db add` 只加密 URL（独立 DB 密钥 + `~/.vaulty/db.json`，0600），并为每条连接生成**专属隧道 token**；`serve` 起 TCP 隧道在握手注入真实凭据，客户端用专属 token（旧连接回退 bridge token，PG/MySQL username 字段 / Redis AUTH）；`db regen` 可轮换 token；DSN 永不离开 host、不进日志/回包 |
+| DB 隧道 | `vaulty-keeper db add` 只加密 URL（独立 DB 密钥 + `~/.vaulty/db.json`，0600），并为每条连接生成**专属隧道 token**；`serve` 起 TCP 隧道在握手注入真实凭据，客户端用专属 token（旧连接回退 bridge token，PG/MySQL username 字段 / Redis AUTH）；`db regen` 可轮换 token；**隧道默认开启，`db on/off` 按连接开关（端口停止/恢复监听，状态持久化）**；DSN 永不离开 host、不进日志/回包 |
 | Web UI | 仅 127.0.0.1 + 随机 token 门控写操作/明文出口，GET 只返回掩码（未标记安全的 key 一律掩码）；**明文接口（reveal/export/明文编辑/AES 解密）默认禁用**，需 `--allow-plaintext` 显式开启，否则带 token 也返回 403；token 失败限速（指数退避） |
 | 防破解 | 指纹为 HMAC-SHA256（密钥为快照密钥），密钥不泄露时无法离线枚举弱值匹配掩码指纹；token 为 128 位随机 |
 | 判断一致性 | 用 `compare`（掩码 + 长度 + 指纹），不要 `get` 明文 |

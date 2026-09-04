@@ -23,6 +23,7 @@ import (
 
 	"vaulty-keeper/internal/aesx"
 	"vaulty-keeper/internal/apollo"
+	"vaulty-keeper/internal/i18n"
 )
 
 func TestSnapshotViewMasksSensitiveValue(t *testing.T) {
@@ -1100,6 +1101,9 @@ func TestDBListAddConnectRemove(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"token":"`) {
 		t.Fatalf("connect = %d %s", w.Code, w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), `"raw":"postgresql://`) || !strings.Contains(w.Body.String(), `:x@`) {
+		t.Fatalf("connect raw link should carry a user and a placeholder password: %s", w.Body.String())
+	}
 	if strings.Contains(w.Body.String(), "bridge-tok") {
 		t.Fatalf("connect should use a per-connection token, not the global bridge token: %s", w.Body.String())
 	}
@@ -1133,6 +1137,86 @@ func TestDBListAddConnectRemove(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
 	if strings.Contains(w.Body.String(), `"name":"pg"`) {
 		t.Fatalf("connection not removed: %s", w.Body.String())
+	}
+}
+
+func TestDBTunnelOnOff(t *testing.T) {
+	h := newDBHandler(t, true)
+	add := func() {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/db/connections",
+			bytes.NewBufferString(`{"name":"pg","url":"postgres://app:realpass@db.internal:5432/appdb"}`))
+		r.Header.Set("X-Auth-Token", "ui-tok")
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("add = %d: %s", w.Code, w.Body.String())
+		}
+	}
+	add()
+
+	// list reports the connection as enabled by default
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"disabled":true`) {
+		t.Fatalf("fresh connection should be enabled: %d %s", w.Code, w.Body.String())
+	}
+
+	// toggle requires the token
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/db/tunnel",
+		bytes.NewBufferString(`{"name":"pg","enabled":false}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("tunnel toggle without token = %d, want 401", w.Code)
+	}
+
+	// turn off
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/db/tunnel",
+		bytes.NewBufferString(`{"name":"pg","enabled":false}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tunnel off = %d: %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
+	if !strings.Contains(w.Body.String(), `"disabled":true`) {
+		t.Fatalf("db list should report the tunnel off: %s", w.Body.String())
+	}
+	// connect info warns the tunnel is closed, still no real URL
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/connect?name=pg", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "tunnel for this connection is off") {
+		t.Fatalf("connect should warn about a closed tunnel: %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "realpass") || strings.Contains(w.Body.String(), "db.internal") {
+		t.Fatalf("connect leaked real credentials: %s", w.Body.String())
+	}
+
+	// turn back on
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/tunnel",
+		bytes.NewBufferString(`{"name":"pg","enabled":true}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tunnel on = %d: %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
+	if strings.Contains(w.Body.String(), `"disabled":true`) {
+		t.Fatalf("db list should report the tunnel on again: %s", w.Body.String())
+	}
+
+	// unknown connection
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/tunnel",
+		bytes.NewBufferString(`{"name":"nope","enabled":false}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("tunnel toggle of unknown connection = %d, want 400", w.Code)
 	}
 }
 
@@ -1356,5 +1440,55 @@ func TestDBRegenToken(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest && w.Code != http.StatusNotFound {
 		t.Fatalf("regen unknown = %d, want 4xx", w.Code)
+	}
+}
+
+func TestPrefsEndpoint(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("VAULTY_KEEPER_LANG", "")
+	i18n.Init()
+	h := newDBHandler(t, false)
+
+	// GET returns the shared language (default en)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/prefs", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"lang":"en"`) {
+		t.Fatalf("prefs GET = %d %s", w.Code, w.Body.String())
+	}
+
+	// PUT requires the token
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/prefs", bytes.NewBufferString(`{"lang":"zh"}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("prefs PUT without token = %d, want 401", w.Code)
+	}
+
+	// PUT with the token writes the shared prefs file
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/prefs", bytes.NewBufferString(`{"lang":"zh"}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("prefs PUT = %d %s", w.Code, w.Body.String())
+	}
+	if got := i18n.ReadLang(); got != "zh" {
+		t.Fatalf("prefs file lang = %q, want zh", got)
+	}
+
+	// GET now reflects the file
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/prefs", nil))
+	if !strings.Contains(w.Body.String(), `"lang":"zh"`) {
+		t.Fatalf("prefs GET after PUT = %s", w.Body.String())
+	}
+
+	// invalid value rejected
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPut, "/api/prefs", bytes.NewBufferString(`{"lang":"fr"}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("prefs PUT invalid = %d, want 400", w.Code)
 	}
 }

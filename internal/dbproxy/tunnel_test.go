@@ -181,6 +181,51 @@ func TestRedisTunnel(t *testing.T) {
 	}
 }
 
+func TestTunnelDisabledStopsAndResumesListening(t *testing.T) {
+	fake := newFakeRedis(t, "realpass")
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	tunnelPort := freePort(t)
+	realURL := fmt.Sprintf("redis://:realpass@127.0.0.1:%d/0", fake.port())
+	if err := Add(path, key, "cache", realURL, tunnelPort); err != nil {
+		t.Fatal(err)
+	}
+	const token = "tok-123"
+	startTunnel(t, path, key, tunnelPort, token)
+
+	// enabled: port accepts connections
+	waitPort(t, tunnelPort)
+
+	// disable: within the ~2s sync the listener must stop accepting
+	if err := SetTunnel(path, key, "cache", true); err != nil {
+		t.Fatal(err)
+	}
+	waitPortClosed(t, tunnelPort)
+
+	// re-enable: listener comes back
+	if err := SetTunnel(path, key, "cache", false); err != nil {
+		t.Fatal(err)
+	}
+	waitPort(t, tunnelPort)
+}
+
+// waitPortClosed polls until the tunnel port no longer accepts connections
+// (the serve sync loop stops the listener within ~2s).
+func waitPortClosed(t *testing.T, port int) {
+	t.Helper()
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
+		if err != nil {
+			return
+		}
+		c.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("tunnel on port %d still accepting after disable", port)
+}
+
 func TestRedisTunnelRejectsBadToken(t *testing.T) {
 	fake := newFakeRedis(t, "realpass")
 	dir := t.TempDir()
@@ -297,4 +342,51 @@ func waitPortGone(t *testing.T, port int) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("port %d still accepting after removal", port)
+}
+
+func TestTunnelLinks(t *testing.T) {
+	tr := func(key string, args ...any) string { return fmt.Sprintf(key, args...) }
+	cases := []struct {
+		typ       string
+		token     string
+		port      int
+		db        string
+		wantRaw   string
+		wantKinds []string
+	}{
+		{"postgres", "tok", 15432, "appdb", "postgresql://tok:x@127.0.0.1:15432/appdb", []string{"psql", "dbeaver", "pgadmin"}},
+		{"mysql", "tok", 15435, "appdb", "mysql://tok:x@127.0.0.1:15435/appdb", []string{"dbeaver", "workbench", "mysql"}},
+		{"redis", "tok", 15434, "0", "redis://x:tok@127.0.0.1:15434/0", []string{"insight", "rediscli"}},
+	}
+	for _, c := range cases {
+		raw, links, err := TunnelLinks(c.typ, c.token, "127.0.0.1", c.port, c.db, tr)
+		if err != nil {
+			t.Fatalf("%s: TunnelLinks error: %v", c.typ, err)
+		}
+		if raw != c.wantRaw {
+			t.Errorf("%s: raw = %q, want %q", c.typ, raw, c.wantRaw)
+		}
+		if len(links) != len(c.wantKinds) {
+			t.Fatalf("%s: %d links, want %d", c.typ, len(links), len(c.wantKinds))
+		}
+		for i, k := range c.wantKinds {
+			if links[i].Kind != k {
+				t.Errorf("%s: link %d kind = %q, want %q", c.typ, i, links[i].Kind, k)
+			}
+			if links[i].Value == "" {
+				t.Errorf("%s: link %d value is empty", c.typ, i)
+			}
+		}
+		for _, l := range links {
+			if !strings.Contains(l.Value, "tok") {
+				t.Errorf("%s: link %q does not carry the token: %q", c.typ, l.Kind, l.Value)
+			}
+		}
+	}
+	if _, _, err := TunnelLinks("mongo", "tok", "127.0.0.1", 1, "db", tr); err == nil {
+		t.Fatal("TunnelLinks should reject an unsupported type")
+	}
+	if got := RawTunnelURL("mongo", "tok", "h", 1, "db"); got != "" {
+		t.Fatalf("RawTunnelURL unsupported type = %q, want empty", got)
+	}
 }

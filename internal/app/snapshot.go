@@ -24,7 +24,7 @@ func Import(dir, name, appID, text string, snapKey, sensitiveKey []byte) (int, e
 	}
 	kvs, _ := apollo.ParseKV(text)
 	if len(kvs) == 0 {
-		return 0, errors.New("未解析到任何键值条目")
+		return 0, errors.New("no key/value entries parsed")
 	}
 	s := apollo.NewSnapshot(name, appID)
 	for _, kv := range kvs {
@@ -121,7 +121,7 @@ func SetValue(dir, name, appID, key, value string, secret *bool, snapKey, sensit
 	}
 	it, ok := visible[key]
 	if !ok {
-		return nil, fmt.Errorf("保存后未找到条目 %q", key)
+		return nil, fmt.Errorf("item %q not found after saving", key)
 	}
 	return &it, nil
 }
@@ -201,7 +201,7 @@ func EditApply(dir, name, appID string, snapKey, sensitiveKey []byte, text strin
 	}
 	kvs, _ := apollo.ParseKV(text)
 	if len(kvs) == 0 {
-		return 0, errors.New("编辑后未解析到任何键值条目；快照未变更")
+		return 0, errors.New("no key/value entries parsed after editing; snapshot unchanged")
 	}
 	ns := apollo.NewSnapshot(s.Meta.Name, s.Meta.AppID)
 	for _, kv := range kvs {
@@ -233,7 +233,7 @@ func Reveal(dir, name, appID string, snapKey, sensitiveKey []byte, targets []str
 		}
 		it, ok := s.Items[k]
 		if !ok {
-			return nil, fmt.Errorf("快照 %q 中不存在 key %q", k, name)
+			return nil, fmt.Errorf("key %q not found in snapshot %q", k, name)
 		}
 		if aesKeyOverride != "" && aesIVOverride != "" {
 			readKey := snapKey
@@ -242,7 +242,7 @@ func Reveal(dir, name, appID string, snapKey, sensitiveKey []byte, targets []str
 			}
 			cipher, err := it.DecryptValue(readKey)
 			if err != nil {
-				return nil, fmt.Errorf("读取 %q：%w", k, err)
+				return nil, fmt.Errorf("reading %q: %w", k, err)
 			}
 			p, err := aesx.Decrypt(aesKeyOverride, aesIVOverride, cipher)
 			if err != nil {
@@ -268,12 +268,12 @@ func load(dir, name, appID string) (*apollo.Snapshot, error) {
 	s, err := apollo.Load(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			msg := fmt.Sprintf("快照 %q 不存在", name)
+			msg := fmt.Sprintf("snapshot %q not found", name)
 			if appID != "" {
-				msg = fmt.Sprintf("快照 %q（appid %s）不存在", name, appID)
+				msg = fmt.Sprintf("snapshot %q (appid %s) not found", name, appID)
 			}
 			if hints := snapshotHints(dir, name, appID); len(hints) > 0 {
-				msg += "；相近快照：" + strings.Join(hints, "、")
+				msg += "; similar snapshots: " + strings.Join(hints, ", ")
 			}
 			return nil, errors.New(msg)
 		}

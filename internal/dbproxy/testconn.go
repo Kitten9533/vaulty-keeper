@@ -19,7 +19,7 @@ import (
 func TestConn(conn Conn) error {
 	u, err := url.Parse(conn.URL)
 	if err != nil {
-		return errors.New("注册的连接 URL 无法解析")
+		return errors.New("cannot parse the registered connection URL")
 	}
 	switch conn.Type {
 	case "postgres":
@@ -51,7 +51,7 @@ func TestConn(conn Conn) error {
 		defer server.Close()
 		return sanitizeTestErr(redisAuthenticate(server, u), u)
 	default:
-		return fmt.Errorf("不支持的数据库类型 %q", conn.Type)
+		return fmt.Errorf("unsupported database type %q", conn.Type)
 	}
 }
 
@@ -62,7 +62,7 @@ const testDialTimeout = 5 * time.Second
 // errDial collapses a network-level failure into a message that carries no
 // address, so the real database location never leaks to an AI/script.
 func errDial(dbType string) error {
-	return fmt.Errorf("连接失败：无法到达 %s（请检查 URL 的 host/port）", dbType)
+	return fmt.Errorf("connection failed: cannot reach %s (check the host/port in the URL)", dbType)
 }
 
 // sanitizeTestErr rewrites an error so it cannot leak the URL's credentials or

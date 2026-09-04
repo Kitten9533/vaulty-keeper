@@ -54,7 +54,7 @@ func NewSnapshot(name, appID string) *Snapshot {
 
 func ValidateSnapshotName(name string) error {
 	if !snapshotNameRe.MatchString(name) {
-		return errors.New("快照名必须以字母或数字开头，且只能包含字母、数字、点、横线或下划线")
+		return errors.New("snapshot name must start with a letter or digit and contain only letters, digits, dots, dashes or underscores")
 	}
 	return nil
 }
@@ -68,10 +68,10 @@ var appIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 // snapshots must reject it themselves.
 func ValidateAppID(appID string) error {
 	if appID == "" {
-		return errors.New("app id 不能为空")
+		return errors.New("app id must not be empty")
 	}
 	if !appIDRe.MatchString(appID) {
-		return errors.New("app id 必须以字母或数字开头，且只能包含字母、数字、点、横线或下划线")
+		return errors.New("app id must start with a letter or digit and contain only letters, digits, dots, dashes or underscores")
 	}
 	return nil
 }
@@ -145,7 +145,7 @@ func (s *Snapshot) Set(snapKey, sensitiveKey []byte, k, v string, secret *bool) 
 		key = sensitiveKey
 	}
 	if key == nil {
-		return errors.New("快照密钥不可用")
+		return errors.New("snapshot key unavailable")
 	}
 	it, err := encryptValue(key, v)
 	if err != nil {
@@ -180,12 +180,12 @@ func (s *Snapshot) Get(snapKey, sensitiveKey []byte, k string) (string, bool, er
 func (s *Snapshot) keyFor(item Item, snapKey, sensitiveKey []byte) ([]byte, error) {
 	if item.Secret {
 		if sensitiveKey == nil {
-			return nil, errors.New("敏感值密钥不可用")
+			return nil, errors.New("sensitive-value key unavailable")
 		}
 		return sensitiveKey, nil
 	}
 	if snapKey == nil {
-		return nil, errors.New("快照密钥不可用")
+		return nil, errors.New("snapshot key unavailable")
 	}
 	return snapKey, nil
 }
@@ -253,23 +253,23 @@ func (a *Snapshot) Diff(b *Snapshot, snapKey, sensitiveKey []byte) ([]Change, er
 		case !aok && bok:
 			v, err := plain(bi)
 			if err != nil {
-				return nil, fmt.Errorf("解密 %q：%w", k, err)
+				return nil, fmt.Errorf("cannot decrypt %q: %w", k, err)
 			}
 			out = append(out, Change{Key: k, Kind: "added", New: v, Secret: bi.Secret, Safe: bi.Safe})
 		case aok && !bok:
 			v, err := plain(ai)
 			if err != nil {
-				return nil, fmt.Errorf("解密 %q：%w", k, err)
+				return nil, fmt.Errorf("cannot decrypt %q: %w", k, err)
 			}
 			out = append(out, Change{Key: k, Kind: "removed", Old: v, Secret: ai.Secret, Safe: ai.Safe})
 		default:
 			av, err := plain(ai)
 			if err != nil {
-				return nil, fmt.Errorf("解密 %q：%w", k, err)
+				return nil, fmt.Errorf("cannot decrypt %q: %w", k, err)
 			}
 			bv, err := plain(bi)
 			if err != nil {
-				return nil, fmt.Errorf("解密 %q：%w", k, err)
+				return nil, fmt.Errorf("cannot decrypt %q: %w", k, err)
 			}
 			if NormValue(av) != NormValue(bv) {
 				out = append(out, Change{Key: k, Kind: "changed", Old: av, New: bv, Secret: ai.Secret || bi.Secret, Safe: ai.Safe && bi.Safe})
@@ -281,7 +281,7 @@ func (a *Snapshot) Diff(b *Snapshot, snapKey, sensitiveKey []byte) ([]Change, er
 
 func (it Item) DecryptValue(key []byte) (string, error) {
 	if key == nil {
-		return "", errors.New("快照密钥不可用")
+		return "", errors.New("snapshot key unavailable")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -301,7 +301,7 @@ func (it Item) DecryptValue(key []byte) (string, error) {
 	}
 	pt, err := g.Open(nil, nonce, ct, nil)
 	if err != nil {
-		return "", fmt.Errorf("解密 %q 失败：%w", "value", err)
+		return "", fmt.Errorf("cannot decrypt %q: %w", "value", err)
 	}
 	return string(pt), nil
 }

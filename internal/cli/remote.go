@@ -17,6 +17,7 @@ import (
 	"vaulty-keeper/internal/apollo"
 	"vaulty-keeper/internal/bridge"
 	"vaulty-keeper/internal/dbproxy"
+	"vaulty-keeper/internal/i18n"
 )
 
 // ---- serve ----
@@ -72,7 +73,7 @@ func runServe(args []string) int {
 				}
 			}()
 		} else {
-			fmt.Fprintf(os.Stderr, "serve: 数据库密钥不可用（%v）；跳过 DB 隧道（掩码桥不受影响）\n", kerr)
+			fmt.Fprintln(os.Stderr, i18n.T("remote.db-key-skip", kerr.Error()))
 		}
 	}
 
@@ -109,7 +110,7 @@ func remoteConfig() (base, token string, err error) {
 		}
 	}
 	if token == "" {
-		return "", "", errors.New("未设置 bridge token（请导出 " + bridge.EnvToken + " 或先运行 'vaulty-keeper serve'）")
+		return "", "", errors.New(i18n.T("remote.token-missing", bridge.EnvToken))
 	}
 	return base, token, nil
 }
@@ -175,12 +176,7 @@ func runRemote(args []string) int {
 func remoteUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	printDomainUsage(w, "remote")
-	fmt.Fprintf(w, `
-掩码代理（'vaulty-keeper serve'，在持有密钥的主机运行）只回掩码值，永不回明文，
-即使 key 被标记安全也一样。remote 客户端供隔离域（Docker 容器/独立账号/VM）
-内的 AI 使用，经 %s / %s 访问桥。remote dblist 列出正在监听的数据库隧道，
-供原生客户端用 token 作为用户名（PG/MySQL）或 AUTH 密码（Redis）连接。
-`, bridge.EnvAddr, bridge.EnvToken)
+	fmt.Fprintf(w, "%s", i18n.T("help.usage.remote", bridge.EnvAddr, bridge.EnvToken))
 }
 
 type bridgeMasked struct {
@@ -199,7 +195,7 @@ func remoteList(args []string) int {
 		return code
 	}
 	if fs.NArg() > 1 {
-		return fail("remote list: 用法：vaulty-keeper remote list [name] [--appid <id>]")
+		return fail("remote list: %s", i18n.T("remote.list-usage"))
 	}
 	base, token, err := remoteConfig()
 	if err != nil {
@@ -270,7 +266,7 @@ func remoteGet(args []string) int {
 		return code
 	}
 	if fs.NArg() != 2 {
-		return fail("remote get: 用法：vaulty-keeper remote get <name> <key> [--appid <id>]")
+		return fail("remote get: %s", i18n.T("remote.get-usage"))
 	}
 	base, token, err := remoteConfig()
 	if err != nil {
@@ -304,7 +300,7 @@ func remoteCompare(args []string) int {
 		return code
 	}
 	if fs.NArg() != 2 {
-		return fail("remote compare: 用法：vaulty-keeper remote compare <nameA> <nameB>")
+		return fail("remote compare: %s", i18n.T("remote.compare-usage"))
 	}
 	base, token, err := remoteConfig()
 	if err != nil {
@@ -417,16 +413,21 @@ func remoteDBListCmd(args []string) int {
 	}
 	var res struct {
 		Connections []struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-			Port int    `json:"port"`
+			Name     string `json:"name"`
+			Type     string `json:"type"`
+			Port     int    `json:"port"`
+			Disabled bool   `json:"disabled"`
 		} `json:"connections"`
 	}
 	if err := json.Unmarshal(body, &res); err != nil {
 		return fail("remote dblist: %v", err)
 	}
 	for _, c := range res.Connections {
-		fmt.Printf("%s (%s) :%d\n", c.Name, c.Type, c.Port)
+		if c.Disabled {
+			fmt.Printf("%s (%s) :%d [%s]\n", c.Name, c.Type, c.Port, i18n.T("db.off-mark"))
+		} else {
+			fmt.Printf("%s (%s) :%d\n", c.Name, c.Type, c.Port)
+		}
 	}
 	return 0
 }

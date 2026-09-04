@@ -18,7 +18,7 @@ func keyStoreGetImpl(account string) (string, error) {
 	out, err := exec.Command("security", "find-generic-password",
 		"-a", account, "-s", KeychainService, "-w").Output()
 	if err != nil {
-		return "", fmt.Errorf("密钥库查询失败：%w", err)
+		return "", fmt.Errorf("keychain lookup failed: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

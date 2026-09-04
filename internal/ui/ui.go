@@ -29,6 +29,7 @@ import (
 
 	"vaulty-keeper/internal/apollo"
 	"vaulty-keeper/internal/app"
+	"vaulty-keeper/internal/i18n"
 )
 
 //go:embed static/index.html static/app.css static/app.js
@@ -86,6 +87,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("/api/aes/gen-key", h.aesGenKey)
 	mux.HandleFunc("/api/aes/transform", h.aesTransform)
 	mux.HandleFunc("/api/config", h.config)
+	mux.HandleFunc("/api/prefs", h.prefs)
 	mux.HandleFunc("/api/db/key", h.dbKeyStatus)
 	mux.HandleFunc("/api/db/list", h.dbList)
 	mux.HandleFunc("/api/db/pubkey", h.dbPubKey)
@@ -94,12 +96,13 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("/api/db/test", h.dbTest)
 	mux.HandleFunc("/api/db/test-url", h.dbTestURL)
 	mux.HandleFunc("/api/db/regen", h.dbRegen)
+	mux.HandleFunc("/api/db/tunnel", h.dbTunnel)
 	mux.HandleFunc("/api/db/connect", h.dbConnect)
 	mux.HandleFunc("/api/db/show", h.dbShow)
 	mux.HandleFunc("/api/db/connections/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/api/db/connections/")
 		if name == "" || strings.Contains(name, "/") {
-			writeAPIError(w, http.StatusBadRequest, "invalid_db_name", "连接名格式错误")
+			writeAPIError(w, http.StatusBadRequest, "invalid_db_name", "invalid connection name")
 			return
 		}
 		h.dbRemove(w, r, name)
@@ -114,16 +117,45 @@ func (h *handler) plaintextOnly(w http.ResponseWriter) bool {
 	if h.cfg.AllowPlaintext {
 		return true
 	}
-	writeAPIError(w, http.StatusForbidden, "plaintext_disabled", "明文接口已禁用：导出、解密、明文编辑、AES 密钥列表等操作需用 --allow-plaintext 重启 UI 后才能使用")
+	writeAPIError(w, http.StatusForbidden, "plaintext_disabled", "plaintext endpoints are disabled: export, decrypt, plaintext edit, AES key list and the real-URL view need --allow-plaintext on the UI process")
 	return false
 }
 
 func (h *handler) config(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"allow_plaintext": h.cfg.AllowPlaintext})
+}
+
+// prefs exposes the shared language preference (~/.vaulty/prefs.json) so the
+// web UI's language switcher and the CLI stay in sync. GET is open (language
+// is not sensitive); PUT is token-gated like every other mutation.
+func (h *handler) prefs(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"lang": i18n.Current()})
+	case http.MethodPut:
+		var req struct {
+			Lang string `json:"lang"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
+			return
+		}
+		if !i18n.IsValid(req.Lang) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_lang", fmt.Sprintf("invalid language %q (use en or zh)", req.Lang))
+			return
+		}
+		if err := i18n.WriteLang(i18n.Normalize(req.Lang)); err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "prefs_write_failed", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "lang": i18n.ReadLang()})
+	default:
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	}
 }
 
 // checkToken requires a valid token on every state-changing request when a
@@ -151,7 +183,7 @@ func checkToken(token string, next http.Handler) http.Handler {
 			if delay > 0 {
 				time.Sleep(delay)
 			}
-			writeAPIError(w, http.StatusUnauthorized, "auth_required", "访问令牌无效或缺失（请打开 'vaulty-keeper ui' 打印的 URL）")
+			writeAPIError(w, http.StatusUnauthorized, "auth_required", "invalid or missing access token (see the URL printed by 'vaulty-keeper ui')")
 			return
 		}
 		mu.Lock()
@@ -176,13 +208,13 @@ func checkOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin == "null" {
-			writeAPIError(w, http.StatusForbidden, "origin_not_allowed", "已拒绝 null origin")
+			writeAPIError(w, http.StatusForbidden, "origin_not_allowed", "null origin rejected")
 			return
 		}
 		if origin != "" {
 			u, err := url.Parse(origin)
 			if err != nil || u.Host != r.Host {
-				writeAPIError(w, http.StatusForbidden, "origin_not_allowed", "已拒绝跨域请求")
+				writeAPIError(w, http.StatusForbidden, "origin_not_allowed", "cross-origin request rejected")
 				return
 			}
 		}
@@ -208,7 +240,7 @@ func (h *handler) serveStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	data, err := staticFiles.ReadFile(file)
@@ -245,7 +277,7 @@ func (h *handler) listSnapshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	refs, err := apollo.ListSnapshots(h.cfg.Dir)
@@ -280,7 +312,7 @@ func (h *handler) listSnapshots(w http.ResponseWriter, r *http.Request) {
 func (h *handler) snapshotView(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/snapshots/")
 	if rest == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_snapshot_name", "快照路径格式错误")
+		writeAPIError(w, http.StatusBadRequest, "invalid_snapshot_name", "invalid snapshot path")
 		return
 	}
 	parts := strings.Split(rest, "/")
@@ -292,17 +324,17 @@ func (h *handler) snapshotView(w http.ResponseWriter, r *http.Request) {
 		case http.MethodDelete:
 			h.deleteSnapshot(w, r, parts[0])
 		default:
-			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		}
 	case len(parts) == 2 && parts[1] == "export":
 		if r.Method != http.MethodPost {
-			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
 		h.exportSnapshot(w, r, parts[0])
 	case len(parts) == 2 && parts[1] == "reveal":
 		if r.Method != http.MethodPost {
-			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
 		h.reveal(w, r, parts[0])
@@ -313,7 +345,7 @@ func (h *handler) snapshotView(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPut:
 			h.editApply(w, r, parts[0])
 		default:
-			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		}
 	case len(parts) == 3 && parts[1] == "items":
 		switch r.Method {
@@ -322,10 +354,10 @@ func (h *handler) snapshotView(w http.ResponseWriter, r *http.Request) {
 		case http.MethodDelete:
 			h.deleteItem(w, r, parts[0], parts[2])
 		default:
-			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		}
 	default:
-		writeAPIError(w, http.StatusBadRequest, "invalid_snapshot_name", "快照路径格式错误")
+		writeAPIError(w, http.StatusBadRequest, "invalid_snapshot_name", "invalid snapshot path")
 	}
 }
 
@@ -342,7 +374,7 @@ func (h *handler) snapshotViewName(w http.ResponseWriter, r *http.Request, name 
 	s, err := apollo.Load(apollo.SnapPath(h.cfg.Dir, name, appID))
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("未找到快照 %q", name))
+			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("snapshot %q not found", name))
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_load_failed", err.Error())
@@ -387,17 +419,17 @@ type exportRequest struct {
 
 func (h *handler) importPreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	var req previewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	items, warnings := apollo.ParseKV(req.Text)
 	if len(items) == 0 {
-		writeAPIError(w, http.StatusBadRequest, "empty_import", "未找到任何配置条目")
+		writeAPIError(w, http.StatusBadRequest, "empty_import", "no configuration entries found")
 		return
 	}
 	out := make([]previewItem, 0, len(items))
@@ -410,7 +442,7 @@ func (h *handler) importPreview(w http.ResponseWriter, r *http.Request) {
 func (h *handler) createSnapshot(w http.ResponseWriter, r *http.Request) {
 	var req createSnapshotRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if err := apollo.ValidateSnapshotName(req.Name); err != nil {
@@ -423,12 +455,12 @@ func (h *handler) createSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	items, _ := apollo.ParseKV(req.Text)
 	if len(items) == 0 {
-		writeAPIError(w, http.StatusBadRequest, "empty_import", "未找到任何配置条目")
+		writeAPIError(w, http.StatusBadRequest, "empty_import", "no configuration entries found")
 		return
 	}
 	path := apollo.SnapPath(h.cfg.Dir, req.Name, req.AppID)
 	if _, err := os.Stat(path); err == nil {
-		writeAPIError(w, http.StatusConflict, "snapshot_exists", fmt.Sprintf("快照 %q (appid %s) 已存在", req.Name, req.AppID))
+		writeAPIError(w, http.StatusConflict, "snapshot_exists", fmt.Sprintf("snapshot %q (appid %s) already exists", req.Name, req.AppID))
 		return
 	} else if !os.IsNotExist(err) {
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_create_failed", err.Error())
@@ -468,7 +500,7 @@ func (h *handler) loadSnapshotTarget(w http.ResponseWriter, name, appID string) 
 	s, err := apollo.Load(apollo.SnapPath(h.cfg.Dir, name, appID))
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("未找到快照 %q", name))
+			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("snapshot %q not found", name))
 			return nil, nil, nil, false
 		}
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_load_failed", err.Error())
@@ -482,12 +514,12 @@ func (h *handler) loadSnapshotTarget(w http.ResponseWriter, name, appID string) 
 func (h *handler) keys(w http.ResponseWriter) (snapKey, sensitiveKey []byte, ok bool) {
 	snapKey, err := h.cfg.SnapshotKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("快照密钥不可用（%s）；请运行 'vaulty-keeper apollo init' 或设置 %s", err, apollo.EnvKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'vaulty-keeper apollo init' or set %s", err, apollo.EnvKey))
 		return nil, nil, false
 	}
 	sensitiveKey, err = h.cfg.SensitiveKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("敏感值密钥不可用（%s）；请运行 'vaulty-keeper sensitive init' 或设置 %s", err, apollo.EnvSensitiveKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("sensitive-value key unavailable (%s); run 'vaulty-keeper sensitive init' or set %s", err, apollo.EnvSensitiveKey))
 		return nil, nil, false
 	}
 	return snapKey, sensitiveKey, true
@@ -509,7 +541,7 @@ func (h *handler) updateItem(w http.ResponseWriter, r *http.Request, name, itemK
 	}
 	var req updateItemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if err := s.Set(snapKey, sensitiveKey, itemKey, req.Value, req.Secret); err != nil {
@@ -527,7 +559,7 @@ func (h *handler) updateItem(w http.ResponseWriter, r *http.Request, name, itemK
 	}
 	it, ok := visible[itemKey]
 	if !ok {
-		writeAPIError(w, http.StatusInternalServerError, "item_update_failed", "更新后未找到条目")
+		writeAPIError(w, http.StatusInternalServerError, "item_update_failed", "item not found after update")
 		return
 	}
 	writeJSON(w, http.StatusOK, it)
@@ -540,7 +572,7 @@ func (h *handler) deleteItem(w http.ResponseWriter, r *http.Request, name, itemK
 		return
 	}
 	if !s.Delete(itemKey) {
-		writeAPIError(w, http.StatusNotFound, "key_not_found", fmt.Sprintf("未找到条目 %q", itemKey))
+		writeAPIError(w, http.StatusNotFound, "key_not_found", fmt.Sprintf("item %q not found", itemKey))
 		return
 	}
 	if err := s.Save(apollo.SnapPath(h.cfg.Dir, name, appID)); err != nil {
@@ -562,11 +594,11 @@ func (h *handler) exportSnapshot(w http.ResponseWriter, r *http.Request, name st
 	}
 	var req exportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if !req.Confirm {
-		writeAPIError(w, http.StatusBadRequest, "export_confirmation_required", "明文导出需要二次确认")
+		writeAPIError(w, http.StatusBadRequest, "export_confirmation_required", "plaintext export requires a second confirmation")
 		return
 	}
 	keys := make([]string, 0, len(s.Items))
@@ -610,7 +642,7 @@ type SafeChange struct {
 
 func (h *handler) compare(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	from := r.URL.Query().Get("from")
@@ -686,16 +718,16 @@ func compareValue(s *apollo.Snapshot, snapKey, sensitiveKey []byte, k string) Sa
 // one column per requested snapshot ref. Missing keys are present:false.
 func (h *handler) compareMulti(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	var req multiCompareRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if len(req.Refs) < 2 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_refs", "至少需要两个快照")
+		writeAPIError(w, http.StatusBadRequest, "invalid_refs", "at least two snapshots are required")
 		return
 	}
 	for _, ref := range req.Refs {
@@ -758,7 +790,7 @@ func (h *handler) compareMulti(w http.ResponseWriter, r *http.Request) {
 // matches legacy snapshots without one); when absent, every snapshot matches.
 func (h *handler) compareKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	keyName := r.URL.Query().Get("key")
@@ -802,7 +834,7 @@ func (h *handler) compareKey(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) loadError(w http.ResponseWriter, name string, err error) {
 	if os.IsNotExist(err) {
-		writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("未找到快照 %q", name))
+		writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("snapshot %q not found", name))
 		return
 	}
 	writeAPIError(w, http.StatusInternalServerError, "snapshot_load_failed", err.Error())
@@ -861,7 +893,7 @@ type initRequest struct {
 
 func (h *handler) keyStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	_, err := h.cfg.SnapshotKey()
@@ -870,7 +902,7 @@ func (h *handler) keyStatus(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) sensitiveKeyStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	_, err := h.cfg.SensitiveKey()
@@ -879,17 +911,17 @@ func (h *handler) sensitiveKeyStatus(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) initSensitiveKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	var req initRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if !req.Force {
 		if _, err := h.cfg.SensitiveKey(); err == nil {
-			writeAPIError(w, http.StatusConflict, "sensitive_key_exists", "敏感值密钥已存在")
+			writeAPIError(w, http.StatusConflict, "sensitive_key_exists", "sensitive-value key already exists")
 			return
 		}
 	}
@@ -902,17 +934,17 @@ func (h *handler) initSensitiveKey(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) initKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	var req initRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if !req.Force {
 		if _, err := h.cfg.SnapshotKey(); err == nil {
-			writeAPIError(w, http.StatusConflict, "key_exists", "快照密钥已存在")
+			writeAPIError(w, http.StatusConflict, "key_exists", "snapshot key already exists")
 			return
 		}
 	}
@@ -937,15 +969,15 @@ func (h *handler) reveal(w http.ResponseWriter, r *http.Request, name string) {
 	appID := r.URL.Query().Get("appid")
 	var req revealRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if !req.Confirm {
-		writeAPIError(w, http.StatusBadRequest, "confirm_required", "明文显示需要二次确认")
+		writeAPIError(w, http.StatusBadRequest, "confirm_required", "plaintext display requires a second confirmation")
 		return
 	}
 	if len(req.Targets) == 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_key", "未提供任何目标 key")
+		writeAPIError(w, http.StatusBadRequest, "invalid_key", "no target key provided")
 		return
 	}
 	if err := apollo.ValidateSnapshotName(name); err != nil {
@@ -975,11 +1007,11 @@ func (h *handler) editLoad(w http.ResponseWriter, r *http.Request, name string) 
 	appID := r.URL.Query().Get("appid")
 	var req editLoadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if !req.Confirm {
-		writeAPIError(w, http.StatusBadRequest, "confirm_required", "明文编辑需要二次确认")
+		writeAPIError(w, http.StatusBadRequest, "confirm_required", "plaintext edit requires a second confirmation")
 		return
 	}
 	snapKey, sensitiveKey, ok := h.keys(w)
@@ -1005,11 +1037,11 @@ func (h *handler) editApply(w http.ResponseWriter, r *http.Request, name string)
 	appID := r.URL.Query().Get("appid")
 	var req editApplyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if req.Text == "" {
-		writeAPIError(w, http.StatusBadRequest, "empty_import", "未找到任何配置条目")
+		writeAPIError(w, http.StatusBadRequest, "empty_import", "no configuration entries found")
 		return
 	}
 	snapKey, sensitiveKey, ok := h.keys(w)
@@ -1035,12 +1067,12 @@ type aesGenKeyRequest struct {
 
 func (h *handler) aesGenKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	var req aesGenKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	key, iv, err := app.GenKey(req.Bytes, req.IVBytes)
@@ -1060,16 +1092,16 @@ type aesTransformRequest struct {
 
 func (h *handler) aesTransform(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	var req aesTransformRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if req.Key == "" || req.IV == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_aes_params", "key 与 iv 必填")
+		writeAPIError(w, http.StatusBadRequest, "invalid_aes_params", "key and iv are required")
 		return
 	}
 	var (
@@ -1085,7 +1117,7 @@ func (h *handler) aesTransform(w http.ResponseWriter, r *http.Request) {
 		}
 		out, err = app.Decrypt(req.Key, req.IV, req.Text)
 	default:
-		writeAPIError(w, http.StatusBadRequest, "invalid_aes_params", "op 必须为 encrypt 或 decrypt")
+		writeAPIError(w, http.StatusBadRequest, "invalid_aes_params", "op must be encrypt or decrypt")
 		return
 	}
 	if err != nil {
@@ -1112,8 +1144,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func Start(ctx context.Context, cfg Config, port int, openBrowser bool, out io.Writer) error {
+	i18n.Init()
 	if port < 0 || port > 65535 {
-		return fmt.Errorf("端口 %d 超出 0..65535 范围", port)
+		return fmt.Errorf("%s", i18n.T("ui.port-range", port))
 	}
 	listener, err := listenLoopback(port)
 	if err != nil {
@@ -1136,7 +1169,7 @@ func Start(ctx context.Context, cfg Config, port int, openBrowser bool, out io.W
 	url := "http://" + listener.Addr().String() + "/?t=" + cfg.Token
 	fmt.Fprintf(out, "vaulty-keeper UI available at %s\n", url)
 	if !cfg.AllowPlaintext {
-		fmt.Fprintln(out, "提示：明文接口（导出/解密/明文编辑/AES 密钥列表）当前已禁用；需要时用 --allow-plaintext 重启 UI 开启")
+		fmt.Fprintln(out, i18n.T("ui.plaintext-hint"))
 	}
 	fmt.Fprintln(out, "warning: this URL contains an access token that can reveal plaintext config. Do NOT share it with AI/scripts or paste it into logs or shell history.")
 	if openBrowser {
@@ -1176,5 +1209,5 @@ func listenLoopback(port int) (net.Listener, error) {
 			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("从 %d 起没有空闲端口", port)
+	return nil, fmt.Errorf("%s", i18n.T("ui.no-free-port", port))
 }

@@ -98,6 +98,7 @@ func TestDBShellRejectedWhenPiped(t *testing.T) {
 }
 
 func TestDBConnectPrintsReadyCommand(t *testing.T) {
+	i18nTest(t)
 	dir := dbTestEnv(t)
 	db := filepath.Join(dir, "db")
 	// The serve-time global bridge token still exists; a fresh connection gets
@@ -112,7 +113,7 @@ func TestDBConnectPrintsReadyCommand(t *testing.T) {
 			t.Fatalf("db connect failed: %d", code)
 		}
 	})
-	tokRe := regexp.MustCompile(`postgresql://([0-9a-f]{32})@`)
+	tokRe := regexp.MustCompile(`postgresql://([0-9a-f]{32}):x@`)
 	m := tokRe.FindStringSubmatch(out)
 	if m == nil {
 		t.Fatalf("db connect --cmd has no 32-hex per-connection token: %q", out)
@@ -120,7 +121,7 @@ func TestDBConnectPrintsReadyCommand(t *testing.T) {
 	if m[1] == "tok-abc123" {
 		t.Fatalf("db connect should use the per-connection token, not the global bridge token: %q", out)
 	}
-	want := `psql "postgresql://` + m[1] + `@127.0.0.1:15432/appdb"`
+	want := `psql "postgresql://` + m[1] + `:x@127.0.0.1:15432/appdb"`
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("db connect --cmd = %q, want %q", out, want)
 	}
@@ -129,16 +130,16 @@ func TestDBConnectPrintsReadyCommand(t *testing.T) {
 		t.Fatalf("db connect leaked real credentials: %q", out)
 	}
 
-	// 丰富视图：原始隧道链接 + 各客户端链接
+	// rich view: raw tunnel link + ready client links
 	out = captureStdout(t, func() {
 		if code := Run([]string{"db", "connect", "pgdb", "--dir", db}); code != 0 {
 			t.Fatalf("db connect failed: %d", code)
 		}
 	})
 	for _, wantSub := range []string{
-		"原始隧道链接",
-		"postgresql://" + m[1] + "@127.0.0.1:15432/appdb",
-		"jdbc:postgresql://127.0.0.1:15432/appdb?user=" + m[1],
+		"raw tunnel link",
+		"postgresql://" + m[1] + ":x@127.0.0.1:15432/appdb",
+		"jdbc:postgresql://127.0.0.1:15432/appdb?user=" + m[1] + "&password=x",
 		"pgAdmin4",
 	} {
 		if !strings.Contains(out, wantSub) {
@@ -160,6 +161,7 @@ func TestDBConnectPrintsReadyCommand(t *testing.T) {
 }
 
 func TestDBRegenToken(t *testing.T) {
+	i18nTest(t)
 	dir := dbTestEnv(t)
 	db := filepath.Join(dir, "db")
 	add := func(name, dsn string) {
@@ -206,7 +208,7 @@ func TestDBRegenToken(t *testing.T) {
 			t.Fatalf("db regen --all failed: %d", code)
 		}
 	})
-	if !strings.Contains(out, "已为 2 个连接") {
+	if !strings.Contains(out, "regenerated tokens for 2 connections") {
 		t.Fatalf("db regen --all summary missing: %q", out)
 	}
 }
@@ -251,6 +253,7 @@ func TestDBTestDispatch(t *testing.T) {
 }
 
 func TestDBListHint(t *testing.T) {
+	i18nTest(t)
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "nope", "db.json")
 	if !strings.Contains(dbListHint(missing, errors.New("x")), "db add") {
@@ -258,17 +261,18 @@ func TestDBListHint(t *testing.T) {
 	}
 	mismatch := filepath.Join(dir, "db.json")
 	os.WriteFile(mismatch, []byte("{}"), 0o600)
-	h := dbListHint(mismatch, errors.New("解密连接失败：cipher: message authentication failed"))
-	if !strings.Contains(h, "密钥不匹配") {
+	h := dbListHint(mismatch, errors.New("cannot decrypt connection: cipher: message authentication failed"))
+	if !strings.Contains(h, "key mismatch") {
 		t.Fatalf("mismatch hint missing: %s", h)
 	}
-	nokey := dbListHint(mismatch, errors.New("未找到数据库密钥"))
+	nokey := dbListHint(mismatch, errors.New("database key not found: x"))
 	if !strings.Contains(nokey, "db init") {
 		t.Fatalf("no-key hint missing: %s", nokey)
 	}
 }
 
 func TestDBInitForceNeedsYesWhenPiped(t *testing.T) {
+	i18nTest(t)
 	dir := dbTestEnv(t)
 	_ = dir
 	// non-TTY: --force without --yes must refuse (protects existing connections)
@@ -277,7 +281,99 @@ func TestDBInitForceNeedsYesWhenPiped(t *testing.T) {
 			t.Fatal("db init --force should need --yes when piped")
 		}
 	})
-	if !strings.Contains(out, "重新 db add") {
+	if !strings.Contains(out, "db add") {
 		t.Fatalf("db init --force should warn about losing connections: %q", out)
+	}
+}
+
+func TestDBTunnelOnOff(t *testing.T) {
+	i18nTest(t)
+	dir := dbTestEnv(t)
+	db := filepath.Join(dir, "db")
+	withStdin(t, "postgres://app:pgpass@db.example.com:5432/appdb\n")
+	if code := Run([]string{"db", "add", "pgdb", "--dir", db}); code != 0 {
+		t.Fatalf("db add failed: %d", code)
+	}
+
+	// default: on, no [off] marker
+	out := captureStdout(t, func() {
+		if code := Run([]string{"db", "list", "--dir", db}); code != 0 {
+			t.Fatalf("db list failed: %d", code)
+		}
+	})
+	if !strings.Contains(out, "pgdb") || strings.Contains(out, "[off]") {
+		t.Fatalf("fresh connection should be on: %q", out)
+	}
+
+	// off: marker appears, connect warns
+	if code := Run([]string{"db", "off", "pgdb", "--dir", db}); code != 0 {
+		t.Fatalf("db off failed: %d", code)
+	}
+	out = captureStdout(t, func() {
+		if code := Run([]string{"db", "list", "--dir", db}); code != 0 {
+			t.Fatalf("db list failed: %d", code)
+		}
+	})
+	if !strings.Contains(out, "[off]") {
+		t.Fatalf("db off should mark the connection [off]: %q", out)
+	}
+	// db connect still works (prints links) but warns the tunnel is closed
+	cerr := captureStderr(t, func() {
+		if code := Run([]string{"db", "connect", "pgdb", "--cmd", "--dir", db}); code != 0 {
+			t.Fatalf("db connect after off failed: %d", code)
+		}
+	})
+	if !strings.Contains(cerr, "turned off") && !strings.Contains(cerr, "off") {
+		t.Fatalf("db connect should warn about a closed tunnel: %q", cerr)
+	}
+	if code := Run([]string{"db", "on", "pgdb", "--dir", db}); code != 0 {
+		t.Fatalf("db on failed: %d", code)
+	}
+	out = captureStdout(t, func() {
+		if code := Run([]string{"db", "list", "--dir", db}); code != 0 {
+			t.Fatalf("db list failed: %d", code)
+		}
+	})
+	if strings.Contains(out, "[off]") || strings.Contains(out, "pgpass") || strings.Contains(out, "db.example.com") {
+		t.Fatalf("db on should restore and never leak URL: %q", out)
+	}
+
+	// unknown connection
+	if code := Run([]string{"db", "off", "nope", "--dir", db}); code == 0 {
+		t.Fatal("db off of unknown connection should fail")
+	}
+	// missing name
+	if code := Run([]string{"db", "off", "--dir", db}); code == 0 {
+		t.Fatal("db off without name should fail")
+	}
+
+	// --all toggles every connection
+	add := func(name, dsn string) {
+		t.Helper()
+		withStdin(t, dsn+"\n")
+		if code := Run([]string{"db", "add", name, "--dir", db}); code != 0 {
+			t.Fatalf("db add %s failed: %d", name, code)
+		}
+	}
+	add("rd", "redis://:pw@db.example.com:6379/0")
+	if code := Run([]string{"db", "off", "--all", "--dir", db}); code != 0 {
+		t.Fatalf("db off --all failed: %d", code)
+	}
+	out = captureStdout(t, func() {
+		if code := Run([]string{"db", "list", "--dir", db}); code != 0 {
+			t.Fatalf("db list failed: %d", code)
+		}
+	})
+	if strings.Count(out, "[off]") != 2 {
+		t.Fatalf("db off --all should mark both connections: %q", out)
+	}
+	// off --all with everything already off: no-op
+	out = captureStdout(t, func() {
+		if code := Run([]string{"db", "off", "--all", "--dir", db}); code != 0 {
+			t.Fatalf("db off --all failed: %d", code)
+		}
+	})
+	if !strings.Contains(out, "no connections whose state needs changing") {
+		t.Fatalf("idempotent db off --all should report nothing to do: %q", out)
 	}
 }

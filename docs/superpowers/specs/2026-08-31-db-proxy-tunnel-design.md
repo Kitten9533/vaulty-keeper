@@ -19,7 +19,7 @@
 
 ```
 [Docker 容器：AI agent]
-  psql "postgresql://$TOKEN@host.docker.internal:15432/appdb"
+  psql "postgresql://$TOKEN:x@host.docker.internal:15432/appdb"
   redis-cli -a "$TOKEN" -p 15433
   mysql -h host.docker.internal -P 15434 -u "$TOKEN" -p任意
         │   TCP（带 token 门控）

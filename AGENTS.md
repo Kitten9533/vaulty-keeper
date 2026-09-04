@@ -22,7 +22,7 @@ make build     # 产物 bin/vaulty-keeper
 - **AI 写**：`set`/`unset`/`import` 安全，无需 `--yes`（AI 写的就是它已知的明文，写入即加密）。
 - **Web UI**：仅监听 127.0.0.1，随机 token 门控写操作与明文出口，GET 只返回掩码数据；**明文接口（reveal/export/明文编辑/AES 解密）默认禁用**，需 `--allow-plaintext` 显式开启（否则带 token 也 403）；token 失败限速（指数退避）。
 - **掩码代理（serve/remote）**：`vaulty-keeper serve --addr 0.0.0.0:8970` 在 host 起掩码代理，`vaulty-keeper remote list/get/compare` 在隔离域（Docker 容器/独立账号/VM）内读配置。代理**无条件掩码**——即使 `set --plain` 标记安全的 key 也不回明文；全部 /api 端点要 token（0600 写 `~/.vaulty/bridge-token`）+ 失败限速。对"故意对抗的同用户 AI"，这是唯一真正能防住的方式：把 AI 放进摸不到密钥/密文的隔离域（见 README「容器隔离部署」，docker-compose 已内置不挂载密钥目录/cap_drop/no-new-privileges）。
-- **DB 隧道（db/serve）**：`vaulty-keeper db add` 只加密数据库 URL（独立 DB 密钥 `VAULTY_KEEPER_DB_KEY` + `~/.vaulty/db.json`，0600），并为每条连接生成**专属隧道 token**；`serve` 为每条连接起 TCP 隧道，在握手阶段把真实凭据注入（PG trust 风格 / MySQL 认证应答替换 / Redis 代发 AUTH），之后纯字节转发。客户端只需隧道 token（`db connect <name>` 打印；旧连接回退全局 `VAULTY_KEEPER_BRIDGE_TOKEN`；PG/MySQL 的 username 字段 / Redis 的 AUTH 首命令），**不需要真实账号密码**；`db regen <name>|--all` 轮换 token（旧 token 立即失效）；DSN 永不离开 host、不进日志/回包。隧道监听地址跟随 `--addr`，`0.0.0.0` 时靠 token 门控兜底。只读靠注册只读账号实现，代理不强制。
+- **DB 隧道（db/serve）**：`vaulty-keeper db add` 只加密数据库 URL（独立 DB 密钥 `VAULTY_KEEPER_DB_KEY` + `~/.vaulty/db.json`，0600），并为每条连接生成**专属隧道 token**；`serve` 为每条连接起 TCP 隧道，在握手阶段把真实凭据注入（PG trust 风格 / MySQL 认证应答替换 / Redis 代发 AUTH），之后纯字节转发。客户端只需隧道 token（`db connect <name>` 打印；旧连接回退全局 `VAULTY_KEEPER_BRIDGE_TOKEN`；PG/MySQL 的 username 字段 / Redis 的 AUTH 首命令），**不需要真实账号密码**；`db regen <name>|--all` 轮换 token（旧 token 立即失效）；DSN 永不离开 host、不进日志/回包。隧道**默认开启**，`db on/off <name>|--all` 按连接开关（serve 约 2 秒内生效，端口停止/恢复监听），UI 里每行有「开启隧道/关闭隧道」按钮。隧道监听地址跟随 `--addr`，`0.0.0.0` 时靠 token 门控兜底。只读靠注册只读账号实现，代理不强制。
 - **防破解**：掩码指纹是 HMAC-SHA256（密钥=快照密钥），密钥不泄露时无法离线枚举弱值匹配指纹；token 为 128 位随机，AES-256-GCM 暴力不可行。
 - **判断一致性**：用 `compare`（掩码 + 长度 + 指纹即可判断），不要 `get` 明文。
 
@@ -38,17 +38,19 @@ bin/vaulty-keeper apollo set/unset <env> <key> [<value>] --appid <id>
 bin/vaulty-keeper apollo mark <env> <key> --plain|--secret --appid <id>   # 不改值，翻转安全/敏感标记
 bin/vaulty-keeper aes encrypt --key ... --iv ...
 bin/vaulty-keeper remote list|get|compare ...     # 容器/隔离域内经掩码代理读（永远只有掩码）
-bin/vaulty-keeper db list / remote dblist ...     # 只列连接名/类型/端口（不返回 URL）
+bin/vaulty-keeper db list / remote dblist ...     # 只列连接名/类型/端口/开关状态（不返回 URL）
 bin/vaulty-keeper db connect <name>            # 打印带 token 的完整客户端命令（--container 用 host.docker.internal）
+bin/vaulty-keeper db on/off <name>|--all       # 开启/关闭连接的隧道（AI 安全，不碰明文；serve 约 2 秒内生效）
 bin/vaulty-keeper db test <name>                 # 验证注册的连接可用（AI 安全，不打印 URL）；失败提示 db add 同名修复（端口不变）
 bin/vaulty-keeper db show <name>                 # 打印解密后的真实 URL（TTY-only，与 reveal 同门禁）
 bin/vaulty-keeper db add <name>                   # 注册连接（URL 从 stdin 读，加密落盘）
+bin/vaulty-keeper lang [en|zh]                    # 查看/设置共享语言（UI 与 CLI 互通，默认英文）
 
 DB 隧道用法（AI 侧）：`db list`（或 `remote dblist`）拿到连接名 + 隧道端口后，用原生客户端连代理端口，token 用 `db connect <name>` 打印的连接专属 token（旧连接回退 `VAULTY_KEEPER_BRIDGE_TOKEN`）：
-  psql "postgresql://$TOKEN@host.docker.internal:15432/appdb"   # token 放 user 字段，数据库名/账号密码一律用注册 URL 里的
+  psql "postgresql://$TOKEN:x@host.docker.internal:15432/appdb"   # token 放 user 字段，数据库名/账号密码一律用注册 URL 里的
   mysql -h host.docker.internal -P 15435 -u "$TOKEN" -px
   redis-cli -a "$TOKEN" -p 15434
-AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或任何回包中找 DSN。Mongo 未接入代理。serve 热加载：db add/rm/regen 后隧道自动开/关（每 2 秒同步 db.json），不用重启。
+AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或任何回包中找 DSN。Mongo 未接入代理。serve 热加载：db add/rm/regen/on/off 后隧道自动开/关（每 2 秒同步 db.json），不用重启。
 本地人工验证：`./scripts/dbtest.sh`（Docker 起 pg/mariadb/redis + 起 serve + 全量正/负向测试；`--clean` 收尾）。
 图解：`docs/db-proxy-architecture.md`（Docker 里是什么/凭据存哪/三库认证注入/安全边界/时序）。
 用法示例：`docs/db-proxy-examples.md`（多连接/各客户端/容器 AI/权限/脚本，全部实测过）。
@@ -56,6 +58,8 @@ AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或�
 明文命令 —— `apollo reveal`、`apollo export`、`apollo edit`、`apollo list/compare --reveal`、`aes decrypt` 会把明文打到 stdout，永久进入会话日志。**这些命令只在交互式终端（TTY）可用；脚本/AI 环境一律拒绝，加 `--yes` 也无法放行**——所以 AI 永远拿不到明文，即使被诱导要求也不会成功。判断两个环境某 key 是否一致用 `compare`（掩码 + 长度即可判断），不要 get 明文。
 
 `apollo get` 在非 TTY 下对未标记安全的 key 只输出 `*** (n chars)`；需要 AI 读取的确定安全 key（如 APP_NAME）用 `set --plain` 或 `mark --plain` 显式放行。
+
+**语言**：工具默认英文；Web UI 顶栏可切换中英文（按浏览器记在 `localStorage` 并同步写 `~/.vaulty/prefs.json`），CLI 输出与 UI 同语言——命令树、`-h` 帮助、运行时消息与提示全部双语。切换方式：`vaulty-keeper lang zh|en`（写共享文件）或环境变量 `VAULTY_KEEPER_LANG`（优先级最高）；解析顺序 `VAULTY_KEEPER_LANG` → `~/.vaulty/prefs.json` → 默认 `en`。shell 补全描述与底层库错误保持英文（中文界面下是「中文提示 + 英文底层细节」，与中文版 UI 一致）。
 
 红线：
 

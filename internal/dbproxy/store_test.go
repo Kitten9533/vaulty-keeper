@@ -18,8 +18,8 @@ func testKey(t *testing.T) []byte {
 
 func TestConnTypeFromURL(t *testing.T) {
 	cases := []struct {
-		raw  string
-		typ  string
+		raw     string
+		typ     string
 		wantErr bool
 	}{
 		{"postgres://u:p@h:5432/db", "postgres", false},
@@ -242,7 +242,7 @@ func TestKeyMismatchDiagnosedPrecisely(t *testing.T) {
 	if err == nil {
 		t.Fatal("Resolve with wrong key succeeded")
 	}
-	if !strings.Contains(err.Error(), "密钥不匹配") ||
+	if !strings.Contains(err.Error(), "key mismatch") ||
 		!strings.Contains(err.Error(), keyID(key1)) ||
 		!strings.Contains(err.Error(), keyID(key2)) {
 		t.Fatalf("mismatch error not precise: %v", err)
@@ -312,5 +312,87 @@ func TestRegenToken(t *testing.T) {
 	// unknown name
 	if _, err := RegenToken(path, key, "zzz"); err == nil {
 		t.Fatal("RegenToken of unknown connection should fail")
+	}
+}
+
+func TestSetTunnelOnOff(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	if err := Add(path, key, "m", "redis://h", 0); err != nil {
+		t.Fatal(err)
+	}
+	// new connections default to enabled
+	conns, err := List(path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conns[0].Disabled {
+		t.Fatal("fresh connection should default to enabled (tunnel on)")
+	}
+
+	if err := SetTunnel(path, key, "m", true); err != nil {
+		t.Fatal(err)
+	}
+	conns, _ = List(path, key)
+	if !conns[0].Disabled {
+		t.Fatal("SetTunnel(disabled=true) not reflected in List")
+	}
+	// Resolve keeps reporting the state too
+	c, err := Resolve(path, key, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Disabled {
+		t.Fatal("Resolve should report Disabled")
+	}
+	// URL stays intact (only the flag changed)
+	if c.URL != "redis://h" {
+		t.Fatalf("SetTunnel must not touch the URL: %q", c.URL)
+	}
+
+	if err := SetTunnel(path, key, "m", false); err != nil {
+		t.Fatal(err)
+	}
+	conns, _ = List(path, key)
+	if conns[0].Disabled {
+		t.Fatal("SetTunnel(disabled=false) not reflected in List")
+	}
+
+	// unknown name
+	if err := SetTunnel(path, key, "zzz", true); err == nil {
+		t.Fatal("SetTunnel of unknown connection should fail")
+	}
+}
+
+func TestSetTunnelAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	for _, n := range []string{"a", "b", "c"} {
+		if err := Add(path, key, n, "redis://h", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names, err := SetTunnelAll(path, key, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 3 {
+		t.Fatalf("SetTunnelAll should update 3 connections, got %v", names)
+	}
+	conns, _ := List(path, key)
+	for _, c := range conns {
+		if !c.Disabled {
+			t.Fatalf("connection %s should be disabled after SetTunnelAll", c.Name)
+		}
+	}
+	// second run: nothing to change
+	names, err = SetTunnelAll(path, key, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("idempotent SetTunnelAll should change nothing, got %v", names)
 	}
 }

@@ -18,7 +18,7 @@ func targetName(account string) string { return KeychainService + ":" + account 
 func keyStoreGetImpl(account string) (string, error) {
 	cred, err := wincred.GetGenericCredential(targetName(account))
 	if err != nil {
-		return "", fmt.Errorf("凭据查询失败：%w", err)
+		return "", fmt.Errorf("credential lookup failed: %w", err)
 	}
 	return string(cred.CredentialBlob), nil
 }
@@ -28,7 +28,7 @@ func keyStoreSetImpl(account, pass string) error {
 	cred.UserName = "vaulty-keeper"
 	cred.CredentialBlob = []byte(pass)
 	if err := cred.Write(); err != nil {
-		return fmt.Errorf("凭据写入失败：%w", err)
+		return fmt.Errorf("credential write failed: %w", err)
 	}
 	return nil
 }

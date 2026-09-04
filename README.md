@@ -49,6 +49,26 @@ vaulty-keeper ui --allow-plaintext    # explicitly enable plaintext endpoints (s
 - Covers all features: snapshot browse/search/CRUD, import, env comparison, plaintext edit, export (download or copy), AES encrypt/decrypt (manual key/iv), snapshot and sensitive key initialization, **database tunnels** (register/test connections, generate client commands, rotate tunnel tokens, view the real URL with `--allow-plaintext`).
 - Plaintext output (view / plaintext edit / export / AES decrypt) requires a second confirmation and responses carry `Cache-Control: no-store`; the browser never persists plaintext.
 - Snapshot contents are never persisted in the browser.
+- The UI defaults to **English** and can be switched to Chinese (中文) from the selector in the top bar. The choice is remembered in `localStorage` and mirrored to the shared preference file, so the CLI follows it too (see [Language](#language-ui--cli)).
+
+## Language (UI & CLI)
+
+The whole tool is bilingual (English / 中文) and the UI and CLI share one language setting.
+
+- The **web UI** defaults to English; the top-bar selector switches to 中文 and back. The choice is remembered per browser (`localStorage`) and pushed to the shared preference file `~/.vaulty/prefs.json` (0600). A first visit in a fresh browser adopts the shared setting (e.g. set by the CLI).
+- The **CLI** prints the same language as the UI: command tree, `-h` output, usage paragraphs, runtime messages and prompts are all localized.
+- `vaulty-keeper lang` prints the current language; `vaulty-keeper lang zh|en` writes the shared preference (works on a non-TTY too).
+- `VAULTY_KEEPER_LANG=en|zh` overrides the file (highest priority).
+- Resolution order: `VAULTY_KEEPER_LANG` → `~/.vaulty/prefs.json` → default `en`.
+
+```sh
+vaulty-keeper lang            # → language: en
+vaulty-keeper lang zh         # switch to Chinese, shared with the web UI
+vaulty-keeper lang            # → 语言：zh
+vaulty-keeper help            # help tree is now in Chinese too
+```
+
+Shell-completion descriptions and low-level library errors stay English; on a Chinese terminal you see Chinese guidance with English error details (same as the Chinese UI does).
 
 ## vaulty-keeper apollo — Apollo snapshot tool
 
@@ -152,6 +172,7 @@ vaulty-keeper serve --addr 0.0.0.0:8970       # masking proxy (for containers/is
 vaulty-keeper remote list|get|compare ...     # read through the masking proxy (same shape as apollo subcommands)
 vaulty-keeper db <init|add|list|test|connect|show|rm|shell|regen> ... # encrypted DB connections + tunnels (see "Database tunnel proxy")
 vaulty-keeper completion zsh | source /dev/stdin   # or bash / fish; add to your shell config
+vaulty-keeper lang [en|zh]    # show or set the shared UI/CLI language
 vaulty-keeper version
 ```
 
@@ -276,14 +297,17 @@ printf 'postgres://app:pass@db.example.com:5432/orders' \
 vaulty-keeper db list                                                          # orders (postgres) :15432
 vaulty-keeper db regen orders                                                  # rotate that connection's tunnel token; old token dies immediately
 vaulty-keeper db regen --all                                                   # rotate all tunnel tokens
+vaulty-keeper db off orders [--all]                                            # close the tunnel, port stops listening (serve picks it up in ~2s)
+vaulty-keeper db on orders [--all]                                             # reopen the tunnel
 vaulty-keeper serve --addr 0.0.0.0:8970                                        # start masking bridge + tunnels together
 ```
 
 - Type is auto-detected from the URL scheme: `postgres://`/`postgresql://`, `mysql://`, `redis://`/`rediss://`
 - **Multiple connections of the same type**: one name + one independent tunnel port each, unlimited (e.g. three MySQL: `mysql-orders`/`mysql-billing`/`mysql-reporting`; assign or auto-allocate ports at `db add`), fetch commands per connection with `db connect <name>`
 - Inside containers/isolated domains, use `vaulty-keeper db list` (reads via the bridge when there's no local store) or `vaulty-keeper remote dblist` to find tunnel ports, then connect with a native client (`$TOKEN` is the connection-specific token printed by `vaulty-keeper db connect <name>`; legacy connections without one fall back to the global `VAULTY_KEEPER_BRIDGE_TOKEN`)
-- **Hot reload**: `serve` syncs `db.json` every 2 seconds — `db add`/`db rm`/`db regen` opens/closes tunnels automatically, **no serve restart needed**
-- `vaulty-keeper db connect <name>` prints the **ready-to-run client command with the token filled in** (psql/mysql/redis-cli); `--container` switches to `host.docker.internal`, `--host` targets another host, `--cmd` prints a single one-line command
+- **Hot reload**: `serve` syncs `db.json` every 2 seconds — `db add`/`db rm`/`db regen`/`db on`/`db off` opens/closes tunnels automatically, **no serve restart needed**
+- **Tunnels are on by default**; `db off <name>|--all` closes one (the port stops listening), `db on` reopens it; `db list`/`remote dblist` show a `[off]` marker; the UI has an Open/Close tunnel button per row
+- `vaulty-keeper db connect <name>` prints the **ready-to-run client command with the token filled in** (psql/mysql/redis-cli); `--container` switches to `host.docker.internal`, `--host` targets another host, `--cmd` prints a single one-line command; every tunnel link carries **user+password** (token in PG/MySQL's user field / Redis's AUTH password; the other field is a placeholder `x` the tunnel ignores), so GUI tools that require both fields work
 - `vaulty-keeper db regen <name>|--all` rotates tunnel tokens: every connection has its own **per-connection token** (128-bit random, stored encrypted alongside the URL, generated at `db add`); rotate one connection alone when a token leaks — the global bridge token is unaffected
 - **Credential injection**: PG fake server passes through (trust-style, token in the user field); MySQL swaps the real password's auth response into the handshake (supports `mysql_native_password` / `caching_sha2_password`); Redis proxy sends the real `AUTH` on the client's behalf. Clients never need the real password
 - **TLS**: PG honors the URL's `sslmode` (require/verify-ca/verify-full/prefer), MySQL uses `?tls=true`, Redis uses `rediss://` to reach the real DB; client↔proxy is plaintext on localhost/LAN
@@ -294,6 +318,7 @@ vaulty-keeper serve --addr 0.0.0.0:8970                                        #
 **Security boundary**
 
 - Tunnel listen addresses follow `--addr`: default `127.0.0.1`; containers need `0.0.0.0` (LAN-reachable), **gated by the token** — the token is validated in PG/MySQL's username field and Redis's first AUTH command (either the per-connection token or the global bridge token matches); LAN users without a token are disconnected on connect
+- Close tunnels you are not using with `db off` (the port stops listening entirely) and reopen with `db on`; tunnels are on by default and the state persists in db.json
 - Real URLs/credentials exist only in host memory: db.json has no plaintext, logs record nothing, no reply carries them
 - Tunnel tokens are per-connection (128-bit random, stored encrypted with the URL), rotatable via `db regen`; legacy connections fall back to the global bridge token (used by the masking bridge, 128-bit random) with rate-limited failures; a leaked token is by design (the AI is supposed to use it) — this defends against "third parties without a token"
 
@@ -348,7 +373,7 @@ In one sentence: **plaintext exits only on the user's own terminal (AI/script en
 | Masking proxy | `vaulty-keeper serve` (host holds keys) + `vaulty-keeper remote` (inside the container/isolated domain) — the container side only gets `*** (n chars)` + length + fingerprint, **even for keys marked safe with `set --plain`**; token-gated + rate-limited |
 | AI reads | **Reversed default**: `get`/`list`/`compare` mask everything (`*** (n chars)`) in non-TTY environments, no guessing from key names; only keys explicitly marked safe via `set --plain` / `mark --plain` return plaintext. Plaintext exits (reveal, export, edit, `--reveal`, `aes decrypt`) are **always refused in non-interactive terminals, even with `--yes`** — only on the user's own TTY |
 | AI writes | `set`/`unset`/`mark`/`import` are safe (write-then-encrypt), no `--yes` needed |
-| DB tunnels | `vaulty-keeper db add` only encrypts the URL (independent DB key + `~/.vaulty/db.json`, 0600) and generates a **per-connection tunnel token**; `serve` opens TCP tunnels and injects real credentials at handshake; clients use the per-connection token (legacy connections fall back to the bridge token; PG/MySQL username field / Redis AUTH); `db regen` rotates tokens; DSNs never leave the host, never in logs/replies |
+| DB tunnels | `vaulty-keeper db add` only encrypts the URL (independent DB key + `~/.vaulty/db.json`, 0600) and generates a **per-connection tunnel token**; `serve` opens TCP tunnels and injects real credentials at handshake; clients use the per-connection token (legacy connections fall back to the bridge token; PG/MySQL username field / Redis AUTH); `db regen` rotates tokens; **tunnels are on by default, `db on/off` toggles each connection (port stops/resumes listening, state persists)**; DSNs never leave the host, never in logs/replies |
 | Web UI | 127.0.0.1 only + random token gating writes/plaintext exits, GET returns masked data only (unmarked keys are always masked); **plaintext endpoints (reveal/export/plaintext edit/AES decrypt) are disabled by default**, require `--allow-plaintext` explicitly, otherwise 403 even with the token; token failures rate-limited (exponential backoff) |
 | Brute-force resistance | Fingerprints are HMAC-SHA256 (keyed by the snapshot key); without the key, weak values cannot be matched offline against masked fingerprints; tokens are 128-bit random |
 | Consistency checks | Use `compare` (mask + length + fingerprint), don't `get` plaintext |

@@ -60,7 +60,7 @@ func ParseKV(text string) ([]KV, []Warning) {
 		if len(segs) > 1 {
 			warnings = append(warnings, Warning{
 				Line:    lineNo,
-				Message: fmt.Sprintf("自动拆分 %d 个粘连条目，请核对", len(segs)),
+				Message: fmt.Sprintf("split %d glued entries; please double-check", len(segs)),
 				Content: line,
 			})
 		}
@@ -69,7 +69,7 @@ func ParseKV(text string) ([]KV, []Warning) {
 			if !ok {
 				warnings = append(warnings, Warning{
 					Line:    lineNo,
-					Message: "已跳过（缺少 '=' 或 key 非法）",
+					Message: "skipped (missing '=' or invalid key)",
 					Content: strings.TrimSpace(seg),
 				})
 				continue
@@ -83,7 +83,7 @@ func ParseKV(text string) ([]KV, []Warning) {
 // ValidateKey reports whether key is a valid Apollo key name.
 func ValidateKey(key string) error {
 	if !keyRe.MatchString(key) {
-		return fmt.Errorf("非法的 key %q", key)
+		return fmt.Errorf("invalid key %q", key)
 	}
 	return nil
 }

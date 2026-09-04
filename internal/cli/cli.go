@@ -16,6 +16,7 @@ import (
 
 	"vaulty-keeper/internal/apollo"
 	"vaulty-keeper/internal/app"
+	"vaulty-keeper/internal/i18n"
 	"vaulty-keeper/internal/ui"
 )
 
@@ -35,6 +36,7 @@ func bothKeys() ([]byte, []byte, error) {
 }
 
 func Run(args []string) int {
+	i18n.Init()
 	if len(args) == 0 {
 		ensureKeys()
 		usage(os.Stdout)
@@ -55,6 +57,8 @@ func Run(args []string) int {
 		return runRemote(args[1:])
 	case "db":
 		return runDB(args[1:])
+	case "lang":
+		return runLang(args[1:])
 	case "completion":
 		return runCompletion(args[1:])
 	case "version", "--version", "-v":
@@ -71,8 +75,9 @@ func Run(args []string) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintf(w, "vaulty-keeper %s - personal AI toolbox\n\n", Version)
-	fmt.Fprintln(w, "Usage: vaulty-keeper <command> [args] [flags]")
+	fmt.Fprintln(w, i18n.T("cli.tagline", Version))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, i18n.T("cli.usage-line"))
 	fmt.Fprintln(w)
 	printCommandTree(w)
 }
@@ -88,11 +93,11 @@ var confirmKeyInit = confirmYes
 func ensureKeys() {
 	ensureDirs()
 	ensureAESConfig()
-	checkKey("快照", "vaulty-keeper apollo init", app.KeyAvailable, func() error { return app.InitKey(false) })
-	checkKey("敏感值", "vaulty-keeper sensitive init", app.SensitiveKeyAvailable, func() error { return app.InitSensitiveKey(false) })
+	checkKey(i18n.T("cli.key-snapshot"), "vaulty-keeper apollo init", app.KeyAvailable, func() error { return app.InitKey(false) })
+	checkKey(i18n.T("cli.key-sensitive"), "vaulty-keeper sensitive init", app.SensitiveKeyAvailable, func() error { return app.InitSensitiveKey(false) })
 	if p, err := dbPath(""); err == nil {
 		if _, err := os.Stat(p); err == nil {
-			checkKey("数据库", "vaulty-keeper db init",
+			checkKey(i18n.T("cli.key-db"), "vaulty-keeper db init",
 				func() bool { _, err := apollo.DBKey(); return err == nil },
 				func() error { return apollo.GenerateAndStoreDBKey(false) })
 		}
@@ -107,7 +112,7 @@ func ensureDirs() {
 		return
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: 创建数据目录失败："+err.Error()))
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: "+i18n.T("cli.mkdir-failed", err.Error())))
 	}
 }
 
@@ -117,7 +122,7 @@ func ensureDirs() {
 func ensureAESConfig() {
 	entries, err := app.AESConfigList()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: 读取 AES key/iv 列表失败："+err.Error()))
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: "+i18n.T("cli.aes-list-failed", err.Error())))
 		return
 	}
 	if len(entries) > 0 {
@@ -125,14 +130,14 @@ func ensureAESConfig() {
 	}
 	key, iv, err := app.GenKey(16, 16)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: 生成 AES key/iv 失败："+err.Error()))
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: "+i18n.T("cli.aes-gen-failed", err.Error())))
 		return
 	}
 	if err := app.AESConfigAdd("default", key, iv); err != nil {
-		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: 初始化 AES key/iv 列表失败："+err.Error()))
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: "+i18n.T("cli.aes-init-failed", err.Error())))
 		return
 	}
-	fmt.Println(dim("已初始化 AES key/iv 列表（~/.vaulty/aes.json，已生成 default 条目；用 aes list 查看，aes add / aes gen-key --name 添加更多）"))
+	fmt.Println(dim(i18n.T("cli.aes-initialized")))
 }
 
 func checkKey(label, cmd string, available func() bool, init func() error) {
@@ -140,17 +145,17 @@ func checkKey(label, cmd string, available func() bool, init func() error) {
 		return
 	}
 	if !isTerminal() {
-		fmt.Fprintf(os.Stderr, "提示：%s密钥未初始化，请运行 %s\n", label, cmd)
+		fmt.Fprintf(os.Stderr, "%s\n", i18n.T("cli.key-missing-hint", label, cmd))
 		return
 	}
-	if !confirmKeyInit(fmt.Sprintf("%s密钥未初始化，现在运行 %s 吗？", label, cmd)) {
+	if !confirmKeyInit(i18n.T("cli.key-missing-confirm", label, cmd)) {
 		return
 	}
 	if err := init(); err != nil {
 		fmt.Fprintln(os.Stderr, paint(os.Stderr, ansiRed, "vaulty-keeper: "+err.Error()))
 		return
 	}
-	fmt.Println(green(fmt.Sprintf("%s密钥已创建（%s）", label, apollo.StoreName())))
+	fmt.Println(green(i18n.T("cli.key-created", label, apollo.StoreName())))
 }
 
 // isTerminalFunc is overridable in tests to simulate a non-TTY stdin.
@@ -264,7 +269,7 @@ func snapPath(dir, name, appID string) (string, error) {
 func mustSnapshot(path, name string) (*apollo.Snapshot, int) {
 	s, err := apollo.Load(path)
 	if err != nil {
-		return nil, fail("加载快照 %q 失败：%v", name, err)
+		return nil, fail("%s", i18n.T("cli.load-snapshot-failed", name, err.Error()))
 	}
 	return s, 0
 }
@@ -315,21 +320,7 @@ func runApollo(args []string) int {
 func apolloUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	printDomainUsage(w, "apollo")
-	fmt.Fprintf(w, `
-<env> 是环境名，与 --appid <id> 一起寻址 {env}__{appid}.json；
-不带 --appid 时读写旧版 {env}.json。快照默认存 ~/.vaulty/apollo/
-（--dir 或 VAULTY_KEEPER_APOLLO_DIR 覆盖）。
-
-明文命令（list/compare --reveal、reveal、export、edit）只在交互式终端可用；
-脚本/AI 环境一律拒绝，加 --yes 也无法放行。非 TTY 下 get/list/compare 默认
-全部掩码（反转默认），只有 set --plain / mark --plain 显式标记安全的 key
-才给明文。
-
-敏感值（名字或内容命中 password/token/secret/JWT/带凭据 URI）用敏感值密钥
-加密（sensitive init），默认掩码；reveal 显示明文，也可 --key/--iv 解密外部
-CryptoUtil AES 密文。rm 需要确认（TTY 提示，非 TTY 需 --yes）；import 覆盖
-已有快照需 --force。
-`)
+	fmt.Fprint(w, i18n.T("help.usage.apollo"))
 }
 
 func apolloInit(args []string) int {
@@ -342,7 +333,7 @@ func apolloInit(args []string) int {
 	if err := app.InitKey(*force); err != nil {
 		return fail("apollo init: %v", err)
 	}
-	fmt.Println(green(fmt.Sprintf("snapshot key created and stored in %s", apollo.StoreName())))
+	fmt.Println(green(i18n.T("cli.snapshot-key-created", apollo.StoreName())))
 	return 0
 }
 
@@ -367,10 +358,10 @@ func apolloImport(args []string) int {
 		}
 	}
 	if *name == "" {
-		return fail("apollo import: --name 必填（或传入文件路径）")
+		return fail("apollo import: %s", i18n.T("cli.import-need-name"))
 	}
 	if err := apollo.ValidateAppID(*appID); err != nil {
-		return fail("apollo import: --appid 必填：%v", err)
+		return fail("apollo import: %s", i18n.T("cli.import-need-appid", err.Error()))
 	}
 	src := "-"
 	if fs.NArg() > 0 {
@@ -378,14 +369,14 @@ func apolloImport(args []string) int {
 	}
 	text, err := readInput(src)
 	if err != nil {
-		return fail("apollo import: 读取输入失败：%v", err)
+		return fail("apollo import: %s", i18n.T("cli.import-read-failed", err.Error()))
 	}
 	kvs, warnings := apollo.ParseKV(text)
 	for _, w := range warnings {
-		fmt.Fprintln(os.Stderr, "warning:", w)
+		fmt.Fprintln(os.Stderr, i18n.T("cli.warning", w))
 	}
 	if len(kvs) == 0 {
-		return fail("apollo import: 未解析到任何键值条目")
+		return fail("apollo import: %s", i18n.T("cli.import-no-entries"))
 	}
 	key, sensitiveKey, err := bothKeys()
 	if err != nil {
@@ -398,15 +389,15 @@ func apolloImport(args []string) int {
 	if !*force {
 		if _, err := os.Stat(apollo.SnapPath(dirPath, *name, *appID)); err == nil {
 			if isTerminal() {
-				fmt.Printf("快照 %q (appid %s) 已存在，覆盖? [y/N] ", *name, *appID)
+				fmt.Printf("%s", i18n.T("cli.overwrite-prompt", *name, *appID))
 				var ans string
 				fmt.Scanln(&ans)
 				if !strings.EqualFold(ans, "y") && !strings.EqualFold(ans, "yes") {
-					fmt.Println("已取消")
+					fmt.Println(i18n.T("cli.cancelled"))
 					return 0
 				}
 			} else {
-				return fail("apollo import: 快照 %q (appid %s) 已存在（用 --force 覆盖）", *name, *appID)
+				return fail("apollo import: %s", i18n.T("cli.import-exists", *name, *appID))
 			}
 		}
 	}
@@ -414,7 +405,7 @@ func apolloImport(args []string) int {
 	if err != nil {
 		return fail("apollo import: %v", err)
 	}
-	fmt.Println(green(fmt.Sprintf("imported %d entries into snapshot %q (appid %s) (%s)", n, *name, *appID, apollo.SnapPath(dirPath, *name, *appID))))
+	fmt.Println(green(i18n.T("cli.imported", n, *name, *appID, apollo.SnapPath(dirPath, *name, *appID))))
 	return 0
 }
 
@@ -430,7 +421,7 @@ func apolloList(args []string) int {
 	}
 	_ = *yes
 	if *reveal && !isTerminal() {
-		return fail("apollo list: 明文输出仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
+		return fail("apollo list: %s", i18n.T("cli.plaintext-tty-only"))
 	}
 
 	dirPath, err := snapDir(*dir)
@@ -535,7 +526,7 @@ func apolloGet(args []string) int {
 	}
 	_ = *yes
 	if fs.NArg() != 2 {
-		return fail("apollo get: 用法：vaulty-keeper apollo get <name> <key>")
+		return fail("apollo get: %s", i18n.T("usage.apollo.get"))
 	}
 	name, k := fs.Arg(0), fs.Arg(1)
 	dirPath, err := snapDir(*dir)
@@ -551,7 +542,7 @@ func apolloGet(args []string) int {
 		return fail("apollo get: %v", err)
 	}
 	if !ok {
-		return fail("apollo get: 快照 %q 中不存在 key %q", k, name)
+		return fail("apollo get: %s", i18n.T("cli.key-not-found", k, name))
 	}
 	// Reverse default: scripts/AI only receive plaintext for keys the user
 	// explicitly marked safe (set --plain); everything else is masked, no
@@ -574,7 +565,7 @@ func apolloSet(args []string) int {
 		return code
 	}
 	if fs.NArg() != 3 {
-		return fail("apollo set: 用法：vaulty-keeper apollo set <name> <key> <value>")
+		return fail("apollo set: %s", i18n.T("usage.apollo.set"))
 	}
 	name, k, v := fs.Arg(0), fs.Arg(1), fs.Arg(2)
 	dirPath, err := snapDir(*dir)
@@ -600,7 +591,7 @@ func apolloSet(args []string) int {
 	if _, err := app.SetValue(dirPath, name, *appID, k, v, secret, key, sensitiveKey); err != nil {
 		return fail("apollo set: %v", err)
 	}
-	fmt.Println(green(fmt.Sprintf("set %s.%s", name, k)))
+	fmt.Println(green(i18n.T("cli.set-done", name, k)))
 	return 0
 }
 
@@ -614,13 +605,13 @@ func guardPlainMark(key, value string) error {
 		return nil
 	}
 	if !isTerminal() {
-		return fmt.Errorf("拒绝将 %q 标记为对脚本/AI 安全：key 名或值看起来是敏感内容；此操作必须在交互式终端确认", key)
+		return fmt.Errorf("%s", i18n.T("cli.plain-mark-refused", key))
 	}
-	fmt.Printf("注意：%q 看起来是敏感值（名字或内容命中敏感规则）。确认要标记为安全、允许 AI/脚本读明文？[y/N] ", key)
+	fmt.Printf("%s", i18n.T("cli.plain-mark-note", key))
 	var ans string
 	fmt.Scanln(&ans)
 	if !strings.EqualFold(ans, "y") && !strings.EqualFold(ans, "yes") {
-		return errors.New("已取消：未标记为安全")
+		return errors.New(i18n.T("cli.plain-mark-cancelled"))
 	}
 	return nil
 }
@@ -633,7 +624,7 @@ func apolloUnset(args []string) int {
 		return code
 	}
 	if fs.NArg() != 2 {
-		return fail("apollo unset: 用法：vaulty-keeper apollo unset <name> <key>")
+		return fail("apollo unset: %s", i18n.T("usage.apollo.unset"))
 	}
 	name, k := fs.Arg(0), fs.Arg(1)
 	dirPath, err := snapDir(*dir)
@@ -645,9 +636,9 @@ func apolloUnset(args []string) int {
 		return fail("apollo unset: %v", err)
 	}
 	if !ok {
-		return fail("apollo unset: 快照 %q 中不存在 key %q", k, name)
+		return fail("apollo unset: %s", i18n.T("cli.key-not-found", k, name))
 	}
-	fmt.Println(green(fmt.Sprintf("unset %s.%s", name, k)))
+	fmt.Println(green(i18n.T("cli.unset-done", name, k)))
 	return 0
 }
 
@@ -661,10 +652,10 @@ func apolloMark(args []string) int {
 		return code
 	}
 	if *asPlain == *asSecret {
-		return fail("apollo mark: 必须且只能指定 --plain 或 --secret 之一")
+		return fail("apollo mark: %s", i18n.T("cli.mark-exactly-one"))
 	}
 	if fs.NArg() != 2 {
-		return fail("apollo mark: 用法：vaulty-keeper apollo mark <name> <key> --plain|--secret")
+		return fail("apollo mark: %s", i18n.T("usage.apollo.mark"))
 	}
 	name, k := fs.Arg(0), fs.Arg(1)
 	dirPath, err := snapDir(*dir)
@@ -691,13 +682,13 @@ func apolloMark(args []string) int {
 		return fail("apollo mark: %v", err)
 	}
 	if !ok {
-		return fail("apollo mark: 快照 %q 中不存在 key %q", k, name)
+		return fail("apollo mark: %s", i18n.T("cli.key-not-found", k, name))
 	}
 	label := "safe (--plain)"
 	if *asSecret {
 		label = "sensitive (--secret)"
 	}
-	fmt.Println(green(fmt.Sprintf("mark %s.%s as %s", name, k, label)))
+	fmt.Println(green(i18n.T("cli.mark-done", name, k, label)))
 	return 0
 }
 
@@ -714,10 +705,10 @@ func apolloCompare(args []string) int {
 	}
 	_ = *yes
 	if *reveal && !isTerminal() {
-		return fail("apollo compare: 明文输出仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
+		return fail("apollo compare: %s", i18n.T("cli.plaintext-tty-only"))
 	}
 	if fs.NArg() != 2 {
-		return fail("apollo compare: 用法：vaulty-keeper apollo compare <nameA> <nameB>")
+		return fail("apollo compare: %s", i18n.T("usage.apollo.compare"))
 	}
 	nameA, nameB := fs.Arg(0), fs.Arg(1)
 	dirPath, err := snapDir(*dir)
@@ -808,10 +799,10 @@ func apolloExport(args []string) int {
 	}
 	_ = *yes
 	if !isTerminal() {
-		return fail("apollo export: 明文输出仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
+		return fail("apollo export: %s", i18n.T("cli.plaintext-tty-only"))
 	}
 	if fs.NArg() != 1 {
-		return fail("apollo export: 用法：vaulty-keeper apollo export <name>")
+		return fail("apollo export: %s", i18n.T("usage.apollo.export"))
 	}
 	name := fs.Arg(0)
 	dirPath, err := snapDir(*dir)
@@ -833,9 +824,9 @@ func apolloExport(args []string) int {
 		cmd := exec.Command("pbcopy")
 		cmd.Stdin = strings.NewReader(out.String())
 		if err := cmd.Run(); err != nil {
-			return fail("apollo export: pbcopy 失败：%v", err)
+			return fail("apollo export: %s", i18n.T("cli.export-pbcopy-failed", err))
 		}
-		fmt.Fprintln(os.Stderr, "copied to clipboard")
+		fmt.Fprintln(os.Stderr, i18n.T("cli.export-copied"))
 	}
 	return 0
 }
@@ -850,7 +841,7 @@ func apolloRm(args []string) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		return fail("apollo rm: 用法：vaulty-keeper apollo rm <name> --appid <id>")
+		return fail("apollo rm: %s", i18n.T("usage.apollo.rm"))
 	}
 	name := fs.Arg(0)
 	if err := apollo.ValidateAppID(*appID); err != nil {
@@ -861,24 +852,24 @@ func apolloRm(args []string) int {
 		return fail("apollo rm: %v", err)
 	}
 	if !*yes && isTerminal() {
-		fmt.Printf("删除快照 %q (appid %s)? [y/N] ", name, *appID)
+		fmt.Printf("%s", i18n.T("cli.rm-confirm", name, *appID))
 		var ans string
 		fmt.Scanln(&ans)
 		if !strings.EqualFold(ans, "y") && !strings.EqualFold(ans, "yes") {
-			fmt.Println("已取消")
+			fmt.Println(i18n.T("cli.cancelled"))
 			return 0
 		}
 	} else if !*yes {
-		return fail("apollo rm: 非 TTY 下需要确认（用 --yes）")
+		return fail("apollo rm: %s", i18n.T("cli.rm-non-tty"))
 	}
 	ok, err := app.Remove(dirPath, name, *appID)
 	if err != nil {
 		return fail("apollo rm: %v", err)
 	}
 	if !ok {
-		return fail("apollo rm: 未找到快照 %q (appid %s)", name, *appID)
+		return fail("apollo rm: %s", i18n.T("cli.rm-not-found", name, *appID))
 	}
-	fmt.Println(green(fmt.Sprintf("removed snapshot %q (appid %s)", name, *appID)))
+	fmt.Println(green(i18n.T("cli.removed-snapshot", name, *appID)))
 	return 0
 }
 
@@ -898,10 +889,10 @@ func apolloReveal(args []string) int {
 	}
 	_ = *yes
 	if !isTerminal() {
-		return fail("apollo reveal: 明文输出仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
+		return fail("apollo reveal: %s", i18n.T("cli.plaintext-tty-only"))
 	}
 	if fs.NArg() < 2 {
-		return fail("apollo reveal: 用法：vaulty-keeper apollo reveal <name> <key...>")
+		return fail("apollo reveal: %s", i18n.T("usage.apollo.reveal"))
 	}
 	name := fs.Arg(0)
 	targets := fs.Args()[1:]
@@ -952,10 +943,10 @@ func apolloEdit(args []string) int {
 	}
 	_ = *yes
 	if !isTerminal() {
-		return fail("apollo edit: 明文仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
+		return fail("apollo edit: %s", i18n.T("cli.plaintext-tty-only-edit"))
 	}
 	if fs.NArg() != 1 {
-		return fail("apollo edit: 用法：vaulty-keeper apollo edit <name>")
+		return fail("apollo edit: %s", i18n.T("usage.apollo.edit"))
 	}
 	name := fs.Arg(0)
 	dirPath, err := snapDir(*dir)
@@ -997,7 +988,7 @@ func apolloEdit(args []string) int {
 	cmd := exec.Command("sh", "-c", ed+" "+strconv.Quote(tmpPath))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fail("apollo edit: 编辑器失败：%v", err)
+		return fail("apollo edit: %s", i18n.T("cli.editor-failed", err.Error()))
 	}
 
 	content, err := os.ReadFile(tmpPath)
@@ -1006,13 +997,13 @@ func apolloEdit(args []string) int {
 	}
 	_, warnings := apollo.ParseKV(string(content))
 	for _, w := range warnings {
-		fmt.Fprintln(os.Stderr, "warning:", w)
+		fmt.Fprintln(os.Stderr, i18n.T("cli.warning", w))
 	}
 	n, err := app.EditApply(dirPath, name, *appID, snapKey, sensitiveKey, string(content))
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
-	fmt.Println(green(fmt.Sprintf("updated snapshot %q: %d entries", name, n)))
+	fmt.Println(green(i18n.T("cli.updated-snapshot", name, n)))
 	return 0
 }
 
@@ -1040,10 +1031,7 @@ func runSensitive(args []string) int {
 func sensitiveUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	printDomainUsage(w, "sensitive")
-	fmt.Fprintf(w, `
-敏感值密钥加密快照中的敏感值（独立于快照密钥），掩码值只能靠它解开
-（env 覆盖：VAULTY_KEEPER_SENSITIVE_KEY）。
-`)
+	fmt.Fprint(w, i18n.T("help.usage.sensitive"))
 }
 
 func sensitiveInit(args []string) int {
@@ -1091,13 +1079,7 @@ func runAES(args []string) int {
 func aesUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	printDomainUsage(w, "aes")
-	fmt.Fprintf(w, `
-key/iv 条目存于 ~/.vaulty/aes.json（{name, secret-key, iv} 数组）。
-解析顺序：--key/--iv → --name（查 aes.json）→ VAULTY_KEEPER_AES_KEY / VAULTY_KEEPER_AES_IV。
-算法：AES/GCM/NoPadding，tag 128 bits，key 16/24/32 字节（UTF-8），iv 为
-UTF-8 字节（Java CryptoUtil 兼容）。decrypt 输出明文，仅交互式终端可用
-（脚本/AI 环境一律拒绝）。
-`)
+	fmt.Fprint(w, i18n.T("help.usage.aes"))
 }
 
 func aesList(args []string) int {
@@ -1134,7 +1116,7 @@ func aesAdd(args []string) int {
 		return code
 	}
 	if *name == "" {
-		return fail("aes add: --name 必填")
+		return fail("aes add: %s", i18n.T("cli.aes-add-need-name"))
 	}
 	if err := app.AESConfigAdd(*name, *key, *iv); err != nil {
 		return fail("aes add: %v", err)
@@ -1152,10 +1134,10 @@ func aesGenKey(args []string) int {
 		return code
 	}
 	if *keyBytes != 16 && *keyBytes != 24 && *keyBytes != 32 {
-		return fail("aes gen-key: key 长度必须为 16/24/32 字节")
+		return fail("aes gen-key: %s", i18n.T("cli.aes-key-len"))
 	}
 	if *ivBytes != 12 && *ivBytes != 16 {
-		return fail("aes gen-key: iv 长度必须为 12 或 16 字节")
+		return fail("aes gen-key: %s", i18n.T("cli.aes-iv-len"))
 	}
 	key, iv, err := app.GenKey(*keyBytes, *ivBytes)
 	if err != nil {
@@ -1188,7 +1170,7 @@ func aesOp(args []string, encrypt bool) int {
 	}
 	_ = *yes
 	if !encrypt && !isTerminal() {
-		return fail("aes decrypt: 明文输出仅在交互式终端可用；脚本/AI 环境永远拿不到明文")
+		return fail("aes decrypt: %s", i18n.T("cli.plaintext-tty-only"))
 	}
 
 	k := *key
@@ -1199,7 +1181,7 @@ func aesOp(args []string, encrypt bool) int {
 			return fail("aes: %v", err)
 		}
 		if e == nil {
-			return fail("aes: %s 中不存在条目 %q", *name, app.AESConfigPath())
+			return fail("aes: %s", i18n.T("cli.aes-entry-missing", *name, app.AESConfigPath()))
 		}
 		if k == "" {
 			k = e.SecretKey
@@ -1215,14 +1197,14 @@ func aesOp(args []string, encrypt bool) int {
 		i = os.Getenv("VAULTY_KEEPER_AES_IV")
 	}
 	if k == "" || i == "" {
-		return fail("aes: --key/--iv（或 --name，或 VAULTY_KEEPER_AES_KEY/VAULTY_KEEPER_AES_IV）必填")
+		return fail("aes: %s", i18n.T("cli.aes-key-iv-required"))
 	}
 
 	var input string
 	if *file != "" {
 		b, err := os.ReadFile(*file)
 		if err != nil {
-			return fail("aes: 读取文件失败：%v", err)
+			return fail("aes: %s", i18n.T("cli.aes-read-file-failed", err.Error()))
 		}
 		input = strings.TrimRight(string(b), "\r\n")
 	} else if fs.NArg() > 0 {
@@ -1230,7 +1212,7 @@ func aesOp(args []string, encrypt bool) int {
 	} else {
 		b, err := io.ReadAll(os.Stdin)
 		if err != nil {
-			return fail("aes: 读取标准输入失败：%v", err)
+			return fail("aes: %s", i18n.T("cli.aes-read-stdin-failed", err.Error()))
 		}
 		input = strings.TrimSpace(string(b))
 	}
@@ -1256,7 +1238,7 @@ func aesOp(args []string, encrypt bool) int {
 func parseUIPort(s string) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil || n < 0 || n > 65535 {
-		return 0, errors.New("端口必须是 0 到 65535 之间的整数")
+		return 0, errors.New(i18n.T("cli.port-range"))
 	}
 	return n, nil
 }
@@ -1294,6 +1276,35 @@ func runUI(args []string) int {
 	return 0
 }
 
+// ---- lang ----
+
+// runLang prints the current language, or writes a new one to the shared
+// prefs file (~/.vaulty/prefs.json) so the web UI and every later CLI run
+// pick it up.
+func runLang(args []string) int {
+	switch {
+	case len(args) == 0:
+		fmt.Println(i18n.T("lang.current", i18n.Current()))
+		return 0
+	case args[0] == "-h" || args[0] == "--help" || args[0] == "help":
+		fmt.Fprintln(os.Stdout, i18n.T("lang.usage"))
+		return 0
+	}
+	if len(args) > 1 {
+		return fail("lang: %s", i18n.T("lang.usage"))
+	}
+	if !i18n.IsValid(args[0]) {
+		return fail("lang: %s", i18n.T("lang.invalid", args[0]))
+	}
+	v := i18n.Normalize(args[0])
+	if err := i18n.WriteLang(v); err != nil {
+		return fail("lang: %v", err)
+	}
+	i18n.Init()
+	fmt.Println(i18n.T("lang.set", v, i18n.PrefsPath()))
+	return 0
+}
+
 // ---- completion ----
 
 const completionZsh = `#compdef vaulty-keeper
@@ -1307,6 +1318,7 @@ _vaulty_keeper() {
     'serve:masked-only bridge for isolated agents'
     'remote:masked reads via the bridge'
     'completion:print shell completion'
+    'lang:show or set the UI/CLI language (en|zh)'
     'version:show version'
     'help:show help'
   )
@@ -1349,7 +1361,7 @@ _vaulty_keeper() {
       ;;
     db)
       local -a subs
-      subs=('init:create database key' 'add:register a connection' 'list:list connections' 'test:check a connection works' 'connect:print ready client command' 'show:print real URL (TTY)' 'rm:remove a connection' 'shell:open interactive shell')
+      subs=('init:create database key' 'add:register a connection' 'list:list connections' 'test:check a connection works' 'connect:print ready client command' 'show:print real URL (TTY)' 'regen:rotate the tunnel token' 'on:turn the tunnel on' 'off:turn the tunnel off' 'rm:remove a connection' 'shell:open interactive shell')
       if (( CURRENT == 3 )); then _describe 'subcommand' subs; fi
       ;;
   esac
@@ -1361,7 +1373,7 @@ const completionBash = `_vaulty_keeper() {
   local cur
   cur="${COMP_WORDS[COMP_CWORD]}"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "apollo aes sensitive ui serve remote db completion version help" -- "${cur}") )
+    COMPREPLY=( $(compgen -W "apollo aes sensitive ui serve remote db completion lang version help" -- "${cur}") )
     return
   fi
   case "${COMP_WORDS[1]}" in
@@ -1387,7 +1399,7 @@ const completionBash = `_vaulty_keeper() {
       ;;
     db)
       if [[ ${COMP_CWORD} -eq 2 ]]; then
-        COMPREPLY=( $(compgen -W "init add list test regen connect show rm shell help" -- "${cur}") )
+        COMPREPLY=( $(compgen -W "init add list test regen connect show rm shell on off help" -- "${cur}") )
       fi
       ;;
   esac
@@ -1403,13 +1415,14 @@ complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a serve -d 'masked-only
 complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a remote -d 'masked reads via the bridge'
 complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a db -d 'encrypted database connections + tunnels'
 complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a completion -d 'print shell completion'
+complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a lang -d 'show or set the UI/CLI language'
 complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a version -d 'show version'
 complete -c vaulty-keeper -f -n '__fish_use_subcommand' -a help -d 'show help'
 complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from apollo' -a 'init import list get set unset mark compare reveal edit export help'
 complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from aes' -a 'encrypt decrypt gen-key list add help'
 complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from sensitive' -a 'init help'
 complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from remote' -a 'list get compare dblist help'
-complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from db' -a 'init add list test regen connect show rm shell help'
+complete -c vaulty-keeper -f -n '__fish_seen_subcommand_from db' -a 'init add list test regen connect show rm shell on off help'
 `
 
 func runCompletion(args []string) int {

@@ -63,13 +63,22 @@ func (t *Tunnel) Start(ctx context.Context) error {
 		mu.Lock()
 		defer mu.Unlock()
 		for name, c := range desired {
+			if c.Disabled {
+				// Tunnel turned off (db off): stop the listener if one is up.
+				if r, ok := active[name]; ok {
+					r.ln.Close()
+					delete(active, name)
+					fmt.Fprintf(t.Log, "dbproxy: %s: tunnel disabled\n", name)
+				}
+				continue
+			}
 			if _, ok := active[name]; ok {
 				continue
 			}
 			addr := net.JoinHostPort(t.Host, strconv.Itoa(c.Port))
 			ln, err := net.Listen("tcp", addr)
 			if err != nil {
-				fmt.Fprintf(t.Log, "dbproxy: %s: 监听 %s 失败：%v\n", name, addr, err)
+				fmt.Fprintf(t.Log, "dbproxy: %s: failed to listen on %s: %v\n", name, addr, err)
 				continue
 			}
 			active[name] = &running{ln: ln}

@@ -98,10 +98,10 @@ func pgAuthenticate(server net.Conn, u *url.URL) error {
 	}
 	db := strings.TrimPrefix(u.Path, "/")
 	if user == "" {
-		return errors.New("URL 缺少数据库用户")
+		return errors.New("URL is missing a database user")
 	}
 	if db == "" {
-		return errors.New("URL 缺少数据库名")
+		return errors.New("URL is missing a database name")
 	}
 
 	frontend := pgproto3.NewFrontend(server, server)
@@ -136,7 +136,7 @@ authLoop:
 		case *pgproto3.AuthenticationSASL:
 			mech := pickSCRAM(m.AuthMechanisms)
 			if mech == "" {
-				return errors.New("服务端要求的 SASL 机制不支持（仅支持 SCRAM-SHA-256）")
+				return errors.New("server requires a SASL mechanism this client does not support (only SCRAM-SHA-256)")
 			}
 			c, err := scram.SHA256.NewClient(user, pass, "")
 			if err != nil {
@@ -165,7 +165,7 @@ authLoop:
 				return fmt.Errorf("scram server verify: %w", err)
 			}
 		case *pgproto3.ErrorResponse:
-			return fmt.Errorf("服务端认证失败：%s", m.Message)
+			return fmt.Errorf("server authentication failed: %s", m.Message)
 		case *pgproto3.ParameterStatus, *pgproto3.BackendKeyData, *pgproto3.ReadyForQuery:
 			// Consumed here; the client already received synthesized equivalents.
 		}

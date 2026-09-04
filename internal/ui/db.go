@@ -16,6 +16,7 @@ import (
 
 	"vaulty-keeper/internal/apollo"
 	"vaulty-keeper/internal/dbproxy"
+	"vaulty-keeper/internal/i18n"
 )
 
 // Database-connection endpoints, mirroring the `vaulty-keeper db` CLI in the web
@@ -41,7 +42,7 @@ func (h *handler) dbStore() (string, bool) {
 // dbKeyStatus reports whether the DB encryption key exists.
 func (h *handler) dbKeyStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	_, err := h.dbKey()
@@ -54,11 +55,11 @@ func (h *handler) dbKeyStatus(w http.ResponseWriter, r *http.Request) {
 // memory and is regenerated on every start.
 func (h *handler) dbPubKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.dbPriv == nil {
-		writeAPIError(w, http.StatusInternalServerError, "db_encryption_unavailable", "数据库 URL 加密不可用")
+		writeAPIError(w, http.StatusInternalServerError, "db_encryption_unavailable", "database URL encryption unavailable")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -81,39 +82,39 @@ type urlEnc struct {
 // process-local ECDH private key. Errors never echo the ciphertext.
 func (h *handler) decryptURL(e urlEnc) (string, error) {
 	if h.dbPriv == nil {
-		return "", errors.New("数据库 URL 加密不可用")
+		return "", errors.New("database URL encryption unavailable")
 	}
 	ephRaw, err := base64.StdEncoding.DecodeString(e.Eph)
 	if err != nil {
-		return "", errors.New("无效的加密参数（eph）")
+		return "", errors.New("invalid encryption payload (eph)")
 	}
 	ephPub, err := ecdh.P256().NewPublicKey(ephRaw)
 	if err != nil {
-		return "", errors.New("无效的加密参数（eph 公钥）")
+		return "", errors.New("invalid encryption payload (eph public key)")
 	}
 	secret, err := h.dbPriv.ECDH(ephPub)
 	if err != nil {
-		return "", errors.New("无法建立加密通道")
+		return "", errors.New("cannot establish an encryption channel")
 	}
 	iv, err := base64.StdEncoding.DecodeString(e.IV)
 	if err != nil {
-		return "", errors.New("无效的加密参数（iv）")
+		return "", errors.New("invalid encryption payload (iv)")
 	}
 	ct, err := base64.StdEncoding.DecodeString(e.Ct)
 	if err != nil {
-		return "", errors.New("无效的加密参数（ct）")
+		return "", errors.New("invalid encryption payload (ct)")
 	}
 	block, err := aes.NewCipher(secret)
 	if err != nil {
-		return "", errors.New("加密初始化失败")
+		return "", errors.New("encryption init failed")
 	}
 	g, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", errors.New("加密初始化失败")
+		return "", errors.New("encryption init failed")
 	}
 	pt, err := g.Open(nil, iv, ct, nil)
 	if err != nil {
-		return "", errors.New("URL 解密失败，请刷新页面后重试")
+		return "", errors.New("URL decryption failed, refresh the page and retry")
 	}
 	return string(pt), nil
 }
@@ -121,17 +122,17 @@ func (h *handler) decryptURL(e urlEnc) (string, error) {
 // dbList returns connection metadata only (never URLs).
 func (h *handler) dbList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	store, ok := h.dbStore()
 	if !ok {
-		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "未配置数据库存储")
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "database store not configured")
 		return
 	}
 	key, err := h.dbKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用，请先初始化（db init）")
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable, initialize it first (db init)")
 		return
 	}
 	conns, err := dbproxy.List(store, key)
@@ -145,12 +146,12 @@ func (h *handler) dbList(w http.ResponseWriter, r *http.Request) {
 // dbInit creates the DB encryption key (writes to Keychain / env fallback).
 func (h *handler) dbInit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	var req initRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if err := apollo.GenerateAndStoreDBKey(req.Force); err != nil {
@@ -173,17 +174,17 @@ type dbAddRequest struct {
 // dbAdd registers a new connection (the URL is encrypted at rest).
 func (h *handler) dbAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	store, ok := h.dbStore()
 	if !ok {
-		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "未配置数据库存储")
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "database store not configured")
 		return
 	}
 	var req dbAddRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	rawURL := req.URL
@@ -196,12 +197,12 @@ func (h *handler) dbAdd(w http.ResponseWriter, r *http.Request) {
 		rawURL = dec
 	}
 	if req.Name == "" || rawURL == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_db_add", "name 与 url（或 url_enc）必填")
+		writeAPIError(w, http.StatusBadRequest, "invalid_db_add", "name and url (or url_enc) are required")
 		return
 	}
 	key, err := h.dbKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用，请先初始化（db init）")
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable, initialize it first (db init)")
 		return
 	}
 	if err := dbproxy.Add(store, key, req.Name, rawURL, req.Port); err != nil {
@@ -219,22 +220,22 @@ type dbTestRequest struct {
 // dbTest verifies a connection can authenticate (never returns the URL).
 func (h *handler) dbTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	store, ok := h.dbStore()
 	if !ok {
-		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "未配置数据库存储")
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "database store not configured")
 		return
 	}
 	var req dbTestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	key, err := h.dbKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用")
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable")
 		return
 	}
 	conn, err := dbproxy.Resolve(store, key, req.Name)
@@ -265,16 +266,16 @@ type dbTestURLRequest struct {
 // anything. The URL arrives encrypted and the response never contains it.
 func (h *handler) dbTestURL(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	var req dbTestURLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	if req.URLEnc == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_db_test_url", "缺少 url_enc")
+		writeAPIError(w, http.StatusBadRequest, "invalid_db_test_url", "missing url_enc")
 		return
 	}
 	rawURL, err := h.decryptURL(*req.URLEnc)
@@ -338,18 +339,18 @@ type dbClientLine struct {
 // the real database password).
 func (h *handler) dbConnect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	store, ok := h.dbStore()
 	if !ok {
-		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "未配置数据库存储")
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "database store not configured")
 		return
 	}
 	name := r.URL.Query().Get("name")
 	key, err := h.dbKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用")
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable")
 		return
 	}
 	conn, err := dbproxy.Resolve(store, key, name)
@@ -374,42 +375,30 @@ func (h *handler) dbConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildConnectInfo renders the ready-to-run client links for a connection
-// using the given tunnel token.
+// using the given tunnel token. Link shapes come from dbproxy so the UI and
+// the CLI's `db connect` never drift apart; labels are localized here.
 func buildConnectInfo(conn dbproxy.Conn, token, host string) (dbConnectInfo, error) {
 	info := dbConnectInfo{Name: conn.Name, Type: conn.Type, Port: conn.Port, Token: token, Host: host}
 	db := dbName(conn.URL)
 	if token == "" {
-		info.Note = "serve 未运行或无 bridge token，无法生成带 token 的命令"
+		info.Note = "serve is not running or no bridge token is available; cannot build token-based commands"
 	}
-	switch conn.Type {
-	case "postgres":
-		if token != "" {
-			info.Raw = fmt.Sprintf("postgresql://%s@%s:%d/%s", token, host, conn.Port, db)
-			info.Clients = []dbClientLine{
-				{"psql —— PostgreSQL 自带的命令行客户端（装 PG 就有）", info.Raw},
-				{"DBeaver / DataGrip —— 通用数据库图形工具（贴 JDBC 链接）", fmt.Sprintf("jdbc:postgresql://%s:%d/%s?user=%s", host, conn.Port, db, token)},
-				{"pgAdmin4 —— PostgreSQL 官方图形工具（填字段）", fmt.Sprintf("Host=%s Port=%d Database=%s Username=%s 密码留空", host, conn.Port, db, token)},
-			}
+	if conn.Disabled {
+		note := "the tunnel for this connection is off, links below are currently unavailable (turn it on in the UI or via 'vaulty-keeper db on " + conn.Name + "')"
+		if info.Note != "" {
+			note = info.Note + "; " + note
 		}
-	case "mysql":
-		if token != "" {
-			info.Raw = fmt.Sprintf("mysql://%s:x@%s:%d/%s", token, host, conn.Port, db)
-			info.Clients = []dbClientLine{
-				{"DBeaver / DataGrip —— 通用数据库图形工具（贴 JDBC 链接）", fmt.Sprintf("jdbc:mysql://%s:%d/%s?user=%s&password=x", host, conn.Port, db, token)},
-				{"MySQL Workbench —— MySQL 官方图形工具（填字段）", fmt.Sprintf("Hostname=%s Port=%d Default Schema=%s Username=%s 密码任意", host, conn.Port, db, token)},
-				{"mysql —— MySQL 自带的命令行客户端（装 MySQL 就有）", fmt.Sprintf("mysql -h %s -P %d -u %s -px --ssl-mode=DISABLED %s", host, conn.Port, token, db)},
-			}
+		info.Note = note
+	}
+	if token != "" {
+		raw, links, err := dbproxy.TunnelLinks(conn.Type, token, host, conn.Port, db, i18n.T)
+		if err != nil {
+			return info, fmt.Errorf("unsupported database type %q", conn.Type)
 		}
-	case "redis":
-		if token != "" {
-			info.Raw = fmt.Sprintf("redis://:%s@%s:%d/%s", token, host, conn.Port, db)
-			info.Clients = []dbClientLine{
-				{"Redis Insight —— Redis 官方图形工具（贴 URL）", info.Raw},
-				{"redis-cli —— Redis 自带的命令行客户端（装 Redis 就有）", fmt.Sprintf("redis-cli -h %s -p %d -a %s --no-auth-warning", host, conn.Port, token)},
-			}
+		info.Raw = raw
+		for _, l := range links {
+			info.Clients = append(info.Clients, dbClientLine{Label: i18n.T("db.connect-" + l.Kind), Line: l.Value})
 		}
-	default:
-		return info, fmt.Errorf("不支持的数据库类型 %q", conn.Type)
 	}
 	return info, nil
 }
@@ -425,22 +414,22 @@ type dbRegenRequest struct {
 // connection). Token-gated; never returns the real URL or credentials.
 func (h *handler) dbRegen(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	store, ok := h.dbStore()
 	if !ok {
-		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "未配置数据库存储")
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "database store not configured")
 		return
 	}
 	var req dbRegenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	key, err := h.dbKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用")
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable")
 		return
 	}
 	if req.All {
@@ -453,7 +442,7 @@ func (h *handler) dbRegen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_db_regen", "缺少 name（或 all:true）")
+		writeAPIError(w, http.StatusBadRequest, "invalid_db_regen", "missing name (or all:true)")
 		return
 	}
 	if _, err := dbproxy.RegenToken(store, key, req.Name); err != nil {
@@ -489,6 +478,45 @@ func uiBridgeToken() string {
 	return strings.TrimSpace(string(b))
 }
 
+type dbTunnelRequest struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+
+// dbTunnel turns a connection's tunnel on (enabled:true) or off
+// (enabled:false). Only the flag changes, never any plaintext; the host's
+// serve picks the change up within ~2s (it syncs db.json). Token-gated.
+func (h *handler) dbTunnel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	store, ok := h.dbStore()
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "database store not configured")
+		return
+	}
+	var req dbTunnelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
+		return
+	}
+	if req.Name == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_db_tunnel", "missing name")
+		return
+	}
+	key, err := h.dbKey()
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable")
+		return
+	}
+	if err := dbproxy.SetTunnel(store, key, req.Name, !req.Enabled); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "db_tunnel_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": req.Name, "enabled": req.Enabled})
+}
+
 type dbShowRequest struct {
 	Name string `json:"name"`
 }
@@ -499,22 +527,22 @@ func (h *handler) dbShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	store, ok := h.dbStore()
 	if !ok {
-		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "未配置数据库存储")
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "database store not configured")
 		return
 	}
 	var req dbShowRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_json", "无效的 JSON 请求体")
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
 	key, err := h.dbKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用")
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable")
 		return
 	}
 	conn, err := dbproxy.Resolve(store, key, req.Name)
@@ -528,17 +556,17 @@ func (h *handler) dbShow(w http.ResponseWriter, r *http.Request) {
 // dbRemove deletes a connection.
 func (h *handler) dbRemove(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodDelete {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	store, ok := h.dbStore()
 	if !ok {
-		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "未配置数据库存储")
+		writeAPIError(w, http.StatusNotFound, "db_store_unconfigured", "database store not configured")
 		return
 	}
 	key, err := h.dbKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用")
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable")
 		return
 	}
 	if err := dbproxy.Remove(store, key, name); err != nil {

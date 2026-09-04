@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"vaulty-keeper/internal/aesx"
+	"vaulty-keeper/internal/i18n"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -43,6 +44,15 @@ func captureStderr(t *testing.T, fn func()) string {
 	w.Close()
 	b, _ := io.ReadAll(r)
 	return string(b)
+}
+
+// i18nTest pins the CLI language to English and isolates HOME so a shared
+// ~/.vaulty/prefs.json on the developer machine cannot leak into tests.
+func i18nTest(t *testing.T) {
+	t.Helper()
+	t.Setenv(i18n.EnvLang, i18n.LangEn)
+	t.Setenv("HOME", t.TempDir())
+	i18n.Init()
 }
 
 // asTTY makes commands run as if stdin were a terminal, bypassing the
@@ -452,7 +462,7 @@ func TestApolloRejectsUnsafeSnapshotName(t *testing.T) {
 			t.Fatalf("list with unsafe name returned %d, want 1", code)
 		}
 	})
-	if !strings.Contains(err, "快照名必须以字母或数字开头") {
+	if !strings.Contains(err, "snapshot name must start with a letter or digit") {
 		t.Fatalf("stderr %q missing name validation message", err)
 	}
 }
@@ -498,10 +508,12 @@ func TestUIOptions(t *testing.T) {
 // TestEnsureKeys exercises checkKey's three branches: key present (silent),
 // missing on non-TTY (hint only), missing on TTY with confirm (init runs).
 func TestEnsureKeys(t *testing.T) {
+	t.Setenv(i18n.EnvLang, i18n.LangEn)
+	i18n.Init()
 	// key available → silent, init never called
 	called := false
 	out := captureStdout(t, func() {
-		checkKey("快照", "vaulty-keeper apollo init", func() bool { return true },
+		checkKey("snapshot", "vaulty-keeper apollo init", func() bool { return true },
 			func() error { called = true; return nil })
 	})
 	if called || out != "" {
@@ -511,7 +523,7 @@ func TestEnsureKeys(t *testing.T) {
 	// missing + non-TTY → hint on stderr, init never called
 	called = false
 	errOut := captureStderr(t, func() {
-		checkKey("快照", "vaulty-keeper apollo init", func() bool { return false },
+		checkKey("snapshot", "vaulty-keeper apollo init", func() bool { return false },
 			func() error { called = true; return nil })
 	})
 	if called {
@@ -528,13 +540,13 @@ func TestEnsureKeys(t *testing.T) {
 	t.Cleanup(func() { confirmKeyInit = oldConfirm })
 	called = false
 	out = captureStdout(t, func() {
-		checkKey("快照", "vaulty-keeper apollo init", func() bool { return false },
+		checkKey("snapshot", "vaulty-keeper apollo init", func() bool { return false },
 			func() error { called = true; return nil })
 	})
 	if !called {
 		t.Error("init should run after TTY confirm")
 	}
-	if !strings.Contains(out, "已创建") {
+	if !strings.Contains(out, "created") {
 		t.Errorf("expected created message, got %q", out)
 	}
 
@@ -542,7 +554,7 @@ func TestEnsureKeys(t *testing.T) {
 	confirmKeyInit = func(string) bool { return false }
 	called = false
 	captureStdout(t, func() {
-		checkKey("快照", "vaulty-keeper apollo init", func() bool { return false },
+		checkKey("snapshot", "vaulty-keeper apollo init", func() bool { return false },
 			func() error { called = true; return nil })
 	})
 	if called {
@@ -555,6 +567,8 @@ func TestEnsureKeys(t *testing.T) {
 func TestEnsureDirsAndAESConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv(i18n.EnvLang, i18n.LangEn)
+	i18n.Init()
 
 	ensureDirs()
 	apolloDir := filepath.Join(home, ".vaulty", "apollo")
@@ -571,7 +585,7 @@ func TestEnsureDirsAndAESConfig(t *testing.T) {
 	if !strings.Contains(string(b), "default") || strings.Contains(string(b), `[]`) {
 		t.Errorf("expected a seeded default entry, got %s", b)
 	}
-	if !strings.Contains(out, "已初始化") {
+	if !strings.Contains(out, "Initialized") {
 		t.Errorf("expected init message, got %q", out)
 	}
 
@@ -579,6 +593,73 @@ func TestEnsureDirsAndAESConfig(t *testing.T) {
 	out = captureStdout(t, func() { ensureAESConfig() })
 	if out != "" {
 		t.Errorf("existing config should be silent, got %q", out)
+	}
+}
+
+func TestLangCommand(t *testing.T) {
+	t.Setenv(i18n.EnvLang, "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	i18n.Init()
+
+	// default language: en
+	out := captureStdout(t, func() {
+		if code := Run([]string{"lang"}); code != 0 {
+			t.Fatalf("lang failed: %d", code)
+		}
+	})
+	if !strings.Contains(out, "language: en") {
+		t.Fatalf("default lang output: %q", out)
+	}
+
+	// switch to zh and verify the shared prefs file
+	if code := Run([]string{"lang", "zh"}); code != 0 {
+		t.Fatalf("lang zh failed: %d", code)
+	}
+	if i18n.ReadLang() != i18n.LangZh {
+		t.Fatalf("prefs lang = %q, want zh", i18n.ReadLang())
+	}
+	out = captureStdout(t, func() {
+		if code := Run([]string{"lang"}); code != 0 {
+			t.Fatalf("lang failed: %d", code)
+		}
+	})
+	if !strings.Contains(out, "语言：zh") {
+		t.Fatalf("lang output after switch: %q", out)
+	}
+
+	// invalid value rejected
+	if code := Run([]string{"lang", "fr"}); code == 0 {
+		t.Fatal("lang fr should fail")
+	}
+}
+
+// TestCLILanguageSwitch verifies the shared prefs file drives the CLI output
+// language (the same file the web UI writes on switch).
+func TestCLILanguageSwitch(t *testing.T) {
+	t.Setenv(i18n.EnvLang, "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	i18n.Init()
+	if err := i18n.WriteLang(i18n.LangZh); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStderr(t, func() {
+		if code := Run([]string{"db", "add"}); code == 0 {
+			t.Fatal("db add without args should fail")
+		}
+	})
+	if !strings.Contains(out, "用法：echo") {
+		t.Fatalf("zh db usage expected, got %q", out)
+	}
+	// help tree title in Chinese
+	out = captureStdout(t, func() {
+		if code := Run([]string{"help"}); code != 0 {
+			t.Fatalf("help failed: %d", code)
+		}
+	})
+	if !strings.Contains(out, "Apollo 快照（加密落盘）") {
+		t.Fatalf("zh help title expected, got %q", out)
 	}
 }
 

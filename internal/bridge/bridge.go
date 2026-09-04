@@ -79,7 +79,7 @@ func NewHandler(cfg Config) http.Handler {
 // never URLs) so an isolated agent can point native clients at the tunnels.
 func (h *handler) dbList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.cfg.DBStore == "" {
@@ -88,7 +88,7 @@ func (h *handler) dbList(w http.ResponseWriter, r *http.Request) {
 	}
 	key, err := apollo.DBKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "数据库密钥不可用")
+		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable")
 		return
 	}
 	conns, err := dbproxy.List(h.cfg.DBStore, key)
@@ -118,7 +118,7 @@ func requireToken(token string, next http.Handler) http.Handler {
 			if delay > 0 {
 				time.Sleep(delay)
 			}
-			writeAPIError(w, http.StatusUnauthorized, "auth_required", "访问令牌无效或缺失（请查看 'vaulty-keeper serve' 打印的 URL）")
+			writeAPIError(w, http.StatusUnauthorized, "auth_required", "invalid or missing access token (see the URL printed by 'vaulty-keeper serve')")
 			return
 		}
 		mu.Lock()
@@ -181,7 +181,7 @@ type snapshotSummary struct {
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -189,7 +189,7 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) listSnapshots(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	refs, err := apollo.ListSnapshots(h.cfg.Dir)
@@ -224,7 +224,7 @@ func (h *handler) listSnapshots(w http.ResponseWriter, r *http.Request) {
 // snapshotView returns every item of one snapshot, each masked.
 func (h *handler) snapshotView(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	name := r.URL.Query().Get("name")
@@ -240,7 +240,7 @@ func (h *handler) snapshotView(w http.ResponseWriter, r *http.Request) {
 	s, err := apollo.Load(apollo.SnapPath(h.cfg.Dir, name, appID))
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("未找到快照 %q", name))
+			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("snapshot %q not found", name))
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_load_failed", err.Error())
@@ -271,7 +271,7 @@ func (h *handler) snapshotView(w http.ResponseWriter, r *http.Request) {
 // get returns one key's masked value.
 func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	name := r.URL.Query().Get("name")
@@ -292,7 +292,7 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 	s, err := apollo.Load(apollo.SnapPath(h.cfg.Dir, name, appID))
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("未找到快照 %q", name))
+			writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("snapshot %q not found", name))
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError, "snapshot_load_failed", err.Error())
@@ -300,7 +300,7 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	it, present := s.Items[key]
 	if !present {
-		writeAPIError(w, http.StatusNotFound, "key_not_found", fmt.Sprintf("快照 %q 中不存在 key %q", key, name))
+		writeAPIError(w, http.StatusNotFound, "key_not_found", fmt.Sprintf("key %q not found in snapshot %q", key, name))
 		return
 	}
 	v, err := s.DecryptItem(it, snapKey, sensitiveKey)
@@ -326,7 +326,7 @@ type safeChange struct {
 // values masked.
 func (h *handler) compare(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "方法不允许")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	from := r.URL.Query().Get("from")
@@ -377,7 +377,7 @@ func (h *handler) compare(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) loadError(w http.ResponseWriter, name string, err error) {
 	if os.IsNotExist(err) {
-		writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("未找到快照 %q", name))
+		writeAPIError(w, http.StatusNotFound, "snapshot_not_found", fmt.Sprintf("snapshot %q not found", name))
 		return
 	}
 	writeAPIError(w, http.StatusInternalServerError, "snapshot_load_failed", err.Error())
@@ -388,12 +388,12 @@ func (h *handler) loadError(w http.ResponseWriter, name string, err error) {
 func (h *handler) keys(w http.ResponseWriter) (snapKey, sensitiveKey []byte, ok bool) {
 	snapKey, err := h.cfg.SnapshotKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("快照密钥不可用（%s）；请运行 'vaulty-keeper apollo init' 或设置 %s", err, apollo.EnvKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "snapshot_key_unavailable", fmt.Sprintf("snapshot key unavailable (%s); run 'vaulty-keeper apollo init' or set %s", err, apollo.EnvKey))
 		return nil, nil, false
 	}
 	sensitiveKey, err = h.cfg.SensitiveKey()
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("敏感值密钥不可用（%s）；请运行 'vaulty-keeper sensitive init' 或设置 %s", err, apollo.EnvSensitiveKey))
+		writeAPIError(w, http.StatusServiceUnavailable, "sensitive_key_unavailable", fmt.Sprintf("sensitive-value key unavailable (%s); run 'vaulty-keeper sensitive init' or set %s", err, apollo.EnvSensitiveKey))
 		return nil, nil, false
 	}
 	return snapKey, sensitiveKey, true
@@ -434,7 +434,7 @@ func Start(ctx context.Context, cfg Config, addr string, hostDir string, out io.
 	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("监听 %s 失败：%w", addr, err)
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 	defer listener.Close()
 

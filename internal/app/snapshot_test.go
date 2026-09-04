@@ -236,7 +236,7 @@ func TestLoadErrorMentionsAppIDAndHints(t *testing.T) {
 		t.Fatal("expected an error for a missing snapshot")
 	}
 	msg := err.Error()
-	for _, want := range []string{`"test"（appid merdi）`, "appid a", "appid merdi2"} {
+	for _, want := range []string{`"test" (appid merdi)`, "appid a", "appid merdi2"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error missing %q:\n%s", want, msg)
 		}

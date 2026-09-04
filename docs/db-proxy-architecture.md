@@ -65,11 +65,11 @@
   mysqlnative← mysql://nativeuser:nativepass@127.0.0.1:59919/shop
   cache     ← redis://:redispass@127.0.0.1:59920/0
 
-serve 为每个连接开一个隧道端口，AI 侧拿到的"地址"：
-  PostgreSQL:  jdbc:postgresql://127.0.0.1:15432/appdb?user=<TOKEN>
+serve 为每个连接开一个隧道端口，AI 侧拿到的"地址"（链接统一带 user+password，token 在 PG/MySQL 的 user 字段 / Redis 的 AUTH 密码，另一字段是占位 `x`）：
+  PostgreSQL:  jdbc:postgresql://127.0.0.1:15432/appdb?user=<TOKEN>&password=x
   MySQL(sha2): 127.0.0.1:15435  user=<TOKEN> 密码任意
   MySQL(native):127.0.0.1:15436 user=<TOKEN> 密码任意
-  Redis:       127.0.0.1:15434  AUTH <TOKEN>
+  Redis:       127.0.0.1:15434  AUTH <TOKEN>（URL 形式 redis://x:<TOKEN>@.../0）
 ```
 
 注意：**隧道端口（15432/15435/15436/15434）是固定的**（注册时 `--port` 指定或自动分配并写入 db.json）；**容器宿主端口（59918/59919/59920）是动态的**，每次重跑 `scripts/dbtest.sh` 会变。AI 只需要隧道端口，不需要知道容器端口。
@@ -103,6 +103,7 @@ db.json（磁盘密文，权限 0600，无任何明文）◄── 快照密钥/
 | DB Key 在系统密钥库 | 防其他用户 / 其他机器 / 意外明文 |
 | 真实凭据只进 host 内存 | 日志、回包、客户端、AI 环境全部接触不到 |
 | token 门控 | 防"无 token 的第三方"（局域网暴露 0.0.0.0 时兜底）。token 为**连接专属**（128 位随机，`db add` 生成、随 URL 一并加密落盘），`db regen <name>|--all` 可轮换、旧 token 立即失效；未升级的旧连接回退全局 bridge token（掩码桥同款） |
+| 隧道开关 | 隧道**默认开启**；`db on/off <name>|--all` 按连接关闭（端口完全停止监听）/恢复，状态持久化在 db.json，serve 每 2 秒同步热加载；不需要暴露的连接随时关掉 |
 
 ---
 
