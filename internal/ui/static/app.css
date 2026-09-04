@@ -39,7 +39,6 @@ aside{background:var(--rail);border-right:1px solid var(--line);padding:16px 12p
 .item.active{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
 .item .count{color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums;margin-left:8px}
 .foot{border-top:1px solid var(--line);padding:13px 9px 3px;display:flex;gap:10px;align-items:center}
-.avatar{width:28px;height:28px;border-radius:50%;background:#e4dcd3;display:grid;place-items:center;color:#6e665d;font-size:12px;font-weight:600;flex:none}
 .foot b{display:block;font-size:13px;color:#4a4641}
 .foot span{font-size:11.5px;color:var(--faint)}
 
