@@ -357,7 +357,7 @@ func TestEdit(t *testing.T) {
 
 	// fake editor: appends a new key and changes FOO
 	editor := filepath.Join(dir, "editor.sh")
-	os.WriteFile(editor, []byte("#!/bin/sh\nsed -i '' 's/FOO = 1/FOO = 9/' \"$1\"\nprintf 'NEW_KEY = 3\\n' >> \"$1\"\n"), 0o700)
+	os.WriteFile(editor, []byte("#!/bin/sh\nsed 's/FOO = 1/FOO = 9/' \"$1\" > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"\nprintf 'NEW_KEY = 3\\n' >> \"$1\"\n"), 0o700)
 
 	if code := Run([]string{"apollo", "edit", "prod", "--editor", editor, "--dir", snap, "--appid", "app-x"}); code != 0 {
 		t.Fatalf("edit failed with code %d", code)
