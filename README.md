@@ -49,13 +49,15 @@ vaulty-keeper ui --allow-plaintext    # explicitly enable plaintext endpoints (s
 - Covers all features: snapshot browse/search/CRUD, import, env comparison, plaintext edit, export (download or copy), AES encrypt/decrypt (manual key/iv), snapshot and sensitive key initialization, **database tunnels** (register/test connections, generate client commands, rotate tunnel tokens, view the real URL with `--allow-plaintext`).
 - Plaintext output (view / plaintext edit / export / AES decrypt) requires a second confirmation and responses carry `Cache-Control: no-store`; the browser never persists plaintext.
 - Snapshot contents are never persisted in the browser.
-- The UI defaults to **English** and can be switched to Chinese (中文) from the selector in the top bar. The choice is remembered in `localStorage` and mirrored to the shared preference file, so the CLI follows it too (see [Language](#language-ui--cli)).
+- The UI defaults to **English** and can be switched to Chinese (中文) with the toggle in the top bar. The choice is remembered in `localStorage` and mirrored to the shared preference file, so the CLI follows it too (see [Language](#language-ui--cli)).
+>
+> A page-by-page guide to the UI (features & usage) lives in **[`docs/ui-guide.md`](docs/ui-guide.md)** ([中文版](docs/ui-guide.zh-CN.md)).
 
 ## Language (UI & CLI)
 
 The whole tool is bilingual (English / 中文) and the UI and CLI share one language setting.
 
-- The **web UI** defaults to English; the top-bar selector switches to 中文 and back. The choice is remembered per browser (`localStorage`) and pushed to the shared preference file `~/.vaulty/prefs.json` (0600). A first visit in a fresh browser adopts the shared setting (e.g. set by the CLI).
+- The **web UI** defaults to English; the top-bar toggle switches to 中文 and back. The choice is remembered per browser (`localStorage`) and pushed to the shared preference file `~/.vaulty/prefs.json` (0600). A first visit in a fresh browser adopts the shared setting (e.g. set by the CLI).
 - The **CLI** prints the same language as the UI: command tree, `-h` output, usage paragraphs, runtime messages and prompts are all localized.
 - `vaulty-keeper lang` prints the current language; `vaulty-keeper lang zh|en` writes the shared preference (works on a non-TTY too).
 - `VAULTY_KEEPER_LANG=en|zh` overrides the file (highest priority).
@@ -72,7 +74,7 @@ Shell-completion descriptions and low-level library errors stay English; on a Ch
 
 ## vaulty-keeper apollo — Apollo snapshot tool
 
-> A walkthrough of the snapshot implementation (encrypted file layout / dual-key design / sensitive detection / masking & fingerprints / explicit allowlisting) with tested examples lives in **[`docs/apollo-snapshot-guide.md`](docs/apollo-snapshot-guide.md)** (Chinese).
+> A walkthrough of the snapshot implementation (encrypted file layout / dual-key design / sensitive detection / masking & fingerprints / explicit allowlisting) with tested examples lives in **[`docs/apollo-snapshot-guide.md`](docs/apollo-snapshot-guide.md)** ([中文版](docs/apollo-snapshot-guide.zh-CN.md)).
 
 A fallback for when the Apollo Open API is unavailable: copy key-value pairs from the Apollo portal, import them into an encrypted snapshot, and let AI/scripts read, compare and modify them safely. Snapshots live in `~/.vaulty/apollo/<name>.json` by default (override with `--dir` or `VAULTY_KEEPER_APOLLO_DIR`).
 
@@ -271,8 +273,8 @@ Put the agent on another machine or Windows WSL2; the host's `vaulty-keeper serv
 
 ## Database tunnel proxy (AI queries DBs, DSN never exposed)
 
-> Full ASCII diagrams (what's in Docker / where credentials live / auth injection for three DBs / security boundary / sequence) live in **[`docs/db-proxy-architecture.md`](docs/db-proxy-architecture.md)** (Chinese).
-> Many tested usage examples (multi-connection / client commands / container AI / permissions / scripts) live in **[`docs/db-proxy-examples.md`](docs/db-proxy-examples.md)** (Chinese).
+> Full ASCII diagrams (what's in Docker / where credentials live / auth injection for three DBs / security boundary / sequence) live in **[`docs/db-proxy-architecture.md`](docs/db-proxy-architecture.md)** ([中文版](docs/db-proxy-architecture.zh-CN.md)).
+> Many tested usage examples (multi-connection / client commands / container AI / permissions / scripts) live in **[`docs/db-proxy-examples.md`](docs/db-proxy-examples.md)** ([中文版](docs/db-proxy-examples.zh-CN.md)).
 
 Lets an AI in a container/isolated domain query databases with **native clients** (psql / mysql / redis-cli) and get real data, while the database connection URL (host/account/password) is **never exposed to the AI**. URLs exist only as ciphertext in vaulty-keeper on the host (independent DB key, `VAULTY_KEEPER_DB_KEY` / OS secret store); `serve` opens one TCP tunnel per connection, injects the real credentials during the handshake, then forwards raw bytes.
 

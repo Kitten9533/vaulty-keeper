@@ -159,15 +159,14 @@ const I18N = {
     'aes.error.input': 'Please fill in the input.',
     'aes.copied': 'Copied to clipboard.',
     'aes.copy-failed': 'Copy failed.',
-    'db.key-ok': 'Database key available (Keychain or env var)',
-    'db.key-missing': 'Database key unavailable; generate one below',
     'db.count': '{n} connections',
     'db.empty': 'No connections yet. Fill in the name and URL on the left to register one; the vaulty-keeper serve on the host automatically opens a local tunnel for it.',
     'db.broken': 'Key mismatch',
     'db.broken-title': 'Cannot decrypt with the current key',
     'db.state.on': 'On',
     'db.state.off': 'Off',
-    'db.test': 'Test',
+    'db.test': 'Test conn',
+    'db.test-title': 'Test the real registered connection directly with its decrypted URL (not the tunnel)',
     'db.connect': 'Connect info',
     'db.regen': 'Regenerate',
     'db.regen-title': 'Regenerate the tunnel token; old links stop working immediately',
@@ -403,15 +402,14 @@ const I18N = {
     'aes.error.input': '请填写输入内容。',
     'aes.copied': '已复制到剪贴板。',
     'aes.copy-failed': '复制失败。',
-    'db.key-ok': '数据库密钥可用（Keychain 或环境变量）',
-    'db.key-missing': '数据库密钥不可用，点击下方按钮生成本机密钥',
     'db.count': '{n} 条',
     'db.empty': '暂无连接，在左侧填写名称与数据库 URL 并注册；注册后 host 上的 vaulty-keeper serve 会自动为它开启一条本地隧道',
     'db.broken': '密钥不匹配',
     'db.broken-title': '无法用当前密钥解密',
     'db.state.on': '开',
     'db.state.off': '关',
-    'db.test': '测试',
+    'db.test': '测试连接',
+    'db.test-title': '用注册的真实 URL 直连测试（不走隧道）',
     'db.connect': '连接信息',
     'db.regen': '重新生成',
     'db.regen-title': '重新生成隧道 token，旧链接立即失效',
@@ -543,8 +541,9 @@ function applyI18n() {
     const v = t(el.dataset.i18nTitle);
     if (v != null) el.setAttribute('title', v);
   });
-  const sel = $('lang-select');
-  if (sel) sel.value = LANG;
+  document.querySelectorAll('#lang-toggle [data-lang]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.lang === LANG);
+  });
 }
 
 // setLang switches the language, persists it, and re-renders every surface.
@@ -754,20 +753,11 @@ function showDBError(msg) {
 }
 
 async function loadDB() {
-  const status = $('db-key-status');
   const initBtn = $('db-init-btn');
   try {
     const ks = await api('/api/db/key');
-    if (ks.available) {
-      status.textContent = t('db.key-ok');
-      status.className = 'status-line ok';
-      initBtn.hidden = true;
-    } else {
-      throw new Error('unavailable');
-    }
+    initBtn.hidden = ks.available;
   } catch (_) {
-    status.textContent = t('db.key-missing');
-    status.className = 'status-line warn';
     initBtn.hidden = false;
   }
   try {
@@ -804,7 +794,7 @@ function renderDBTable() {
     const actions = c.broken
       ? `<td class="row-actions"><button class="row-del" type="button" data-db-action="rm" data-name="${escapeHtml(c.name)}">${escapeHtml(t('db.rm'))}</button></td>`
       : `<td class="row-actions">
-          <button class="ghost" type="button" data-db-action="test" data-name="${escapeHtml(c.name)}">${escapeHtml(t('db.test'))}</button>
+          <button class="ghost" type="button" data-db-action="test" data-name="${escapeHtml(c.name)}" title="${escapeHtml(t('db.test-title'))}">${escapeHtml(t('db.test'))}</button>
           <button class="ghost" type="button" data-db-action="connect" data-name="${escapeHtml(c.name)}">${escapeHtml(t('db.connect'))}</button>
           <button class="ghost" type="button" data-db-action="regen" data-name="${escapeHtml(c.name)}" title="${escapeHtml(t('db.regen-title'))}">${escapeHtml(t('db.regen'))}</button>
           ${c.disabled
@@ -2258,7 +2248,10 @@ function wire() {
   $('nav-db').addEventListener('click', () => switchView('db'));
   $('nav-settings').addEventListener('click', () => switchView('settings'));
 
-  $('lang-select').addEventListener('change', (e) => setLang(e.target.value));
+  $('lang-toggle').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-lang]');
+    if (btn) setLang(btn.dataset.lang);
+  });
 
   $('db-init-btn').addEventListener('click', dbInit);
   $('db-add-btn').addEventListener('click', dbAdd);

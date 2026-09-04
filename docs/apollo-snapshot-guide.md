@@ -1,67 +1,75 @@
-# vaulty-keeper Apollo 快照 · 使用示例与实现讲解
+# vaulty-keeper Apollo snapshots · usage walkthrough & implementation notes
 
-> 讲解"从 Apollo 门户粘贴配置 → 加密落盘 → AI 安全读取"这条链路是怎么实现的：快照文件长什么样、双密钥怎么分工、敏感值怎么识别、AI 为什么只能拿到掩码、以及怎么显式放行/判断一致性。
-> 配套：`README.md`（命令全表）、`docs/db-proxy-architecture.md`（数据库隧道图解）。
+> [中文](apollo-snapshot-guide.zh-CN.md) | English
+>
+> Explains how the "paste config from the Apollo portal → encrypted to disk → AI-safe reads" chain works: what a snapshot file looks like, how the two keys divide the work, how sensitive values are detected, why AI can only ever get masks, and how to explicitly allowlist / compare for consistency.
+> Companion: `README.md` (full command reference), `docs/db-proxy-architecture.md` (DB tunnel diagrams).
 
 ---
 
-## 图 1 · 总览：一图看懂全链路
+## Figure 1 · Overview: the whole chain in one picture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Apollo 门户（配置中心）                                               │
-│   复制 KEY = value 文本 —— 明文只出现在"你手动粘贴导入"这一刻             │
+│ Apollo portal (config center)                                       │
+│   copy KEY = value text — plaintext appears only while you paste it │
 └──────────────────────┬──────────────────────────────────────────────┘
                        │  vaulty-keeper apollo import prod.txt --name prod --appid merdi
                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Host：~/.vaulty/apollo/{env}__{appid}.json   （0600，磁盘无明文）        │
+│ Host: ~/.vaulty/apollo/{env}__{appid}.json   (0600, no plaintext    │
+│       on disk)                                                      │
 │                                                                     │
-│   items：KEY → { enc(AES-256-GCM 密文), nonce(随机), secret }         │
-│     secret=false → 快照密钥加密        secret=true → 敏感值密钥加密     │
-│   两把密钥都在系统密钥库（Keychain / env VAULTY_KEEPER_*_KEY 兜底）     │
-└───────┬──────────────────────────┬────────────────────┬──────────────┘
-        │ ① 用户本人 TTY           │ ② AI / 脚本（非 TTY）│ ③ 容器内 AI（隔离域）
-        ▼                         ▼                    ▼
+│   items: KEY → { enc(AES-256-GCM ciphertext), nonce(random),        │
+│           secret }                                                  │
+│     secret=false → snapshot key    secret=true → sensitive key      │
+│   both keys live in the system keyring (Keychain / env              │
+│   VAULTY_KEEPER_*_KEY fallback)                                     │
+└───────┬──────────────────────────┬────────────────────┬─────────────┘
+        │ ① your own TTY          │ ② AI / scripts      │ ③ AI in a   │
+        │                         │    (non-TTY)        │    container│
+        ▼                         ▼                     ▼   (isolated)│
 ┌───────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
-│ get/list/compare  │  │ get/list/compare      │  │ remote list/get/…    │
-│ reveal/export/edit│  │  → 掩码 + 长度 + 指纹  │  │  （经 serve 掩码桥，   │
-│  → 明文（含敏感值） │  │ 明文命令一律拒绝        │  │   永远只有掩码）      │
+│ get/list/compare  │  │ get/list/compare      │  │ remote list/get/…   │
+│ reveal/export/edit│  │  → mask + length +    │  │  (via serve mask    │
+│  → plaintext      │  │    fingerprint        │  │   bridge, masks     │
+│  (incl. sensitive)│  │  plaintext commands   │  │   only, always)     │
+│                   │  │  always rejected      │  │                     │
 └───────────────────┘  └──────────────────────┘  └──────────────────────┘
 ```
 
-一句话：**配置只在导入/导出那一刻以明文出现，其余时间全是密文；AI/脚本默认只能拿到掩码+长度+指纹，明文出口只在你自己终端可用；容器 AI 要拿任何配置（哪怕掩码），都只有经 serve 那一条路。**
+In one sentence: **config appears as plaintext only at import/export time; the rest of the time it is ciphertext. AI/scripts get only mask + length + fingerprint by default; plaintext exits are available only on your own terminal. A containerized AI can reach any config (even masked) only through `serve`.**
 
 ---
 
-## 1 · 一分钟上手
+## 1 · One-minute start
 
 ```sh
-# ① 首次：两把密钥进系统密钥库（macOS Keychain / Windows 凭据管理器 / Linux Secret Service）
-vaulty-keeper apollo init        # 快照密钥（加密非敏感值）
-vaulty-keeper sensitive init     # 敏感值密钥（加密敏感值）
+# ① First run: both keys go into the system keyring (macOS Keychain / Windows Credential Manager / Linux Secret Service)
+vaulty-keeper apollo init        # snapshot key (encrypts non-sensitive values)
+vaulty-keeper sensitive init     # sensitive-value key (encrypts sensitive values)
 
-# ② 从 Apollo 门户复制 KEY=value 文本，导入加密快照
-#    --appid 必填；--name 省略时取文件名；已存在需 --force
+# ② Copy KEY=value text from the Apollo portal and import an encrypted snapshot
+#    --appid is required; --name defaults to the file name; existing snapshots need --force
 vaulty-keeper apollo import prod.txt --name prod --appid merdi
 #   imported 4 entries into snapshot "prod" (appid merdi) (~/.vaulty/apollo/prod__merdi.json)
 
-# ③ 列出（默认掩码，AI 友好）
+# ③ List (masked by default, AI-friendly)
 vaulty-keeper apollo list prod --appid merdi --json
 #   { "name": "prod", "app_id": "merdi", "items": {
 #     "API_SECRET": "*** (12 chars)", "APP_NAME": "*** (5 chars)", ... } }
 
-# ④ 读单个值（非 TTY 下只对标记安全的 key 给明文，见 §6）
+# ④ Read a single value (non-TTY prints plaintext only for keys explicitly marked safe, see §6)
 vaulty-keeper apollo get prod APP_NAME --appid merdi
 ```
 
-快照默认存 `~/.vaulty/apollo/`，以「环境名 + AppID」寻址 `{env}__{appid}.json`；旧版无 AppID 的快照是 `{env}.json`，不传 `--appid` 读取。
+Snapshots default to `~/.vaulty/apollo/`, addressed as `{env}__{appid}.json` (env name + AppID); legacy snapshots without an AppID are `{env}.json` and are read without `--appid`.
 
 ---
 
-## 2 · 加密落盘长什么样（快照文件结构）
+## 2 · What the encrypted snapshot looks like (file layout)
 
-导入上面 4 个值后，`~/.vaulty/apollo/prod__merdi.json`（权限 0600）实际内容：
+After importing the 4 values above, `~/.vaulty/apollo/prod__merdi.json` (mode 0600) actually contains:
 
 ```json
 {
@@ -90,89 +98,89 @@ vaulty-keeper apollo get prod APP_NAME --appid merdi
 }
 ```
 
-要点（`internal/apollo/store.go`）：
+Key points (`internal/apollo/store.go`):
 
-- **值全部是密文**：每条 value 用 AES-256-GCM 单独加密，`enc` = Base64 密文，`nonce` = 该条独立的随机 nonce（每条不同，相同明文密文也不同）。磁盘上没有任何明文值。
-- **`secret` 字段标记加密用哪把钥匙**：`true` = 用敏感值密钥，`false` = 用快照密钥（§3）。
-- **`meta.captured_at`** 记录导入时刻（UTC RFC3339）。
-- 文件名 `prod__merdi.json` 里 `__` 是分隔符，`{env}__{appid}.json`（`internal/apollo/store.go:88` 的 `FileName`）。
+- **Every value is ciphertext**: each value is encrypted independently with AES-256-GCM; `enc` = Base64 ciphertext, `nonce` = a per-entry random nonce (different per entry, so identical plaintext yields different ciphertext). No plaintext value ever touches disk.
+- **The `secret` field selects which key encrypted it**: `true` = sensitive-value key, `false` = snapshot key (§3).
+- **`meta.captured_at`** records the import time (UTC RFC3339).
+- In the file name `prod__merdi.json`, `__` is the separator, i.e. `{env}__{appid}.json` (`FileName` in `internal/apollo/store.go:88`).
 
 ---
 
-## 3 · 双密钥分工：为什么敏感值要单独一把钥匙
+## 3 · Why sensitive values need their own key
 
-两把独立密钥，都在系统密钥库（`internal/apollo/keyring.go`），均可环境变量覆盖：
+Two independent keys, both in the system keyring (`internal/apollo/keyring.go`), both overridable via environment variables:
 
-| 密钥 | Keychain account | 环境变量 | 加密对象 |
+| Key | Keychain account | Env var | Encrypts |
 |---|---|---|---|
-| 快照密钥 | `apollo-snapshot-key` | `VAULTY_KEEPER_APOLLO_KEY` | 非敏感值（secret=false） |
-| 敏感值密钥 | `sensitive-key` | `VAULTY_KEEPER_SENSITIVE_KEY` | 敏感值（secret=true） |
+| Snapshot key | `apollo-snapshot-key` | `VAULTY_KEEPER_APOLLO_KEY` | non-sensitive values (secret=false) |
+| Sensitive key | `sensitive-key` | `VAULTY_KEEPER_SENSITIVE_KEY` | sensitive values (secret=true) |
 
-安全价值：**快照密钥泄露（比如误发到别处）也解不开敏感值**——敏感值被敏感值密钥加密，而 `apollo init` 和 `sensitive init` 是两次独立的密钥生成。`reveal`/`--reveal` 显示敏感值明文必须同时有敏感值密钥（`internal/app/snapshot.go` 的 `DecryptItem` 按 `secret` 选钥匙）。
+Security value: **a leaked snapshot key (e.g. sent somewhere by mistake) still can't decrypt sensitive values** — sensitive values are encrypted with the sensitive key, and `apollo init` / `sensitive init` are two independent key generations. Showing sensitive plaintext via `reveal`/`--reveal` requires the sensitive key (`DecryptItem` in `internal/app/snapshot.go` picks the key by `secret`).
 
-> env 覆盖只在无密钥库的环境（如 Linux 无头服务器没有 Secret Service）兜底，属于红线密钥：不要导进 AI 会话、不要放命令行参数。
+> Env overrides only fall back for environments without a keyring (e.g. Linux headless servers without Secret Service). They are red-line keys: don't export them into an AI session, don't pass them as command-line arguments.
 
 ---
 
-## 4 · 敏感识别：什么会被自动标成 secret
+## 4 · Sensitive detection: what gets auto-marked secret
 
-导入时自动判断（`internal/apollo/mask.go` 的 `IsSensitiveKeyValue`），命中任一条 → `secret=true`：
+Automatic detection at import time (`IsSensitiveKeyValue` in `internal/apollo/mask.go`); any match → `secret=true`:
 
-1. **key 名命中**（不区分大小写）：
+1. **Key name match** (case-insensitive):
    `password|passwd|pwd|token|secret|salt|credential|private|access[_-]?key|secret[_-]?key|api[_-]?key`
-   → `API_SECRET`、`CMS_SECRET`、`SENTRY_AUTH_TOKEN`、`MONGODB_URI`… 全中。
-2. **带凭据的 URI/DSN**：key 名含 `uri|url|dsn|connection|endpoint|addr|address`，**且**值形如 `scheme://user[:password]@host`
-   → `REDIS_URI=redis://:pw@r-abc...:6379/0` 中；纯 URL 不带 `@` 凭据（如 `https://example.com/api`）不中。
-3. **JWT**：值形如 `eyJ...` 三段 base64url → `SUPABASE_SERVICE_ROLE_KEY` 这类中。
+   → `API_SECRET`, `CMS_SECRET`, `SENTRY_AUTH_TOKEN`, `MONGODB_URI`… all match.
+2. **URI/DSN with embedded credentials**: key name contains `uri|url|dsn|connection|endpoint|addr|address`, **and** the value looks like `scheme://user[:password]@host`
+   → `REDIS_URI=redis://:pw@r-abc...:6379/0` matches; a plain URL without `@` credentials (e.g. `https://example.com/api`) does not.
+3. **JWT**: value shaped like `eyJ...` with three base64url segments → e.g. `SUPABASE_SERVICE_ROLE_KEY`.
 
-原则是**宁多掩不漏掩**：自动识别不写回文件（导入后 `secret` 是本次判定结果；`set` 不带 `--plain/--secret` 时保留已有条目的原判定）。
+Principle: **err on the side of masking**. Auto-detection is not written back to the file (`secret` is this run's verdict; `set` without `--plain/--secret` keeps the existing entry's verdict).
 
 ---
 
-## 5 · 反转默认：AI 为什么只能拿到掩码
+## 5 · Reversed default: why AI only gets masks
 
-非 TTY（脚本 / AI）下的输出规则（`internal/cli/cli.go` 的 `maskedFor`）：
+Output rules for non-TTY (scripts / AI) (`maskedFor` in `internal/cli/cli.go`):
 
-- **默认全部掩码**，不靠 key 名猜测——`get`/`list`/`compare` 对**未显式标记安全**的 key 一律输出 `*** (n chars)`（`MaskWithLen`，保留长度信息）。
-- 只有 `set --plain` / `mark --plain` **显式标记为安全**的 key 才输出明文。
-- 明文出口（`reveal`/`export`/`edit`/`list|compare --reveal`/`aes decrypt`）**非交互终端一律拒绝，加 `--yes` 也无法放行**——只在用户本人 TTY 可用。
+- **Everything is masked by default** — no guessing from key names. `get`/`list`/`compare` print `*** (n chars)` for any key **not explicitly marked safe** (`MaskWithLen`, length preserved).
+- Only keys **explicitly marked safe** with `set --plain` / `mark --plain` print plaintext.
+- Plaintext exits (`reveal`/`export`/`edit`/`list|compare --reveal`/`aes decrypt`) are **always rejected on non-interactive terminals, even with `--yes`** — TTY only, on your own terminal.
 
 ```sh
-vaulty-keeper apollo get prod REDIS_URI --appid merdi     # 非 TTY → *** (43 chars)
-vaulty-keeper apollo get prod APP_NAME --appid merdi      # 未放行 → *** (5 chars)
+vaulty-keeper apollo get prod REDIS_URI --appid merdi     # non-TTY → *** (43 chars)
+vaulty-keeper apollo get prod APP_NAME --appid merdi      # not allowlisted → *** (5 chars)
 ```
 
-TTY 下则是老启发式：敏感名字/内联凭据掩码，`--reveal` 显示明文。
+On a TTY the old heuristics apply: sensitive names / inline credentials are masked, `--reveal` shows plaintext.
 
 ---
 
-## 6 · 显式放行：set --plain / mark --plain
+## 6 · Explicit allowlist: set --plain / mark --plain
 
 ```sh
-# set 时直接标记
+# mark at set time
 vaulty-keeper apollo set prod NEXT_PUBLIC_SAFE_FLAG true --plain --appid merdi
 
-# 或对已有 key 只翻标记（不改值）
+# or flip the flag of an existing key without changing its value
 vaulty-keeper apollo mark prod APP_NAME --plain --appid merdi
-vaulty-keeper apollo mark prod APP_NAME --secret --appid merdi   # 撤销放行
+vaulty-keeper apollo mark prod APP_NAME --secret --appid merdi   # revoke the allowlist
 ```
 
-放行后写回文件的 `safe:true`，非 TTY 的 `get`/`list` 才给明文：
+After allowlisting, `safe:true` is written back to the file, and non-TTY `get`/`list` print plaintext:
 
 ```json
 "APP_NAME": { "enc": "...", "nonce": "...", "secret": false, "safe": true }
 ```
 
-**防误标守卫**（`guardPlainMark`）：`--plain` 命中的 key 名/值看起来是敏感内容时，非 TTY 一律拒绝、TTY 需二次确认——防止误把 `API_SECRET` 标成"安全"漏给 AI。
+**Mis-flag guard** (`guardPlainMark`): when `--plain` hits a key whose name/value looks sensitive, non-TTY is always rejected and a TTY needs a second confirmation — prevents accidentally marking `API_SECRET` as "safe" and leaking it to AI.
 
 ---
 
-## 7 · 指纹：掩码下怎么判断"两个值是否一致"
+## 7 · Fingerprints: judging "are two values the same" under masks
 
-掩码只给长度，同长度的不同值看不出区别。`remote compare`/`remote get` 额外给 **HMAC-SHA256 指纹**（8 字节 hex，`internal/apollo/mask.go` 的 `Fingerprint`）：
+A mask only gives the length, so different values of the same length look identical. `remote compare`/`remote get` additionally give an **HMAC-SHA256 fingerprint** (8-byte hex, `Fingerprint` in `internal/apollo/mask.go`):
 
-- 指纹密钥 = 快照密钥：**密钥不泄露时无法离线枚举弱值来匹配指纹**。
-- 判断两环境某 key 是否一致：**长度相同 + 指纹相同 → 值相同**，全程不出现明文。
+- Fingerprint key = snapshot key: **without the key, weak values can't be brute-forced offline to match a fingerprint**.
+- Judging whether a key matches between two environments: **same length + same fingerprint → same value**, with no plaintext ever shown.
 
 ```sh
 vaulty-keeper remote compare prod test --appid merdi --appid-to merdi2 --json
@@ -180,47 +188,47 @@ vaulty-keeper remote compare prod test --appid merdi --appid-to merdi2 --json
 #                                   "new": {"value":"*** (43 chars)","fingerprint":"9c11..."} } } }
 ```
 
-指纹不同 → 值不同，即使长度一样。**判断一致性用 compare，不要 get 明文**（这是给 AI 的安全姿势）。
+Different fingerprint → different value, even at the same length. **Judge consistency with `compare`, never `get` plaintext** (the safe posture for AI).
 
 ---
 
-## 8 · 导入解析规则（粘贴文本怎么被理解）
+## 8 · Import parsing rules (how pasted text is understood)
 
-`internal/apollo/parser.go` 的 `ParseKV`：
+`ParseKV` in `internal/apollo/parser.go`:
 
-- 每行 `KEY = value`，按**第一个 `=`** 分割，两侧去空格，value 可含 `=`。
-- 空行、行首 `#` 的整行（单行/多行注释）跳过。
-- **粘连自动拆分**：一行内粘在一起的多个 `KEY = ` 条目自动拆开并告警（如 `A = 1B = 2`），同时避免误拆 URL 查询参数（`...?TOKEN=1` 前的 `?` 不是 glue）。
-- key 校验 `[A-Za-z_][A-Za-z0-9_.-]*`，非法行跳过并告警。
-- 值两侧成对引号会被剥掉（`"merdi"` ≡ `merdi`）。
+- Each line is `KEY = value`, split on the **first `=`**, trimmed on both sides; values may contain `=` inside.
+- Blank lines and whole lines starting with `#` (single- or multi-line comments) are skipped.
+- **Auto-splitting of glued entries**: multiple `KEY = ` entries glued into one line are split apart with a warning (e.g. `A = 1B = 2`), while URL query params are not mis-split (a `?` before `...?TOKEN=1` is not glue).
+- Key validation `[A-Za-z_][A-Za-z0-9_.-]*`; invalid lines are skipped with a warning.
+- Matching pairs of quotes around a value are stripped (`"merdi"` ≡ `merdi`).
 
 ---
 
-## 9 · 明文命令：reveal / export / edit（仅你的 TTY）
+## 9 · Plaintext commands: reveal / export / edit (your TTY only)
 
 ```sh
-vaulty-keeper apollo reveal prod --appid merdi API_SECRET      # 单个敏感值明文
-vaulty-keeper apollo reveal prod --appid merdi --json          # 多个 key 的 JSON
-vaulty-keeper apollo export prod --appid merdi                 # 全量 KEY = value（粘贴回 Apollo）
-vaulty-keeper apollo export prod --appid merdi --copy          # 直接进剪贴板
-vaulty-keeper apollo edit prod --appid merdi                   # $EDITOR 打开明文，保存后自动重新加密
+vaulty-keeper apollo reveal prod --appid merdi API_SECRET      # single sensitive value in plaintext
+vaulty-keeper apollo reveal prod --appid merdi --json          # JSON for multiple keys
+vaulty-keeper apollo export prod --appid merdi                 # full KEY = value (paste back to Apollo)
+vaulty-keeper apollo export prod --appid merdi --copy          # straight to the clipboard
+vaulty-keeper apollo edit prod --appid merdi                   # open in $EDITOR, save → auto re-encrypt
 ```
 
-- 全部**只在交互式终端可用**；脚本/AI 一律拒绝（`internal/cli/cli.go` 各命令入口的 `isTerminal()` 门禁）。
-- `edit` 流程 = `Export` 明文到临时文件（0600）→ 编辑器 → `ParseKV` 解析 → 整份重新加密写回（`app.EditLoad`/`EditApply`），编辑时不用手动管两把钥匙。
+- All **work only on an interactive terminal**; scripts/AI are always rejected (the `isTerminal()` gate at each command entry in `internal/cli/cli.go`).
+- `edit` flow = `Export` plaintext to a temp file (0600) → editor → `ParseKV` → full re-encrypt and write back (`app.EditLoad`/`EditApply`); you don't manage the two keys by hand while editing.
 
 ---
 
-## 10 · 常见场景速查
+## 10 · Common scenarios at a glance
 
-| 想干什么 | 命令 |
+| What you want | Command |
 |---|---|
-| 从 Apollo 复制配置落地 | `apollo import prod.txt --name prod --appid merdi` |
-| 列出全部快照 | `apollo list` |
-| AI 读某个值（掩码） | `apollo get prod KEY --appid merdi` |
-| AI 判断两环境是否一致 | `apollo compare prod test --appid merdi --appid-to merdi2 --json` |
-| 给 AI 放行一个确定安全的 key | `set prod KEY v --plain` / `mark prod KEY --plain` |
-| 撤销放行 | `mark prod KEY --secret` |
-| 看敏感值明文（自己 TTY） | `apollo reveal prod KEY --appid merdi` |
-| 整份导出/编辑 | `apollo export prod --appid merdi` / `apollo edit prod --appid merdi` |
-| 报错"快照不存在" | 看提示里的**相近快照**（同 env 的其他 appid），多半是 `--appid` 拼错 |
+| Land config copied from Apollo | `apollo import prod.txt --name prod --appid merdi` |
+| List all snapshots | `apollo list` |
+| AI reads a value (masked) | `apollo get prod KEY --appid merdi` |
+| AI checks two environments match | `apollo compare prod test --appid merdi --appid-to merdi2 --json` |
+| Allowlist a definitely-safe key for AI | `set prod KEY v --plain` / `mark prod KEY --plain` |
+| Revoke the allowlist | `mark prod KEY --secret` |
+| View sensitive plaintext (your TTY) | `apollo reveal prod KEY --appid merdi` |
+| Full export / edit | `apollo export prod --appid merdi` / `apollo edit prod --appid merdi` |
+| "Snapshot not found" error | look for the **similar snapshots** in the hint (other appids of the same env) — usually a typo in `--appid` |

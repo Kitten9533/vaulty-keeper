@@ -42,11 +42,10 @@
     <header class="topbar">
       <div id="breadcrumb" class="crumb"></div>
       <div class="topbar-actions">
-        <select id="lang-select" class="lang-select" aria-label="Language">
-          <option value="en">English</option>
-          <option value="zh">中文</option>
-        </select>
-        <button class="more" type="button" aria-label="More actions">•••</button>
+        <div class="lang-toggle" id="lang-toggle" role="group" aria-label="Language">
+          <button type="button" data-lang="en">EN</button>
+          <button type="button" data-lang="zh">中文</button>
+        </div>
       </div>
     </header>
 
@@ -137,7 +136,6 @@
         </div>
         <div id="db-error" class="error-region" hidden></div>
         <div id="db-keyline" class="db-keyline">
-          <span id="db-key-status" class="status-line" data-i18n="checking">Checking…</span>
           <button class="primary" type="button" id="db-init-btn" hidden data-i18n="db.init-btn">Initialize database key</button>
         </div>
         <div class="db-layout">

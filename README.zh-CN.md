@@ -50,6 +50,8 @@ vaulty-keeper ui --allow-plaintext    # 显式开启明文接口（见下）
 - 明文出口（显示 / 明文编辑 / 导出 / AES 解密）均需二次确认后才显示，响应 `Cache-Control: no-store`，浏览器不持久化明文。
 - 浏览器端不持久化快照内容。
 - UI **默认英文**，顶栏选择器可切换中文/英文；选择会记在浏览器 `localStorage` 并同步到共享偏好文件，CLI 输出语言跟随（见下「语言（UI 与 CLI）」）。
+>
+> 逐页讲解 UI 功能与用法见 **[`docs/ui-guide.zh-CN.md`](docs/ui-guide.zh-CN.md)**（[English](docs/ui-guide.md)）。
 
 ## 语言（UI 与 CLI）
 
@@ -72,7 +74,7 @@ shell 补全描述与底层库错误保持英文；中文终端下看到的是�
 
 ## vaulty-keeper apollo — Apollo 快照工具
 
-> 讲解 Apollo 快照的实现（加密文件结构 / 双密钥分工 / 敏感识别 / 掩码与指纹 / 显式放行）与实测示例见 **[`docs/apollo-snapshot-guide.md`](docs/apollo-snapshot-guide.md)**。
+> 讲解 Apollo 快照的实现（加密文件结构 / 双密钥分工 / 敏感识别 / 掩码与指纹 / 显式放行）与实测示例见 **[`docs/apollo-snapshot-guide.zh-CN.md`](docs/apollo-snapshot-guide.zh-CN.md)**（[English](docs/apollo-snapshot-guide.md)）。
 
 Apollo Open API 不可用时的替代方案：从 Apollo 门户**复制键值对**，导入加密快照，AI/脚本安全地读取、对比、修改。快照默认存 `~/.vaulty/apollo/<name>.json`（`--dir` 或环境变量 `VAULTY_KEEPER_APOLLO_DIR` 覆盖）。
 
@@ -271,8 +273,8 @@ agent 放另一台机器或 Windows WSL2，host 的 `vaulty-keeper serve --addr 
 
 ## 数据库隧道代理（AI 查库，DSN 不暴露）
 
-> 完整的 ASCII 图解（Docker 里是什么 / 凭据存哪 / 三库认证注入 / 安全边界 / 时序）见 **[`docs/db-proxy-architecture.md`](docs/db-proxy-architecture.md)**。
-> 大量实测过的用法示例（多连接/各客户端/容器 AI/权限/脚本）见 **[`docs/db-proxy-examples.md`](docs/db-proxy-examples.md)**。
+> 完整的 ASCII 图解（Docker 里是什么 / 凭据存哪 / 三库认证注入 / 安全边界 / 时序）见 **[`docs/db-proxy-architecture.zh-CN.md`](docs/db-proxy-architecture.zh-CN.md)**（[English](docs/db-proxy-architecture.md)）。
+> 大量实测过的用法示例（多连接/各客户端/容器 AI/权限/脚本）见 **[`docs/db-proxy-examples.zh-CN.md`](docs/db-proxy-examples.zh-CN.md)**（[English](docs/db-proxy-examples.md)）。
 
 让容器/隔离域里的 AI 用**原生客户端**（psql / mysql / redis-cli）查询数据库并拿到数据，但数据库连接 URL（地址/账号/密码）**绝不暴露给 AI**。URL 只以密文形式存在 host 的 vaulty-keeper 里（独立 DB 密钥，`VAULTY_KEEPER_DB_KEY` / 系统密钥库），`serve` 为每条连接起一个 TCP 隧道，在握手阶段注入真实凭据后纯字节转发。
 

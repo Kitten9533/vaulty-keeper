@@ -1,406 +1,412 @@
-# vaulty-keeper 数据库隧道代理 · 图解
+# vaulty-keeper database tunnel proxy · diagrams
 
-> 用图说话：Docker 里是什么、凭据存在哪、隧道怎么工作、安全边界在哪。
-> 配合 `scripts/dbtest.sh` 一起看，跑一遍再对照图，就全通了。
+> [中文](db-proxy-architecture.zh-CN.md) | English
+>
+> Visuals: what's inside Docker, where credentials live, how the tunnel works, and where the security boundary is.
+> Read alongside `scripts/dbtest.sh` — run it once and check back against these diagrams and it all clicks.
 
 ---
 
-## 图 1 · 总览：一图看懂全链路
+## Figure 1 · Overview: the whole chain in one picture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Docker 容器（AI agent 隔离域：摸不到密钥/密文/真实凭据）                 │
+│ Docker container (AI agent isolation domain: no keys / ciphertext   │
+│ / real credentials reachable)                                       │
 │                                                                     │
-│   你的客户端：psql / mysql / redis-cli / DBeaver / Redis Insight     │
-│      │  只带 TOKEN，不知道真实账号密码                                 │
+│   your clients: psql / mysql / redis-cli / DBeaver / Redis Insight  │
+│     │  only carry a TOKEN, never the real account/password          │
 └──────┼──────────────────────────────────────────────────────────────┘
-       │ TCP（容器内用 host 访问时，host 部分写 host.docker.internal）
+       │ TCP (when a container reaches the host, write host.docker.internal)
        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Host：vaulty-keeper serve --addr 0.0.0.0:8972   （一个进程，两层服务）      │
+│ Host: vaulty-keeper serve --addr 0.0.0.0:8972   (one process, two   │
+│ services)                                                           │
 │                                                                     │
-│  ① HTTP 掩码桥 :8972            ② DB 隧道（每连接一个 TCP 端口）       │
-│    /api/* 全部要 token              pgdb       :15432 (postgres)     │
-│    remote list/get/compare          mysqltest  :15435 (mysql·sha2)   │
-│    remote dblist → 连接清单          mysqlnative:15436 (mysql·native)│
+│  ① HTTP mask bridge :8972         ② DB tunnels (one TCP port per    │
+│    /api/* all require token         connection)                     │
+│    remote list/get/compare          pgdb       :15432 (postgres)    │
+│    remote dblist → connection list  mysqltest  :15435 (mysql·sha2)  │
+│                                     mysqlnative:15436 (mysql·native)│
 │                                     cache      :15434 (redis)       │
-│        │                                  │                          │
-│        │  token 校验                       │  token 校验（协议字段）   │
-│        ▼                                  ▼                          │
-│    读 db.json（DB Key 解密）         读 db.json → 握手注入真实凭据      │
-│        │                                  │                          │
-│        │    ┌─────────────────────────────┘                          │
-│        │    ▼                                                       │
-│        │  DB Key（系统密钥库 / env VAULTY_KEEPER_DB_KEY 兜底）              │
-└───────┼──────────────────────────────────────────────────────────────┘
-        │ TCP（真实凭据只在 host 进程内存里出现，绝不出 host）
+│        │                                  │                         │
+│        │  token check                     │  token check (protocol  │
+│        ▼                                  │  field)                 │
+│     read db.json (decrypt with DB Key)    ▼                         │
+│        │                ┌───────────────────────────────────────────┘
+│        │                ▼                                           │
+│        │  DB Key (system keyring / env VAULTY_KEEPER_DB_KEY fallback)
+└───────┼─────────────────────────────────────────────────────────────┘
+        │ TCP (real credentials appear only in host process memory,
+        │ never leave the host)
         ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ 真实数据库（可以是 Docker 容器 / 内网机器 / 云 RDS，对隧道一视同仁）    │
-│   PostgreSQL :59918    MySQL :59919    Redis :59920                  │
+│ Real databases (Docker containers / intranet hosts / cloud RDS —    │
+│ all the same to the tunnel)                                         │
+│   PostgreSQL :59918    MySQL :59919    Redis :59920                 │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-一句话：**AI 只认 token 和隧道端口；真实凭据只活在 host 的 serve 进程里；两者之间由隧道在握手阶段完成"换凭据"。**
+In one sentence: **AI only knows tokens and tunnel ports; real credentials live only inside the host's `serve` process; between the two, the tunnel swaps credentials during the handshake.**
 
 ---
 
-## 图 2 · 现在 Docker 里是什么（测试环境快照）
+## Figure 2 · What's in Docker right now (test-environment snapshot)
 
 ```
-跑着的容器（只是"测试用的数据库"，serve 把它们当普通远端 DB，不特殊处理）
+Running containers (just "databases for testing"; serve treats them as plain remote DBs)
 ┌───────────┬──────────────────┬────────────────┬──────────────────────┐
-│ 容器       │ 镜像              │ 宿主端口(动态)   │ 真实凭据              │
+│ container │ image            │ host port      │ real credentials     │
 ├───────────┼──────────────────┼────────────────┼──────────────────────┤
 │ aipg      │ postgres:17.6    │ 127.0.0.1:59918│ app / pgpass / appdb │
 │ aimysql8  │ mysql:8.4        │ 127.0.0.1:59919│ sha2user+sha2pass    │
 │           │                  │                │ nativeuser+nativepass│
-│           │                  │                │ 库: shop             │
+│           │                  │                │ db: shop             │
 │ airedis   │ redis:7          │ 127.0.0.1:59920│ :redispass / 0       │
 └───────────┴──────────────────┴────────────────┴──────────────────────┘
 
-这些 URL 被 vaulty-keeper 加密后注册成"连接"（存 db.json）：
-  pgdb      ← postgres://app:pgpass@127.0.0.1:59918/appdb
-  mysqltest ← mysql://sha2user:sha2pass@127.0.0.1:59919/shop
+These URLs are encrypted by vaulty-keeper and registered as "connections" (stored in db.json):
+  pgdb       ← postgres://app:pgpass@127.0.0.1:59918/appdb
+  mysqltest  ← mysql://sha2user:sha2pass@127.0.0.1:59919/shop
   mysqlnative← mysql://nativeuser:nativepass@127.0.0.1:59919/shop
-  cache     ← redis://:redispass@127.0.0.1:59920/0
+  cache      ← redis://:redispass@127.0.0.1:59920/0
 
-serve 为每个连接开一个隧道端口，AI 侧拿到的"地址"（链接统一带 user+password，token 在 PG/MySQL 的 user 字段 / Redis 的 AUTH 密码，另一字段是占位 `x`）：
-  PostgreSQL:  jdbc:postgresql://127.0.0.1:15432/appdb?user=<TOKEN>&password=x
-  MySQL(sha2): 127.0.0.1:15435  user=<TOKEN> 密码任意
-  MySQL(native):127.0.0.1:15436 user=<TOKEN> 密码任意
-  Redis:       127.0.0.1:15434  AUTH <TOKEN>（URL 形式 redis://x:<TOKEN>@.../0）
+serve opens one tunnel port per connection; the "address" AI gets (links always carry user+password; the token goes in the user field for PG/MySQL / the AUTH password for Redis, the other field is a placeholder `x`):
+  PostgreSQL:   jdbc:postgresql://127.0.0.1:15432/appdb?user=<TOKEN>&password=x
+  MySQL(sha2):  127.0.0.1:15435  user=<TOKEN>  any password
+  MySQL(native):127.0.0.1:15436 user=<TOKEN>  any password
+  Redis:        127.0.0.1:15434  AUTH <TOKEN> (URL form redis://x:<TOKEN>@.../0)
 ```
 
-注意：**隧道端口（15432/15435/15436/15434）是固定的**（注册时 `--port` 指定或自动分配并写入 db.json）；**容器宿主端口（59918/59919/59920）是动态的**，每次重跑 `scripts/dbtest.sh` 会变。AI 只需要隧道端口，不需要知道容器端口。
+Note: **tunnel ports (15432/15435/15436/15434) are fixed** (given via `--port` at registration or auto-assigned and written into db.json); **container host ports (59918/59919/59920) are dynamic** and change every time `scripts/dbtest.sh` reruns. AI only needs the tunnel ports, never the container ports.
 
 ---
 
-## 图 3 · 真实账号密码存在哪（存储链路）
+## Figure 3 · Where the real account/password lives (storage chain)
 
 ```
-① 注册连接：echo 'postgres://app:pgpass@...' | vaulty-keeper db add pgdb
-             │  URL 从 stdin 读，不进命令行参数 → 不进 shell history / ps
+① Register: echo 'postgres://app:pgpass@...' | vaulty-keeper db add pgdb
+             │  URL read from stdin, never a CLI arg → never in shell history / ps
              ▼
-真实 URL（含账号密码）
-   │  AES-256-GCM 加密（密钥 = DB Key，独立于快照/敏感值密钥）
+Real URL (with account + password)
+   │  AES-256-GCM encrypted (key = DB Key, independent of snapshot/sensitive keys)
    ▼
-db.json（磁盘密文，权限 0600，无任何明文）◄── 快照密钥/敏感值密钥泄露也解不开
+db.json (ciphertext on disk, mode 0600, no plaintext) ◄── a leaked snapshot/sensitive key can't decrypt this
    │
-   │  serve 启动时：Keychain(或 env VAULTY_KEEPER_DB_KEY) 取 DB Key → 解密 URL
+   │  on serve start: get DB Key from Keychain (or env VAULTY_KEEPER_DB_KEY) → decrypt URL
    ▼
-进程内存中的 URL（只存在于 host 的 serve 进程）
-   │  每个连接：token 校验 → 用真实凭据连真实库 → 握手注入 → 纯字节转发
+URL in process memory (lives only inside the host's serve process)
+   │  per connection: token check → connect to the real DB with real credentials → inject during handshake → pure byte forwarding
    ▼
-真实数据库
+Real database
 ```
 
-安全分层的意义：
-| 层 | 防什么 |
+Why the layering matters:
+| Layer | Protects against |
 |---|---|
-| db.json 只有密文 + 0600 | 磁盘/备份/误发文件都不泄露明文 |
-| DB Key 独立于其他密钥 | 快照密钥泄露 ≠ 数据库凭据泄露 |
-| DB Key 在系统密钥库 | 防其他用户 / 其他机器 / 意外明文 |
-| 真实凭据只进 host 内存 | 日志、回包、客户端、AI 环境全部接触不到 |
-| token 门控 | 防"无 token 的第三方"（局域网暴露 0.0.0.0 时兜底）。token 为**连接专属**（128 位随机，`db add` 生成、随 URL 一并加密落盘），`db regen <name>|--all` 可轮换、旧 token 立即失效；未升级的旧连接回退全局 bridge token（掩码桥同款） |
-| 隧道开关 | 隧道**默认开启**；`db on/off <name>|--all` 按连接关闭（端口完全停止监听）/恢复，状态持久化在 db.json，serve 每 2 秒同步热加载；不需要暴露的连接随时关掉 |
+| db.json holds only ciphertext + 0600 | disk / backups / accidental file sharing leak nothing |
+| DB Key independent of other keys | a leaked snapshot key ≠ leaked DB credentials |
+| DB Key in the system keyring | other users / other machines / accidental plaintext |
+| Real credentials only in host memory | logs, replies, clients, AI environments never see them |
+| token gating | third parties without a token (fallback when 0.0.0.0 is exposed on a LAN). Tokens are **per-connection** (128-bit random, generated by `db add`, encrypted to disk alongside the URL); `db regen <name>|--all` rotates them and old tokens die immediately; legacy connections without their own token fall back to the global bridge token (same as the mask bridge) |
+| tunnel switch | tunnels are **on by default**; `db on/off <name>|--all` turns a connection's tunnel off (port stops listening) / back on, state persisted in db.json, serve hot-reloads every 2 s; unneeded exposure can be closed at any time |
 
 ---
 
-## 图 4 · 三库认证注入：客户端只发 token，隧道换真凭据
+## Figure 4 · Auth injection for three DBs: clients send only a token, the tunnel swaps in real credentials
 
 ```
 PostgreSQL :15432           MySQL :15435/15436          Redis :15434
 ┌──────────────┐           ┌──────────────────┐        ┌──────────────┐
 │ psql/DBeaver │           │ mysql/DBeaver    │        │ redis-cli /  │
 │ user=<TOKEN> │           │ username=<TOKEN> │        │ Redis Insight│
-│ 密码留空      │           │ 密码任意          │        │ AUTH <TOKEN> │
+│ empty pass   │           │ any password     │        │ AUTH <TOKEN> │
 └──────┬───────┘           └────────┬─────────┘        └──────┬───────┘
-       │ 假 server 直接放行          │ 假 server 校验          │ 校验首命令
-       │ (AuthenticationOk,         │ username=token         │ 为 AUTH token
-       │  trust 风格)               │ 然后回 OK               │ 然后回 +OK
-       ▼                           ▼                        ▼
+       │ fake server lets through  │ fake server checks      │ first command
+       │ (AuthenticationOk,        │ username=token          │ must be AUTH
+       │  trust style)             │ then replies OK         │ token, then
+       ▼                           ▼                         ▼ +OK
 ┌──────────────────────────────────────────────────────────────────────┐
-│  serve 用 db.json 里解密的 URL 去连真实库（真实账号密码只在这步出现）    │
+│  serve connects to the real DB with the decrypted URL from db.json   │
+│  (real account/password appear only at this step)                    │
 │                                                                      │
-│  PG   : 真实 user/password 完成 SCRAM-SHA-256 / md5 / cleartext       │
-│  MySQL: 认证应答替换（mysql_native_password / caching_sha2 + RSA）     │
-│  Redis: 代发 AUTH <真实密码> (+ SELECT 库号)                           │
+│  PG   : real user/password complete SCRAM-SHA-256 / md5 / cleartext  │
+│  MySQL: auth-reply swap (mysql_native_password / caching_sha2 + RSA) │
+│  Redis: relays AUTH <real password> (+ SELECT db number)             │
 └──────────────────────────────────────────────────────────────────────┘
-       │ 两端都认证通过 → splice（纯字节转发，不再解析协议）
-       ▼
-真实数据库
+       │ once both sides authenticate → splice (pure byte forwarding,
+       ▼ no more protocol parsing)
+Real database
 ```
 
-关键：**客户端到隧道的"假 server"** 和 **隧道到真实库的"真客户端"** 是两个独立握手，
-中间的桥就是 `internal/dbproxy` 里每个协议的 handler。
+Key point: the **fake server** (client → tunnel) and the **real client** (tunnel → database) are two independent handshakes; the bridge in between is each protocol's handler in `internal/dbproxy`.
 
 ---
 
-## 图 5 · 安全边界：AI 能看到 vs 看不到
+## Figure 5 · Security boundary: what AI can vs cannot see
 
 ```
-AI / 容器内能看到                                    AI 永远看不到
-──────────────────────────────────────────          ─────────────────────────
-✔ 连接名 / 类型 / 隧道端口（db list）        ✘ 真实 URL（地址 / 账号 / 密码）
-✔ 自己的隧道 token（连接专属；旧连接回退 bridge token）   ✘ db.json 密文内容
-✔ 查询结果（本来就是要给 AI 的数据）          ✘ DB Key 及任何密钥
-✔ 审计日志的"成功 / 拒绝"行（无 SQL/凭据）    ✘ 明文出口（reveal/export 等 TTY-only）
-✔ 隧道端口用原生客户端自由查询                ✘ serve 之外的任何明文中间态
+AI / inside the container can see                     AI can NEVER see
+──────────────────────────────────────────            ─────────────────────────
+✔ connection name / type / tunnel port (db list)      ✘ real URL (address / account / password)
+✔ its own tunnel token (per-connection; legacy falls  ✘ db.json ciphertext contents
+  back to bridge token)                               ✘ DB Key or any key
+✔ query results (that's the data AI is meant to get)  ✘ plaintext exits (reveal/export etc. TTY-only)
+✔ audit log "success / rejected" lines (no SQL/creds) ✘ any plaintext intermediate state outside serve
+✔ free queries on tunnel ports with native clients
 
-防御链条（层层兜底，防"故意对抗的 AI"）：
-  ① 容器隔离：AI 进 Docker，摸不到 ~/.vaulty、系统密钥库、真实凭据
-  ② token 门控：无 token 的第三方连隧道端口即被断
-  ③ 凭据不出 host：真实账号密码只在 serve 进程内存
-  ④ 审计：每次成功/拒绝都记（时间、来源 IP、连接名）
-  ⑤ 防误标/明文门禁：明文命令只在用户本人 TTY 可用
-```
-
----
-
-## 图 6 · 一次完整查询的时序（以 DBeaver 查 PG 为例）
-
-```
-DBeaver                     serve(host)                   真实 PG
-   │ jdbc 连 127.0.0.1:15432  │                              │
-   │ user=<TOKEN>             │                              │
-   ├─────────────────────────▶│                              │
-   │                          │ 校验 user==token?            │
-   │                          │ 回 AuthenticationOk          │
-   │◀─────────────────────────┤  (trust 风格直接放行)          │
-   │                          │ 连 127.0.0.1:59918            │
-   │                          │ 用 app/pgpass 走 SCRAM        │
-   │                          ├─────────────────────────────▶│
-   │                          │◀──────── AuthenticationOk ───┤
-   │                          │ splice：两边变纯字节通道        │
-   │ SELECT * FROM t ────────▶│─────────────────────────────▶│
-   │◀──────── 数据行 ─────────│◀──────────── 数据行 ──────────┤
-   │   （DBeaver 全程不知道    │                              │
-   │    真实账号是 app）        │                              │
+Defense chain (layered, against "deliberately adversarial AI"):
+  ① container isolation: AI goes into Docker, can't touch ~/.vaulty, the keyring, or real credentials
+  ② token gating: a third party without a token is cut off at the tunnel port
+  ③ credentials never leave the host: real account/password only in serve process memory
+  ④ audit: every success/reject is logged (time, source IP, connection name)
+  ⑤ mis-flag / plaintext gates: plaintext commands work only on the user's own TTY
 ```
 
 ---
 
-*图对应代码：`internal/dbproxy/tunnel.go`（隧道框架/审计）、`store.go`（db.json 加密存储）、
-`postgres.go` / `mysql.go` / `redis.go`（三种协议认证注入）、`internal/cli/db.go`（命令）、
-`scripts/dbtest.sh`（Docker 测试环境）。*
+## Figure 6 · One full query, step by step (DBeaver querying PG as an example)
+
+```
+DBeaver                     serve(host)                    real PG
+   │ jdbc → 127.0.0.1:15432  │                              │
+   │ user=<TOKEN>            │                              │
+   ├────────────────────────▶│                              │
+   │                         │ check user==token?           │
+   │                         │ reply AuthenticationOk       │
+   │◀────────────────────────┤ (trust style, let through)   │
+   │                         │ connect 127.0.0.1:59918      │
+   │                         │ SCRAM with app/pgpass        │
+   │                         ├─────────────────────────────▶│
+   │                         │◀──────── AuthenticationOk ───┤
+   │                         │ splice: both sides become a  │
+   │                         │ pure byte channel            │
+   │ SELECT * FROM t ───────▶│─────────────────────────────▶│
+   │◀──────── rows ──────────│◀──────────── rows ───────────┤
+   │   (DBeaver never learns │                              │
+   │    the real account is  │                              │
+   │    app)                 │                              │
+```
 
 ---
 
-## 第二部分 · 核心流程走查（纵向图）
+*Code references: `internal/dbproxy/tunnel.go` (tunnel framework / audit), `store.go` (encrypted db.json storage), `postgres.go` / `mysql.go` / `redis.go` (auth injection for the three protocols), `internal/cli/db.go` (commands), `scripts/dbtest.sh` (Docker test environment).*
 
-> 这种图每走一步给一句注解，适合"从头到尾跟一遍"。
+---
 
-### 流程 1 · 真实凭据的一生（注册 → 存储 → 运行 → 消亡）
+## Part 2 · Core flows, walkthrough (vertical diagrams)
+
+> These give one annotation per step — good for following along end to end.
+
+### Flow 1 · The life of the real credentials (register → store → run → gone)
 
 ```
-① 注册：echo 'postgres://app:pgpass@...' | vaulty-keeper db add pgdb
-   │ URL 走 stdin，不进命令行 → 不进 ps / shell history
+① register: echo 'postgres://app:pgpass@...' | vaulty-keeper db add pgdb
+   │ URL via stdin, never a CLI arg → never in ps / shell history
    ▼
-② 加密落盘：AES-256-GCM 加密（密钥 = DB Key）◄── DB Key 独立于快照/敏感值密钥
+② encrypt to disk: AES-256-GCM (key = DB Key) ◄── DB Key independent of snapshot/sensitive keys
    ▼
-③ db.json（0600，只含 url_cipher + nonce）◄── 磁盘无明文；误发/备份/rsync 都不泄
+③ db.json (0600, only url_cipher + nonce) ◄── no plaintext on disk; accidental share/backup/rsync leaks nothing
    │
    ▼
-④ serve 启动：Keychain(或 env) 取 DB Key → 解密到进程内存
-   │ 真实 URL 从此只在 host 内存里活
+④ serve start: get DB Key from Keychain (or env) → decrypt into process memory
+   │ the real URL now lives only in host memory
    ▼
-⑤ 每来一个连接：token 校验 → 用真实凭据连真实库 → 握手注入 → 纯字节转发
-   │ 客户端 / 日志 / 回包永远见不到 URL
+⑤ per incoming connection: token check → connect to the real DB with real credentials → inject during handshake → pure byte forwarding
+   │ clients / logs / replies never see the URL
    ▼
-⑥ 用完即弃：进程退出、连接断开 → 内存里的 URL 随之消亡
+⑥ used then discarded: process exits, connection closes → the URL in memory dies with it
 ```
 
-### 流程 2 · 一次隧道查询的完整生命周期（以 Redis 为例）
+### Flow 2 · The full lifecycle of one tunneled query (Redis as an example)
 
 ```
-客户端 redis-cli -a $TOKEN -p 15434
-   │ ① 发 AUTH <token>
+client redis-cli -a $TOKEN -p 15434
+   │ ① send AUTH <token>
    ▼
-serve（cache 隧道）
-   │ ② token 比对？
-   │    不对 → -ERR authentication required（拒绝 + 审计日志）
-   ▼ 对
-   │ ③ 用 db.json 解密的 URL 连真实 redis（127.0.0.1:59920）
-   │ ④ 代发 AUTH <真实密码> ◄── 真实密码只在 host 内部这条链路出现
+serve (cache tunnel)
+   │ ② compare token?
+   │    no → -ERR authentication required (reject + audit log)
+   ▼ yes
+   │ ③ connect to the real redis with the URL decrypted from db.json (127.0.0.1:59920)
+   │ ④ relay AUTH <real password> ◄── the real password appears only on this host-internal leg
    ▼
-真实 Redis
-   │ ⑤ 回 +OK
+real Redis
+   │ ⑤ reply +OK
    ▼
 serve
-   │ ⑥ 把 +OK 回给客户端 ◄── 客户端以为是自己 token 通过的，不知道真实密码
+   │ ⑥ relay +OK back to the client ◄── the client thinks its token passed; it never learns the real password
    ▼
-客户端
-   │ ⑦ 之后的命令纯字节转发（splice），隧道不再解析协议
+client
+   │ ⑦ from here on, pure byte forwarding (splice); the tunnel stops parsing the protocol
    ▼
-客户端 ⇄ 真实 Redis（PING / GET / SET ... 结果直通）
+client ⇄ real Redis (PING / GET / SET ... results pass straight through)
 ```
 
-### 流程 3 · AI 想拿真实密码，有几条路（每条都堵死）
+### Flow 3 · Ways an AI might try to get the real password (each one is blocked)
 
 ```
-路1 让隧道把密码发回来？
-   serve 只回 +OK / -ERR / 查询结果 ◄── 认证交换在 host 侧完成，客户端全程看不到
-   结果：堵死
+Way 1 make the tunnel send the password back?
+   serve only replies +OK / -ERR / query results ◄── auth exchange happens host-side; the client never sees it
+   result: blocked
 
-路2 查 SQL 拿密码明文？
-   SELECT ...password... ◄── 没有任何 SQL 返回密码明文
-   结果：堵死（哈希要暴力破解；受限账号连哈希都读不到）
+Way 2 query SQL for password plaintext?
+   SELECT ...password... ◄── no SQL returns password plaintext
+   result: blocked (hashes would need brute force; a restricted account can't even read hashes)
 
-路3 读 db.json？
-   容器里没有这个文件 ◄── 未挂载；host 上是 0600 密文
-   结果：堵死
+Way 3 read db.json?
+   the file isn't in the container ◄── not mounted; on the host it's 0600 ciphertext
+   result: blocked
 
-路4 读密钥 / 进程内存？
-   容器里没有密钥 ◄── 不同 VM（Docker 隔离）；同主机同账号场景不设防（信任边界）
-   结果：Docker 下堵死；同主机靠"AI 不主动读"约定
+Way 4 read the key / process memory?
+   no keys in the container ◄── separate VM (Docker isolation); same-host same-account is not defended (trust boundary)
+   result: blocked under Docker; same-host relies on the "AI doesn't actively read" convention
 ```
 
-### 流程 4 · 密钥层级（谁保护谁）
+### Flow 4 · Key hierarchy (who protects what)
 
 ```
-系统密钥库（macOS Keychain / Windows 凭据管理器 / Linux Secret Service）
+system keyring (macOS Keychain / Windows Credential Manager / Linux Secret Service)
    │
-   ├─ apollo 快照密钥 ────────── 加密 → Apollo 快照的「非敏感值」
-   ├─ sensitive 敏感值密钥 ───── 加密 → 快照里的「敏感值」
-   └─ db 数据库密钥(VAULTY_KEEPER_DB_KEY) ─ 加密 → db.json 里的「真实数据库 URL」
+   ├─ apollo snapshot key ───────── encrypts → Apollo snapshots' "non-sensitive values"
+   ├─ sensitive key ─────────────── encrypts → snapshots' "sensitive values"
+   └─ db database key (VAULTY_KEEPER_DB_KEY) ─ encrypts → db.json's "real database URLs"
         │
-        ▼ 单独泄露的影响
-   apollo 密钥泄露   → 能解非敏感快照值，但解不开敏感值、解不开 db.json
-   sensitive 密钥泄露 → 能解敏感值，但解不开 db.json
-   db 密钥泄露       → 能解数据库 URL（最值钱，所以独立）
+        ▼ impact of an isolated leak
+   apollo key leaked   → can decrypt non-sensitive snapshot values, but not sensitive values or db.json
+   sensitive key leaked→ can decrypt sensitive values, but not db.json
+   db key leaked       → can decrypt database URLs (most valuable, hence separate)
 ```
 
-### 流程 5 · serve 启动时序
+### Flow 5 · serve startup sequence
 
 ```
 vaulty-keeper serve --addr 0.0.0.0:8972
-   │ ① 生成 128 位随机全局 bridge token → 写 ~/.vaulty/bridge-token（0600）+ 打印
-   │    （掩码桥 /api 用；每条连接的隧道 token 由 db add 生成、db regen 轮换）
+   │ ① generate 128-bit random global bridge token → write ~/.vaulty/bridge-token (0600) + print
+   │    (for the mask bridge /api; per-connection tunnel tokens are generated by db add, rotated by db regen)
    ▼
-   │ ② 读 db.json（DB Key 解密）→ 每个连接开一个 TCP 隧道
+   │ ② read db.json (decrypt with DB Key) → open one TCP tunnel per connection
    │    pgdb :15432 / mysqltest :15435 / mysqlnative :15436 / cache :15434
    ▼
-   │ ③ 起 HTTP 掩码桥 :8972（/api/* 全部要 token + 失败限速）
+   │ ③ start the HTTP mask bridge :8972 (/api/* all require token + failure rate limiting)
    ▼
-就绪：4 隧道 + 1 桥，等待连接
-   │ 每次连接 → 审计日志（authenticated / invalid token，无 SQL/凭据）
+ready: 4 tunnels + 1 bridge, waiting for connections
+   │ each connection → audit log (authenticated / invalid token, no SQL/credentials)
    ▼
-Ctrl-C / 退出 → 隧道与桥关闭，内存中的真实 URL 消亡
+Ctrl-C / exit → tunnels and bridge close; the real URLs in memory die
 ```
 
-### 流程 6 · Apollo + Docker：AI 在容器里读 / 对比配置
+### Flow 6 · Apollo + Docker: AI reads / compares config inside a container
 
 ```
-Host 侧（先准备好，AI 看不到这些）：
-  vaulty-keeper apollo init / sensitive init    ← 快照密钥 + 敏感值密钥进 Keychain
+Host side (prepared first; AI never sees these):
+  vaulty-keeper apollo init / sensitive init    ← snapshot key + sensitive key into Keychain
   vaulty-keeper apollo import prod.txt --app-id xx
-       │ 明文只在"你手动导入"这一刻出现，之后全部加密落盘
+       │ plaintext appears only at the moment you import; everything after is encrypted to disk
        ▼
-  ~/.vaulty/apollo/prod__xx.json（0600 密文）◄── 磁盘无明文，容器未挂载
+  ~/.vaulty/apollo/prod__xx.json (0600 ciphertext) ◄── no plaintext on disk, not mounted into the container
        ▼
-  vaulty-keeper serve --addr 0.0.0.0:8970        ← host 持有密钥，永远只回掩码
+  vaulty-keeper serve --addr 0.0.0.0:8970        ← host holds the keys, always returns masks only
        │
        ▼
-容器侧（AI 视角，每次操作都经桥）：
+Container side (AI's view; every operation goes through the bridge):
   vaulty-keeper remote list prod --appid xx
-       │ ① AI 问 serve："prod 有哪些 key？"（带 token）
+       │ ① AI asks serve: "what keys does prod have?" (with token)
        ▼
   serve
-       │ ② 用 Keychain 密钥解密快照 → 每个值算「掩码 + 长度 + 指纹」
+       │ ② decrypt the snapshot with the Keychain key → compute 「mask + length + fingerprint」 per value
        ▼
-  AI 拿到：APP_NAME   = *** (5 chars)  [51650fd5fb747230]
-           DB_PASSWORD = *** (11 chars) [afd76e19e7393961]
-       │ 看不到明文，但长度 + 指纹够用
+  AI gets:  APP_NAME    = *** (5 chars)  [51650fd5fb747230]
+            DB_PASSWORD = *** (11 chars) [afd76e19e7393961]
+       │ no plaintext, but length + fingerprint are enough
        ▼
-对比判断（AI 的核心工作）：
+comparison (AI's core job):
   vaulty-keeper remote compare prod test --appid xx --appid-to xx
        ▼
   ~ DB_PASSWORD: *** (11 chars) [afd76e19] -> *** (11 chars) [b5a112e5]
-       │ 指纹不同 = 内容不同（即使长度一样）
+       │ different fingerprint = different content (even at the same length)
        ▼
-  AI 结论：DB_PASSWORD 两环境不一致、LOG_LEVEL 也不一致 → 汇报人类
+  AI's conclusion: DB_PASSWORD differs between environments, LOG_LEVEL too → report to the human
        │
        ▼
-边界：remote 是只读的 ◄── 桥没有 set/unset/import 端点；
-      容器里的 AI 永远只能"掩码读 + 对比判断"，改配置留在 host 命令行/UI
+boundary: remote is read-only ◄── the bridge has no set/unset/import endpoints;
+      a containerized AI can only ever "mask-read + compare"; changes stay on the host CLI/UI
 ```
 
 ---
 
-## 附 · Docker 在项目里的两个角色
+## Appendix · Docker's two roles in this project
 
-项目里的 Docker 文件是**两种独立用途**，别混在一起：
+The Docker files in this project serve **two independent purposes**; don't mix them up:
 
-### 角色 A：测试数据库（`scripts/dbtest.sh`）
-起 PG/MySQL/Redis **数据库容器**给隧道当靶子。只服务于本地验证，不参与任何 vaulty-keeper 逻辑；serve 把它们当普通远端 DB 连。
+### Role A: test databases (`scripts/dbtest.sh`)
+Spins up PG/MySQL/Redis **database containers** as targets for the tunnel. Purely for local verification; they don't participate in any vaulty-keeper logic — serve treats them as ordinary remote DBs.
 
-### 角色 B：隔离 AI agent（`Dockerfile` + `docker-compose.yml` + `docker/agent-entrypoint.sh`）
-把 **AI 本身**关进容器，让 AI 摸不到 host 的密钥/密文——这是防"故意对抗的 AI"的唯一可靠办法。
+### Role B: isolating the AI agent (`Dockerfile` + `docker-compose.yml` + `docker/agent-entrypoint.sh`)
+Puts the **AI itself** inside a container so it can't reach the host's keys/ciphertext — the only reliable defense against a "deliberately adversarial" AI.
 
 ```
-Dockerfile（两阶段）
-  阶段1 golang → go build 出 vaulty-keeper 二进制
-  阶段2 node（agent CLI 是 npm 包）+ git + 非 root 用户 agent
+Dockerfile (two stages)
+  stage 1 golang → go build produces the vaulty-keeper binary
+  stage 2 node (the agent CLI is an npm package) + git + non-root user agent
 
-docker-compose.yml（隔离要点）
-  cap_drop: ALL             容器无内核特权
-  no-new-privileges         无法提权
-  volumes: 只挂项目目录      不挂 ~/.vaulty / Keychain / ~/.ssh / docker.sock
-  env: 只有 BRIDGE_ADDR/TOKEN（没有密钥）
-  extra_hosts: host.docker.internal:host-gateway   Linux 兼容（Docker Desktop 无影响）
-  volumes: agent-home:/home/agent                   持久化 CLI/历史（重建不丢）
+docker-compose.yml (isolation essentials)
+  cap_drop: ALL             container has no kernel privileges
+  no-new-privileges         no privilege escalation
+  volumes: mount project dir only    no ~/.vaulty / Keychain / ~/.ssh / docker.sock
+  env: only BRIDGE_ADDR/TOKEN (no keys)
+  extra_hosts: host.docker.internal:host-gateway   Linux compatible (no effect on Docker Desktop)
+  volumes: agent-home:/home/agent                   persistent CLI/history (survives rebuild)
 
 agent-entrypoint.sh
-  按 VAULTY_KEEPER_INSTALL_AGENTS 自动 npm 装 codex/claude/opencode，再开 shell
+  auto npm-installs codex/claude/opencode when VAULTY_KEEPER_INSTALL_AGENTS is set, then opens a shell
 ```
 
-容器里同时具备两种能力（都经 host 的 serve）：
-- **Apollo 掩码读**：`vaulty-keeper remote list|get|compare` → 只有 `*** (n chars)` + 指纹
-- **DB 隧道**：`db list` 拿隧道端口 → psql/mysql/redis-cli 连 `host.docker.internal:端口`，隧道 token 当用户名/AUTH（连接专属，`db connect` 打印；旧连接回退 bridge token）
+The container has both capabilities at once (both via the host's serve):
+- **Apollo mask reads**: `vaulty-keeper remote list|get|compare` → only `*** (n chars)` + fingerprint
+- **DB tunnels**: `db list` gives tunnel ports → psql/mysql/redis-cli connect to `host.docker.internal:port`, tunnel token as username/AUTH (per-connection, printed by `db connect`; legacy connections fall back to the bridge token)
 
-**边界提醒**：Docker 是"防绝大多数 AI 主动拿密钥"的强隔离，但不是绝对隔离（daemon 是 root 服务，容器逃逸是真实攻击面）。极高威胁等级应升级到独立账号 / VM / 云沙箱（README「不用 Docker 的替代用法」）。
+**Boundary reminder**: Docker is strong isolation against "most AI actively grabbing keys", but not absolute (the daemon is a root service; container escape is a real attack surface). For very high threat levels, upgrade to a separate account / VM / cloud sandbox (README "Alternatives to Docker").
 
-### 什么时候用哪个
+### When to use which
 
-| 场景 | 用什么 |
+| Scenario | Use |
 |---|---|
-| 本地验证 DB 隧道 | `scripts/dbtest.sh`（需本机 Docker Desktop） |
-| 防"会主动读密钥"的 AI | `docker compose up -d`（host 先 `serve --addr 0.0.0.0:8970` + 导 token） |
-| 只防"守规矩"的 AI | 不用 Docker，host 直接 serve |
-| 真隔离但不用 Docker | 独立 macOS 账号 / VM（README「不用 Docker 的替代用法」） |
-| 极高威胁 / 合规审计 | 独立账号 / VM / 云沙箱（Docker 隔离之上再加一层） |
-| 生产 / 云 | 不用 Docker：隧道纯 TCP，DB 可以是云 RDS，AI 放任意隔离域 |
+| Local DB-tunnel verification | `scripts/dbtest.sh` (needs Docker Desktop locally) |
+| Defend against an AI that "actively reads keys" | `docker compose up -d` (host runs `serve --addr 0.0.0.0:8970` first + exports the token) |
+| Only defend against a "well-behaved" AI | no Docker; serve directly on the host |
+| Real isolation without Docker | separate macOS account / VM (README "Alternatives to Docker") |
+| Very high threat / compliance audit | separate account / VM / cloud sandbox (one more layer on top of Docker) |
+| Production / cloud | no Docker: the tunnel is pure TCP, the DB can be cloud RDS, AI goes into any isolated domain |
 
-### 两个角色怎么串起来
+### How the two roles connect
 
 ```
-host: vaulty-keeper serve（掩码桥 + DB 隧道）  ← 裸跑，与 Docker 无关
-Docker 里：[角色B agent容器: AI] --db list--> [隧道端口] --token--> 真实 DB
-                                     （真实 DB = 角色A 的容器 / 内网 / 云 RDS 均可）
+host: vaulty-keeper serve (mask bridge + DB tunnels)  ← runs bare, unrelated to Docker
+in Docker: [role-B agent container: AI] --db list--> [tunnel port] --token--> real DB
+                                       (real DB = role-A container / intranet / cloud RDS, any)
 ```
 
 ---
 
-## 附 · AI 用隧道到底能拿到什么（实测）
+## Appendix · What AI can actually get through the tunnel (measured)
 
-关键原则：**隧道 = 把"注册账号的完整权限"交给 AI**。注册 URL 里那个账号的权限，就是 AI 在隧道里的权限上限。
+Key principle: **a tunnel hands AI the full permissions of the registered account**. Whatever the registered URL's account can do is the ceiling of what AI can do through the tunnel.
 
-| 想拿的东西 | 能不能拿到 | 说明 |
+| What it tries to get | Possible? | Notes |
 |---|---|---|
-| 密码明文 | ❌ 拿不到 | 认证交换在 host 完成，客户端只收到"成功/失败"；SQL 也没有返回密码明文的途径；日志/回包已实测无密码 |
-| 密码哈希 | ⚠️ 看账号权限 | 注册高权账号（如超级用户）→ 能读 `pg_authid`/`mysql.user` 拿哈希（还原仍需暴力破解）；注册受限只读账号 → `permission denied` ✅ |
-| 真实账号名 | ⚠️ 必然可见 | `SELECT current_user` / `CURRENT_USER()` 返回会话属主——"给真实会话"的固有属性，无法同时隐藏。缓解：注册**专用只读账号**（如 `app_ro`），名字本身不敏感 |
-| 真实地址 | ⚠️ 部分可见 | `inet_server_addr()`/`inet_server_port()` 会返回真实服务器地址（docker 场景是容器内网 IP）；hostname/映射端口不出现在配置与日志 |
-| 写数据/删数据 | ⚠️ 看账号权限 | 只读账号 → 被拒；有写权限的账号 → 放行（代理不强制只读） |
+| Password plaintext | ❌ no | auth exchange completes host-side; the client only sees "success/failure"; no SQL path returns password plaintext; logs/replies verified to contain no passwords |
+| Password hashes | ⚠️ depends on account | register a high-privilege account (e.g. superuser) → can read `pg_authid`/`mysql.user` for hashes (recovering still needs brute force); register a restricted read-only account → `permission denied` ✅ |
+| Real account name | ⚠️ always visible | `SELECT current_user` / `CURRENT_USER()` return the session owner — an inherent property of "giving a real session", can't be hidden. Mitigation: register a **dedicated read-only account** (e.g. `app_ro`) whose name is not sensitive |
+| Real address | ⚠️ partially visible | `inet_server_addr()`/`inet_server_port()` return the real server address (a container-internal IP in the Docker case); hostname/mapped ports never appear in config or logs |
+| Write/delete data | ⚠️ depends on account | read-only account → rejected; a writable account → allowed (the proxy does not enforce read-only) |
 
-实测（受限账号 `app_ro`，仅 SELECT）：
+Measured (restricted account `app_ro`, SELECT only):
 ```
-SELECT current_user            → app_ro            （账号名可见）
+SELECT current_user            → app_ro            (account name visible)
 SELECT rolpassword FROM pg_authid → permission denied for table pg_authid   ✅
 INSERT INTO t ...                → permission denied for table t             ✅
-SELECT count(*) FROM t           → 2                （正常查询不受影响）
+SELECT count(*) FROM t           → 2                (normal queries unaffected)
 ```
 
-**结论**：密码（明文）在任何情况下都不出 host；哈希/写权限等能否拿到，完全由你注册的账号决定。所以安全使用的**前置条件**是：`vaulty-keeper db add` 时注册一个**专用只读、最小权限**的账号，而不是拿高权账号去注册。
-
+**Conclusion**: the password (plaintext) never leaves the host under any circumstance; whether hashes/write permissions can be obtained is entirely decided by the account you register. So the **precondition for safe use** is: register a **dedicated, read-only, least-privilege** account with `vaulty-keeper db add` instead of registering a high-privilege account.

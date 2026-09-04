@@ -52,8 +52,8 @@ DB 隧道用法（AI 侧）：`db list`（或 `remote dblist`）拿到连接名 
   redis-cli -a "$TOKEN" -p 15434
 AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或任何回包中找 DSN。Mongo 未接入代理。serve 热加载：db add/rm/regen/on/off 后隧道自动开/关（每 2 秒同步 db.json），不用重启。
 本地人工验证：`./scripts/dbtest.sh`（Docker 起 pg/mariadb/redis + 起 serve + 全量正/负向测试；`--clean` 收尾）。
-图解：`docs/db-proxy-architecture.md`（Docker 里是什么/凭据存哪/三库认证注入/安全边界/时序）。
-用法示例：`docs/db-proxy-examples.md`（多连接/各客户端/容器 AI/权限/脚本，全部实测过）。
+图解：`docs/db-proxy-architecture.zh-CN.md`（Docker 里是什么/凭据存哪/三库认证注入/安全边界/时序）。
+用法示例：`docs/db-proxy-examples.zh-CN.md`（多连接/各客户端/容器 AI/权限/脚本，全部实测过）。
 
 明文命令 —— `apollo reveal`、`apollo export`、`apollo edit`、`apollo list/compare --reveal`、`aes decrypt` 会把明文打到 stdout，永久进入会话日志。**这些命令只在交互式终端（TTY）可用；脚本/AI 环境一律拒绝，加 `--yes` 也无法放行**——所以 AI 永远拿不到明文，即使被诱导要求也不会成功。判断两个环境某 key 是否一致用 `compare`（掩码 + 长度即可判断），不要 get 明文。
 
