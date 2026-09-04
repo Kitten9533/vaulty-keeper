@@ -17,13 +17,13 @@ jobs:
           cache: true
       - run: go vet ./...
       - name: Run tests
-        run: go test -v ./... 2>&1 | tee /tmp/test-output.txt; test ${PIPESTATUS[0]} -eq 0
-      - name: Upload test output on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-output
-          path: /tmp/test-output.txt
+        run: |
+          go test -v ./... 2>&1 | tee /tmp/test-output.txt
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then
+            grep -A8 -E "^--- FAIL" /tmp/test-output.txt | head -60 | sed 's/^/::error::/'
+          fi
+          exit $status
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
