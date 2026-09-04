@@ -6,7 +6,7 @@ Personal AI toolbox (single Go binary, no runtime dependencies). All values are 
 
 ## Quick start
 
-**Option 1: Download a prebuilt binary** (recommended, no Go required) — grab the archive for your platform (darwin/linux/windows × amd64/arm64) from [Releases](https://github.com/Kitten9533/vaulty-keeper/releases), extract, and put `vaulty-keeper` on your PATH:
+**Option 1: Download a prebuilt binary** (recommended, no Go required) — grab the archive for your platform (macos/linux × x86_64/arm64, windows × x86_64) from [Releases](https://github.com/Kitten9533/vaulty-keeper/releases), extract, and put `vaulty-keeper` on your PATH:
 
 ```sh
 vaulty-keeper apollo init      # first run: create snapshot key (macOS Keychain / Windows Credential Manager / Linux Secret Service)

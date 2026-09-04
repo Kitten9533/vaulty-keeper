@@ -155,6 +155,7 @@ const I18N = {
     'view.settings': 'Settings',
     'breadcrumb.workbench': 'Config Workbench',
     'api.fail': 'Request failed ({status})',
+    'api.auth-expired': 'Access token is invalid or expired — the UI regenerates it on every start. Reopen the new URL printed by the running `vaulty-keeper ui`.',
     'aes.error.key-iv': 'Please fill in key and iv.',
     'aes.error.input': 'Please fill in the input.',
     'aes.copied': 'Copied to clipboard.',
@@ -398,6 +399,7 @@ const I18N = {
     'view.settings': '设置',
     'breadcrumb.workbench': '配置工作台',
     'api.fail': '请求失败 ({status})',
+    'api.auth-expired': '访问令牌无效或已过期——UI 每次启动都会重新生成。请用正在运行的 `vaulty-keeper ui` 打印的新 URL 重新打开。',
     'aes.error.key-iv': '请填写 key 和 iv。',
     'aes.error.input': '请填写输入内容。',
     'aes.copied': '已复制到剪贴板。',
@@ -575,6 +577,7 @@ async function api(path, options = {}) {
   if (res.status === 204) return null;
   const type = res.headers.get('content-type') || '';
   if (!res.ok) {
+    if (res.status === 401) throw new Error(t('api.auth-expired'));
     let message = t('api.fail', { status: res.status });
     try {
       if (type.includes('application/json')) {
@@ -600,9 +603,9 @@ function escapeHtml(s) {
 }
 
 function relTime(iso) {
-  const t = new Date(iso);
-  if (isNaN(t.getTime())) return '';
-  const diff = Date.now() - t.getTime();
+  const dt = new Date(iso);
+  if (isNaN(dt.getTime())) return '';
+  const diff = Date.now() - dt.getTime();
   const min = Math.floor(diff / 60000);
   if (min < 1) return t('rel.just-now');
   if (min < 60) return t('rel.min', { n: min });
@@ -610,7 +613,7 @@ function relTime(iso) {
   if (hours < 24) return t('rel.hour', { n: hours });
   const days = Math.floor(hours / 24);
   if (days < 7) return t('rel.day', { n: days });
-  return t.toLocaleDateString(LANG === 'zh' ? 'zh-CN' : 'en-US');
+  return dt.toLocaleDateString(LANG === 'zh' ? 'zh-CN' : 'en-US');
 }
 
 // ---- render: rail ----
@@ -1650,12 +1653,12 @@ function renderCompareRefs(fromLabel, toLabel, changes) {
   const arrow = document.createElement('span');
   arrow.className = 'compare-arrow';
   arrow.textContent = '→';
-  const t = document.createElement('span');
-  t.className = 'compare-ref to';
-  t.textContent = toLabel;
+  const el = document.createElement('span');
+  el.className = 'compare-ref to';
+  el.textContent = toLabel;
   bar.appendChild(f);
   bar.appendChild(arrow);
-  bar.appendChild(t);
+  bar.appendChild(el);
   const stat = document.createElement('span');
   stat.className = 'compare-stat';
   const counts = { added: 0, removed: 0, changed: 0 };

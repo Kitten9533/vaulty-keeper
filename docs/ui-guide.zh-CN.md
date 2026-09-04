@@ -22,7 +22,7 @@ vaulty-keeper ui --allow-plaintext  # 额外开启明文接口（导出 / 解密
 
 ### Windows 启动方式
 
-Windows 发布包是 `vaulty-keeper-windows-amd64.zip`（或 `-arm64.zip`），解压后得到 `vaulty-keeper.exe`，用法与其它平台完全一致，只是文件名带 `.exe`：
+Windows 发布包是 `vaulty-keeper-windows-x86_64.zip`，解压后得到 `vaulty-keeper.exe`，用法与其它平台完全一致，只是文件名带 `.exe`：
 
 ```powershell
 # PowerShell / CMD，进入解压目录后：

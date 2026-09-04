@@ -6,7 +6,7 @@
 
 ## 快速开始
 
-**方式一：下载预编译二进制**（推荐，无需安装 Go）——从 [Releases](https://github.com/Kitten9533/vaulty-keeper/releases) 下载对应平台的压缩包（darwin/linux/windows × amd64/arm64），解压后把 `vaulty-keeper` 放到 PATH：
+**方式一：下载预编译二进制**（推荐，无需安装 Go）——从 [Releases](https://github.com/Kitten9533/vaulty-keeper/releases) 下载对应平台的压缩包（macos/linux × x86_64/arm64，windows × x86_64），解压后把 `vaulty-keeper` 放到 PATH：
 
 ```sh
 vaulty-keeper apollo init      # 首次：生成快照密钥（macOS Keychain / Windows 凭据管理器 / Linux Secret Service）

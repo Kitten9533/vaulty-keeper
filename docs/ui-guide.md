@@ -22,7 +22,7 @@ vaulty-keeper ui --allow-plaintext  # additionally enable plaintext endpoints (e
 
 ### Windows
 
-The Windows release is `vaulty-keeper-windows-amd64.zip` (or `-arm64.zip`); unzip it to get `vaulty-keeper.exe`, which works exactly like the other platforms — the only difference is the `.exe` suffix:
+The Windows release is `vaulty-keeper-windows-x86_64.zip`; unzip it to get `vaulty-keeper.exe`, which works exactly like the other platforms — the only difference is the `.exe` suffix:
 
 ```powershell
 # PowerShell / CMD, in the extraction directory:

@@ -74,4 +74,5 @@ AI 永远看不到真实 URL/凭据；不要试图从 db.json、serve 日志或�
 ## 开发
 
 - 改 Go 代码后跑 `go test ./...`；改动涉及并发/终端时加跑 `go test -race ./...` 和 `go vet ./...`。
+- **改 `internal/ui/static/` 前端后**：`make test` 会先跑 `node scripts/check-ui.mjs`（JS 语法 / DOM id / 变量遮蔽 / i18n key 双语对齐），必须通过再 `make build` 重建。历史教训：局部变量遮蔽全局翻译函数 `t()`（`relTime`、`renderCompareRefs`）会导致整页渲染中断且单测抓不到。
 - 加密快照格式、解析规则等见 `README.md`「验证」与对应包注释，改前先读。
