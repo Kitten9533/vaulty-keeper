@@ -2,30 +2,52 @@ BIN := bin/vaulty-keeper
 VERSION := $(shell grep 'const Version' internal/cli/cli.go | sed 's/.*"\(.*\)"/\1/')
 PLATFORMS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
 
-.PHONY: build test check-ui install release clean
+.PHONY: build test check-ui docs-check require-node install release clean
 
 build:
 	go build -o $(BIN) .
 
+require-node:
+	@command -v node >/dev/null 2>&1 || { echo "node is required"; exit 1; }
+
 # check-ui runs static checks over the embedded frontend (JS syntax, DOM ids,
 # variable shadowing, i18n key parity). It catches regressions that Go tests
 # can't — e.g. a local variable shadowing the global i18n helper `t()`.
-check-ui:
-	@command -v node >/dev/null 2>&1 || { echo "check-ui: node is required"; exit 1; }
+check-ui: require-node
 	node scripts/check-ui.mjs
 
-test: check-ui
+# docs-check runs static checks over the Markdown tree (bilingual pairing,
+# language-switch links, code-fence parity, relative link targets). It keeps
+# the docs/ guides and root READMEs internally consistent.
+docs-check: require-node
+	node scripts/check-docs.mjs
+
+test: check-ui docs-check
 	go test ./...
 
 install: build
 	mkdir -p $(HOME)/.local/bin
 	ln -sf $(CURDIR)/$(BIN) $(HOME)/.local/bin/vaulty-keeper
 
+# Current guides bundled into every archive so the packaged README's docs/*.md
+# relative links resolve offline. docs/superpowers/ historical records are
+# intentionally source-only and not shipped; the packaged docs/README.md keeps
+# its links to them (source-tree only), by design.
+DOCS := docs/README.md docs/README.zh-CN.md \
+        docs/security-model.md docs/security-model.zh-CN.md \
+        docs/apollo-snapshot-guide.md docs/apollo-snapshot-guide.zh-CN.md \
+        docs/ui-guide.md docs/ui-guide.zh-CN.md \
+        docs/db-proxy-architecture.md docs/db-proxy-architecture.zh-CN.md \
+        docs/db-proxy-examples.md docs/db-proxy-examples.zh-CN.md \
+        docs/mongodb-tunnel-guide.md docs/mongodb-tunnel-guide.zh-CN.md
+
 # Cross-compile release binaries into release/ (one tarball/zip per platform,
-# including the README and LICENSE), ready to attach to a GitHub release.
+# including the READMEs, LICENSE, AGENTS.md and the current docs/ guides),
+# ready to attach to a GitHub release.
 release:
-	rm -rf release && mkdir -p release
-	cp README.md README.zh-CN.md LICENSE release/
+	rm -rf release && mkdir -p release/docs
+	cp README.md README.zh-CN.md LICENSE AGENTS.md release/
+	cp $(DOCS) release/docs/
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
 		ext=""; \
@@ -36,13 +58,14 @@ release:
 		echo ">> building $$base..."; \
 		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "release/vaulty-keeper$$ext" .; \
 		if [ "$$os" = "windows" ]; then \
-			zip -jq "release/$$base.zip" "release/vaulty-keeper$$ext" "release/README.md" "release/README.zh-CN.md" "release/LICENSE"; \
+			(cd release && zip -rq "$$base.zip" "vaulty-keeper$$ext" "README.md" "README.zh-CN.md" "LICENSE" "AGENTS.md" "docs"); \
 		else \
-			tar -C release -czf "release/$$base.tar.gz" "vaulty-keeper" "README.md" "README.zh-CN.md" "LICENSE"; \
+			tar -C release -czf "release/$$base.tar.gz" "vaulty-keeper" "README.md" "README.zh-CN.md" "LICENSE" "AGENTS.md" "docs"; \
 		fi; \
 		rm -f "release/vaulty-keeper$$ext"; \
 	done
-	rm -f release/README.md release/README.zh-CN.md release/LICENSE
+	rm -f release/README.md release/README.zh-CN.md release/LICENSE release/AGENTS.md
+	rm -rf release/docs
 	@echo ">> done:"
 	@ls -lh release/
 

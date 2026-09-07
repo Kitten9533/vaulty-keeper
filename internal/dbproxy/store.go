@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 const (
@@ -98,6 +99,10 @@ func ValidateConnName(name string) error {
 func ConnTypeFromURL(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
+		scheme, _, _ := strings.Cut(raw, ":")
+		if strings.EqualFold(scheme, "mongodb") || strings.EqualFold(scheme, "mongodb+srv") {
+			return "", errors.New("invalid MongoDB connection configuration")
+		}
 		return "", fmt.Errorf("cannot parse database URL: %w", err)
 	}
 	switch u.Scheme {
@@ -107,8 +112,13 @@ func ConnTypeFromURL(raw string) (string, error) {
 		return "mysql", nil
 	case "redis", "rediss":
 		return "redis", nil
+	case "mongodb":
+		if _, err := mongoConfigFromURL(u); err != nil {
+			return "", err
+		}
+		return "mongodb", nil
 	default:
-		return "", fmt.Errorf("unsupported database URL scheme %q (supported: postgres/postgresql, mysql, redis/rediss)", u.Scheme)
+		return "", fmt.Errorf("unsupported database URL scheme %q (supported: postgres/postgresql, mysql, redis/rediss, mongodb)", u.Scheme)
 	}
 }
 
@@ -235,6 +245,9 @@ func allocPort(s *store, requested, base int) (int, error) {
 		}
 	}
 	if requested != 0 {
+		if requested < 1 || requested > 65535 {
+			return 0, fmt.Errorf("port %d is out of range (1-65535)", requested)
+		}
 		if used[requested] {
 			return 0, fmt.Errorf("port %d is already used by another connection", requested)
 		}

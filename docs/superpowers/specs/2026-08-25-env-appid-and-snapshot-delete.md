@@ -1,65 +1,71 @@
-# Env+AppID Unique Key, Snapshot Delete, and Import Dialog Polish — Design
+# Env+AppID Unique Key, Snapshot Delete, And Import Dialog Polish Design
+
+English | [中文](2026-08-25-env-appid-and-snapshot-delete.zh-CN.md)
+
+> **Historical source of implemented decisions, 2026-08-25; lifecycle annotated 2026-09-07. Not an executable plan or complete current API contract.** Retains identity, naming, compatibility and deletion-confirmation rationale and original test requirements; requirements are not passing evidence. Current operations: [Apollo guide](../../apollo-snapshot-guide.md), [UI guide](../../ui-guide.md). This follows the optional-AppID assumptions in the [initial UI](2026-08-25-claude-style-web-ui-design.md) and [full migration](2026-08-25-full-ui-migration-design.md).
+>
+> Old `--app-id` spelling, test expectations and UI layout below are retained as proposals from that date; use the guides' current `--appid` spelling. Later operations require fresh task authorization; this record grants no deletion, migration or plaintext-access permission.
 
 ## Goal
 
-以「环境 + AppID」作为快照唯一键（AppID 必填），支持在 UI 与 CLI 中删除快照，快照列表同时展示环境与 AppID，并优化导入对话框的预览滚动。
+Use environment + required AppID as the snapshot's unique key. Support snapshot deletion in UI and CLI, show both environment and AppID in the list, and improve preview scrolling in the import dialog.
 
 ## Scope
 
-- 存储：新快照一律存 `{env}__{appid}.json`；旧 `{env}.json`（无 AppID）读取兼容。
-- CLI：各命令支持 `--appid`；`import` / `rm` 必填；新增 `rm` 删除命令（需确认）。
-- UI：侧栏列表展示环境 + AppID；列表项删除入口（确认对话框）；导入时 AppID 必填、冲突按 env+appid 判定；预览区可滚动。
-- 不做：快照迁移脚本、按 AppID 的批量操作、多 AppID 快照对比自动选择（对比需显式传 from/to appid）。
+- Storage: new snapshots use `{env}__{appid}.json`; retain read compatibility with old `{env}.json` files without AppID.
+- CLI: support `--appid` across commands; require it for import/rm; add confirmed `rm`.
+- UI: show environment + AppID in the sidebar, add confirmed list-item deletion, require AppID for import, detect conflicts by env+appid, and make the preview scrollable.
+- Exclude migration scripts, batch operations by AppID and automatic AppID selection for comparison; explicitly supply from/to AppID.
 
 ## Storage & Naming
 
-`internal/apollo`：
+Proposed `internal/apollo` changes:
 
-- 新增 `SnapshotRef{ Name, AppID string }`。
-- `ListSnapshots(dir) ([]SnapshotRef, error)`：扫描 `*.json`，读取 meta 得到 Name 与 AppID（不靠文件名解析）。
-- 新增 `ValidateAppID(appID) error`：非空，字符集 `^[A-Za-z0-9][A-Za-z0-9_.-]*$`。
-- 新增 `FileName(name, appID) string`：appID 非空 → `{name}__{appID}.json`；appID 空 → `{name}.json`。
-- 新增 `SnapPath(dir, name, appID) string` = `filepath.Join(dir, FileName(...))`。
-- 冲突判定 = 目标文件已存在（`{env}__{appid}.json` 或 `{env}.json` 天然覆盖了「env 含 `__` 撞名」的边缘情况）。
-- 现有 `snapPath(dir, name)`（CLI 层）改为接收 appID；`ValidateSnapshotName` 不变。
+- Add `SnapshotRef{ Name, AppID string }`.
+- `ListSnapshots(dir) ([]SnapshotRef, error)` scans `*.json` and reads Name/AppID from metadata, not filename parsing.
+- Add `ValidateAppID(appID) error`: nonempty, matching `^[A-Za-z0-9][A-Za-z0-9_.-]*$`.
+- Add `FileName(name, appID) string`: nonempty AppID yields `{name}__{appID}.json`; empty yields `{name}.json`.
+- Add `SnapPath(dir, name, appID) string` using `filepath.Join(dir, FileName(...))`.
+- Detect conflicts by target-file existence. The original proposal noted that checking the resulting filename also catches collisions involving `__` inside an environment name.
+- Extend the CLI's existing `snapPath(dir, name)` to accept AppID; leave `ValidateSnapshotName` unchanged.
 
 ## CLI
 
-- 各 apollo 命令加 `--appid`（get / list / set / unset / compare / reveal / edit / export / import / rm）。访问类命令不指定时读 `{env}.json`（兼容旧快照）。
-- `import`：`--app-id` 改为必填，参与文件命名；缺省报错。
-- 新增 `apollo rm <env> --appid X`：`--appid` 必填（本版删除只针对有 AppID 的快照）。
-  - TTY 下交互确认 `删除 env (appid) ？[y/N]`；非 TTY 必须带 `--yes` 才执行。
-  - 成功输出 `removed env (appid)`，退出码 0；不存在 → 报错退出码 1。
-- usage / completion 更新。
+- Add `--appid` to get/list/set/unset/compare/reveal/edit/export/import/rm. Access commands without it read `{env}.json` for legacy compatibility.
+- Import: the original proposal called the flag `--app-id`, made it required and included it in filenames; omission returns an error.
+- Add `apollo rm <env> --appid X`, requiring AppID; deletion in this proposal targets snapshots with AppID only.
+- In TTY, ask `Delete env (appid)? [y/N]`; non-TTY requires `--yes`.
+- Success prints `removed env (appid)` with exit code 0; absence returns an error and exit code 1.
+- Update usage and completion.
 
 ## UI API
 
-`appid` 一律走 query 参数（URL encoded），路径结构不变，兼容旧快照。
+Pass URL-encoded `appid` in the query; preserve route paths and legacy compatibility.
 
-- `GET /api/snapshots`：返回项已含 `app_id`，保持不变。
-- `GET /api/snapshots/{env}?appid=X`：读取 `{env}__{X}.json`；不传 appid 读 `{env}.json`。
-- `POST /api/snapshots`：`{env, app_id(必填), text}`；app_id 缺失/非法 → `400 invalid_app_id`；文件已存在 → `409 snapshot_exists`（消息含 env 与 appid）。
-- `DELETE /api/snapshots/{env}?appid=X`：删除文件 → `204`；不存在 → `404 snapshot_not_found`。
-- 条目增删改、export、reveal、edit 各端点均接受可选 `?appid=`。
-- `GET /api/compare?from=&to=&from_appid=&to_appid=`：appid 可选，缺省读 `{env}.json`。
+- `GET /api/snapshots`: keep the existing `app_id` response field.
+- `GET /api/snapshots/{env}?appid=X`: read `{env}__{X}.json`; without appid read `{env}.json`.
+- `POST /api/snapshots`: `{env, app_id(required), text}`. Missing/invalid AppID returns `400 invalid_app_id`; an existing file returns `409 snapshot_exists`, with environment and AppID in the message.
+- `DELETE /api/snapshots/{env}?appid=X`: delete and return 204; absent returns `404 snapshot_not_found`.
+- Item mutation, export, reveal and edit endpoints accept optional `?appid=`.
+- `GET /api/compare?from=&to=&from_appid=&to_appid=`: AppIDs optional, defaulting to `{env}.json`.
 
 ## UI Frontend
 
-- 侧栏列表项两行：第一行 `环境` + 条目计数，第二行小字 `AppID`（读取自 `app_id` 字段）。
-- 列表项 hover 显示删除按钮（不触发选中）；点删除 → 确认对话框（显示 `环境 / AppID`）→ `DELETE` → 刷新；若删的是当前选中，自动切到第一个剩余快照或空状态。
-- `state.active` 由纯 env 改为 `{ env, appid }`；所有 API 调用带上 `?appid=`。
-- 导入对话框：「快照名称」label 改为「环境」；「应用 ID」必填（空则前端提示）；预览区 `.preview` 加 `max-height: 220px; overflow-y: auto`。
-- 冲突错误显示 `环境 (appid) 已存在`（服务端消息）。
+- Two-line sidebar items: environment + entry count first, smaller AppID from `app_id` second.
+- Show a delete button on hover without selecting the item. Click opens environment/AppID confirmation, then DELETE and refresh. If deleting the active snapshot, select the first remaining snapshot or empty state.
+- Change `state.active` from environment alone to `{ env, appid }`; attach `?appid=` to API calls.
+- Rename the import label from Snapshot Name to Environment; make Application ID required with frontend empty-input feedback. Set `.preview` to `max-height: 220px; overflow-y: auto`.
+- Display the server conflict message: environment (appid) already exists.
 
 ## Security
 
-- AppID 参与文件路径，必须经 `ValidateAppID` 校验（防路径穿越）。
-- 删除确认只在 UI 确认对话框之后发起；明文出口规则不变（no-store、confirm）。
+- AppID participates in paths, so validate with `ValidateAppID` to prevent traversal.
+- Issue deletion only after UI confirmation. Plaintext-exit rules remain unchanged: no-store and confirm.
 
 ## Testing
 
-- `internal/apollo`：`ValidateAppID`（合法/空/非法字符/路径穿越）、`FileName` 两种形态、`ListSnapshots` 返回 env+appid、`SnapPath`。
-- `internal/app`：`Remove`（存在/不存在）、`Import` 带 appid 命名与冲突、读取旧 `{env}.json` 兼容。
-- `internal/cli`：`--appid` 解析与寻址、`rm` 的确认/`--yes`/不存在路径。
-- `internal/ui`：`DELETE` 端点（204/404/缺 appid 400）、`POST` 缺 appid 400、带 appid 的视图与 items 端点。
-- 前端手动清单：列表双行展示、删除确认与刷新、导入必填与冲突提示、预览滚动。
+- `internal/apollo`: valid/empty/invalid/traversal AppID cases, both filename forms, env+appid listing and `SnapPath`.
+- `internal/app`: existing/absent `Remove`, AppID import naming/conflicts and legacy `{env}.json` reads.
+- `internal/cli`: flag parsing/addressing, rm confirmation/`--yes`/absence.
+- `internal/ui`: DELETE 204/404/missing-AppID 400, POST missing-AppID 400, views and items with AppID.
+- Manual frontend checklist: two-line list, deletion confirmation/refresh, import required fields/conflicts and preview scrolling.

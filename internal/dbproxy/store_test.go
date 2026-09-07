@@ -1,6 +1,7 @@
 package dbproxy
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,8 @@ func TestConnTypeFromURL(t *testing.T) {
 		{"mysql://u:p@h:3306/db", "mysql", false},
 		{"redis://h:6379/0", "redis", false},
 		{"rediss://h:6380", "redis", false},
-		{"mongodb://u:p@h/db", "", true},
+		{"mongodb://u:p@h/db", "mongodb", false},
+		{"mongodb+srv://u:p@h/db", "", true},
 		{"http://h", "", true},
 		{":not a url", "", true},
 	}
@@ -102,8 +104,8 @@ func TestAddRejectsUnknownSchemeAndBadName(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)
 	key := testKey(t)
-	if err := Add(path, key, "x", "mongodb://u:p@h/db", 0); err == nil {
-		t.Fatal("Add() accepted mongodb scheme")
+	if err := Add(path, key, "x", "cassandra://u:p@h/db", 0); err == nil {
+		t.Fatal("Add() accepted unsupported scheme")
 	}
 	if err := Add(path, key, "-bad", "redis://h", 0); err == nil {
 		t.Fatal("Add() accepted invalid name")
@@ -172,6 +174,24 @@ func TestAllocPortConflicts(t *testing.T) {
 		if c.Port == DefaultPortBase && c.Name != "a" {
 			t.Errorf("port %d reused by %s", DefaultPortBase, c.Name)
 		}
+	}
+}
+
+func TestAllocPortRejectsOutOfRange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	for i, port := range []int{-1, 65536, 153425} {
+		name := fmt.Sprintf("bad%d", i)
+		if err := Add(path, key, name, "redis://h", port); err == nil {
+			t.Errorf("Add() accepted out-of-range port %d", port)
+		}
+	}
+	if err := Add(path, key, "ok", "redis://h", 20000); err != nil {
+		t.Errorf("Add() rejected valid port 20000: %v", err)
+	}
+	if err := Add(path, key, "edge", "redis://h2", 65535); err != nil {
+		t.Errorf("Add() rejected boundary port 65535: %v", err)
 	}
 }
 

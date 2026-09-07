@@ -205,6 +205,7 @@ var dict = map[string][2]string{
 	"db.connect-mysql":          {"mysql — MySQL's built-in command-line client:", "mysql —— MySQL 自带的命令行客户端（装 MySQL 就有）："},
 	"db.connect-insight":        {"Redis Insight — Redis's official GUI (paste the URL):", "Redis Insight —— Redis 官方图形工具（贴 URL）："},
 	"db.connect-rediscli":       {"redis-cli — Redis's built-in command-line client:", "redis-cli —— Redis 自带的命令行客户端（装 Redis 就有）："},
+	"db.connect-mongosh":        {"mongosh - MongoDB's command-line client:", "mongosh - MongoDB 命令行客户端："},
 	"db.password-empty":         {"Leave the password empty", "密码留空"},
 	"db.password-any":           {"Password=any", "密码任意"},
 	"db.connect-unsupported":    {"unsupported database type %q", "不支持的数据库类型 %q"},

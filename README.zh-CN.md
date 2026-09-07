@@ -2,27 +2,35 @@
 
 > 中文 | [English](README.md)
 
-个人 AI 工具箱（Go 单二进制，无运行时依赖）。所有值在本地磁盘上都是加密存储，密钥不进配置中心、不进明文文件。`vaulty-keeper ui` 提供本地 Web UI 覆盖全部快照与 AES 工具（仅本机监听）。
+个人 AI 工具箱（Go 单二进制）。快照值、注册数据库 URL 和隧道 token 加密存储，但不覆盖所有本地文件：AES key/IV 列表是明文 JSON，导入源、导出/下载及编辑器临时文件可能含明文。`vaulty-keeper ui` 提供仅本机监听的快照、AES 和数据库连接 Web UI。系统密钥存储及可选原生客户端依赖平台设施。
+
+本页负责安装与入门；[文档索引](docs/README.md)链接现行指南和历史记录。[安全模型](docs/security-model.zh-CN.md)是安全边界的统一维护依据。
 
 ## 快速开始
 
-**方式一：下载预编译二进制**（推荐，无需安装 Go）——从 [Releases](https://github.com/Kitten9533/vaulty-keeper/releases) 下载对应平台的压缩包（macos/linux × x86_64/arm64，windows × x86_64），解压后把 `vaulty-keeper` 放到 PATH：
+**方式一：下载预编译二进制**（无需安装 Go）：从 [Releases](https://github.com/Kitten9533/vaulty-keeper/releases) 下载对应平台的压缩包（macos/linux × x86_64/arm64，windows × x86_64），解压后把 `vaulty-keeper` 放到 PATH（Windows 为 `vaulty-keeper.exe`，压缩包名包含版本）。
+
+本 README 描述当前源码工作区，包括尚未发布的 MongoDB 工作，**不代表现有 0.6.0 产物**。使用下载的二进制前先查发布说明。当前 Makefile 构建的压缩包包含二进制、两版 README、LICENSE、AGENTS.md 和当前 `docs/` 指南（索引、安全模型与五份指南，中英双语）；`docs/superpowers/` 历史记录仅保留在源码中。现有 0.6.0 产物不含 `docs/`；如需离线阅读，请在[源码仓库](https://github.com/Kitten9533/vaulty-keeper)选择对应 tag 的 `docs/`。当前工作区指南不是旧二进制的能力证据。
+
+以下初始化由人工在宿主执行，会创建本地密钥/状态；不是隔离测试，也不是让 agent 访问真实秘密的指令：
 
 ```sh
 vaulty-keeper apollo init      # 首次：生成快照密钥（macOS Keychain / Windows 凭据管理器 / Linux Secret Service）
 vaulty-keeper sensitive init   # 首次：生成敏感值密钥
-vaulty-keeper ui               # 打开本地 Web UI
+vaulty-keeper ui               # 长驻服务，后续命令另开终端执行
 ```
 
-**方式二：源码构建**（需要 Go 1.26+）：
+**方式二：源码构建**（需要 Go 1.26+、Git 和 Make；`make test` 还需要 Node.js）：
 
 ```sh
 git clone https://github.com/Kitten9533/vaulty-keeper.git
+cd vaulty-keeper
 make build          # → bin/vaulty-keeper
 make install        # 软链到 ~/.local/bin/vaulty-keeper
 make test           # 单测（含 Java↔Go 互操作向量）
-make release        # 交叉编译全平台发布包到 release/
 ```
+
+确保 `~/.local/bin` 在 PATH 中，或使用 `bin/vaulty-keeper`。维护者可用 `make release` 交叉编译发布包，但它会**删除并重建 `release/`**，不是快速开始检查，也不会自动发布。下文 shell 示例使用 POSIX 语法；Windows 可使用 WSL/Git Bash，或自行调整为 PowerShell 语法。
 
 ## 手动操作
 
@@ -43,68 +51,89 @@ vaulty-keeper ui --allow-plaintext    # 显式开启明文接口（见下）
 ```
 
 - 仅监听 `127.0.0.1`，不会暴露到局域网。
-- 启动时生成随机访问令牌，URL 形如 `http://127.0.0.1:8080/?t=<token>`：所有写操作（导入/增删改/导出/解密/明文编辑）都要求携带该令牌，本机其他进程（如 AI agent）无法通过 curl 直接导出明文。**请用启动时打印的完整 URL 打开**；只敲 `localhost:8080` 时读操作可用，但写操作会被拒绝。
-- **明文接口默认禁用**（`reveal`/`export`/明文编辑/AES 解密/AES 密钥列表在未开启时一律返回 403，即使带 token）；需要明文时用 `--allow-plaintext` 重启。这样即使 token 泄露给 AI，默认配置下也拿不到明文。
+- 随机访问令牌门控非 GET 操作。**请打开启动时打印的完整 URL**，例如 `http://127.0.0.1:8080/?t=<token>`；读取不要求 UI token。即使显式指定 `--port`，占用时也可能顺延，以打印端口为准。持有 token 不代表调用者是真人。
+- **明文接口默认禁用**（`reveal`/`export`/明文编辑/AES 解密/真实 DB URL 未开启时返回 403，即使带 token）；需用 `--allow-plaintext` 重启开启。这不是全面的无明文保证：快照 GET 返回显式 safe 值，且 **GET `/api/db/connect` 无需 UI token 就能返回可用隧道 token/链接**。本机调用者可能获得数据库访问权限，而不只是掩码元数据。
 - 启动时会打印警示：带 token 的 URL **不要发给 AI/脚本、不要进日志或 shell history**。
-- 覆盖全部功能：快照浏览/搜索/增删改、导入、环境对比、明文编辑、导出（下载或复制）、AES 加解密（手动 key/iv）、快照密钥与敏感值密钥初始化、**数据库隧道**（注册/测试连接、生成各客户端链接、重新生成隧道 token、`--allow-plaintext` 下查看真实 URL）。
-- 明文出口（显示 / 明文编辑 / 导出 / AES 解密）均需二次确认后才显示，响应 `Cache-Control: no-store`，浏览器不持久化明文。
-- 浏览器端不持久化快照内容。
-- UI **默认英文**，顶栏选择器可切换中文/英文；选择会记在浏览器 `localStorage` 并同步到共享偏好文件，CLI 输出语言跟随（见下「语言（UI 与 CLI）」）。
+- 提供快照浏览/搜索/增删改、导入、环境对比、明文编辑、导出（下载或复制）、AES 加解密（手动 key/iv）、快照密钥与敏感值密钥初始化、**数据库隧道**（注册/测试连接、生成各客户端链接、重新生成隧道 token、`--allow-plaintext` 下查看真实 URL）。
+- 确认流程因操作而异：AES 转换和查看 URL 直接发请求；请求中的 `confirm: true` 字段不等于一次独立人工确认。明文响应使用 `Cache-Control: no-store`，不能阻止截取、复制到剪贴板或下载。
+- 应用不主动将快照内容存入浏览器持久化存储；已显示的值、下载、扩展和浏览器/系统截取不在此保证内。实际导航与字段以 UI 指南为准。
+- UI **默认英文**，可切换中文；浏览器偏好及尽力而为的共享文件同步可能与 CLI 不一致（见下「语言（UI 与 CLI）」）。
+- macOS 启动时会尝试复用受支持浏览器中匹配的 UI 标签页，再回退为新开；`--no-open` 禁止打开浏览器。
 >
 > 逐页讲解 UI 功能与用法见 **[`docs/ui-guide.zh-CN.md`](docs/ui-guide.zh-CN.md)**（[English](docs/ui-guide.md)）。
 
 ## 语言（UI 与 CLI）
 
-整个工具双语（English / 中文），UI 与 CLI 共用同一套语言设置：
+工具提供中英文 UI/CLI 文本，共享偏好文件，但解析规则不同：
 
-- **Web UI 默认英文**；顶栏选择器切换中文/英文。选择按浏览器记在 `localStorage`，并同步写入共享偏好文件 `~/.vaulty/prefs.json`（0600）。新浏览器首次打开（无本地记录）会采用共享设置（例如 CLI 侧设置的语言）。
-- **CLI 输出与 UI 同语言**：命令树、`-h` 帮助、usage 段落、运行时消息与交互提示全部双语。
-- `vaulty-keeper lang` 打印当前语言；`vaulty-keeper lang zh|en` 写入共享偏好（非 TTY 也可用）。
+- **Web UI** 优先使用浏览器 `localStorage`；没有本地选择时尝试共享设置，再默认英文。切换会尝试写入 `~/.vaulty/prefs.json`（0600），但可能同步失败，例如缺少有效 UI token。
+- **CLI** 本地化命令树及许多帮助/运行时消息，但不保证与浏览器已保存的语言一致。
+- `vaulty-keeper lang` 打印当前语言；`vaulty-keeper lang zh` 或 `vaulty-keeper lang en` 写入共享偏好（非 TTY 也可用）。
 - `VAULTY_KEEPER_LANG=en|zh` 环境变量优先级最高。
 - 解析顺序：`VAULTY_KEEPER_LANG` → `~/.vaulty/prefs.json` → 默认 `en`。
 
+示例假设没有 `VAULTY_KEEPER_LANG` 覆盖，初始偏好为英文：
+
 ```sh
 vaulty-keeper lang            # → language: en
-vaulty-keeper lang zh         # 切到中文，与 Web UI 互通
+vaulty-keeper lang zh         # 写入共享中文偏好
 vaulty-keeper lang            # → 语言：zh
 vaulty-keeper help            # 帮助树此时也是中文
 ```
 
-shell 补全描述与底层库错误保持英文；中文终端下看到的是「中文提示 + 英文底层细节」，与中文版 UI 的行为一致。
+部分提示、flag 描述、shell 补全描述和底层库错误仍为英文。
 
 ## vaulty-keeper apollo — Apollo 快照工具
 
 > 讲解 Apollo 快照的实现（加密文件结构 / 双密钥分工 / 敏感识别 / 掩码与指纹 / 显式放行）与实测示例见 **[`docs/apollo-snapshot-guide.zh-CN.md`](docs/apollo-snapshot-guide.zh-CN.md)**（[English](docs/apollo-snapshot-guide.md)）。
 
-Apollo Open API 不可用时的替代方案：从 Apollo 门户**复制键值对**，导入加密快照，AI/脚本安全地读取、对比、修改。快照默认存 `~/.vaulty/apollo/<name>.json`（`--dir` 或环境变量 `VAULTY_KEEPER_APOLLO_DIR` 覆盖）。
+Apollo Open API 不可用时的替代方案：从 Apollo 门户复制键值对并导入加密快照。AI/脚本访问遵循下文掩码及写入权限边界。快照默认存于 `~/.vaulty/apollo/`（`--dir` 或环境变量 `VAULTY_KEEPER_APOLLO_DIR` 覆盖）。
+
+完成人工宿主密钥初始化后，以下完整示例仅用**合成值**，在新的临时目录创建两份快照。所有命令在同一终端执行，保留目录变量：
+
+```sh
+DEMO_SNAP_DIR=$(mktemp -d)
+printf '%s\n' 'APP_NAME = demo' 'LOG_LEVEL = info' 'SECRET_TOKEN = synthetic-prod' \
+  | vaulty-keeper apollo import - --dir "$DEMO_SNAP_DIR" --name prod --appid demo
+printf '%s\n' 'APP_NAME = demo' 'LOG_LEVEL = debug' 'SECRET_TOKEN = synthetic-test' \
+  | vaulty-keeper apollo import - --dir "$DEMO_SNAP_DIR" --name test --appid demo
+vaulty-keeper apollo list prod --dir "$DEMO_SNAP_DIR" --appid demo --json </dev/null
+vaulty-keeper apollo compare prod test --dir "$DEMO_SNAP_DIR" --appid demo --appid-to demo --json </dev/null
+```
+
+对比会报告 `LOG_LEVEL` 和 `SECRET_TOKEN` 变化，值为掩码。这使用宿主密钥存储，不是隔离密钥夹具。下文是**命令参考**，不是脚本：替换文件名、环境名、AppID 和 key；`<...>`、`[...]`、`a|b` 表示占位/可选项，不能原样当 shell 输入。
 
 ```sh
 vaulty-keeper apollo init                          # 首次：生成快照密钥（系统密钥库，如 macOS Keychain / Windows 凭据管理器 / Linux Secret Service）
 vaulty-keeper sensitive init                       # 首次：生成敏感值密钥（独立于快照密钥）
 vaulty-keeper apollo import prod.txt --appid xx    # 解析粘贴内容；--appid 必填；--name 省略时自动取文件名；已存在时需 --force 覆盖
 vaulty-keeper apollo import - --name prod --appid xx   # 从 stdin 读（旧写法 --app-id 仍兼容）
- vaulty-keeper apollo list                          # 列出快照（环境 + AppID）
- vaulty-keeper apollo list prod --appid xx          # 默认全部掩码 *** (长度)；--reveal 显示明文（仅 TTY）
- vaulty-keeper apollo list prod --appid xx --json   # JSON 输出（AI 友好）
- vaulty-keeper apollo get prod --appid xx SOME_KEY  # 非 TTY 下只对标记为安全的 key 输出明文，其余掩码
- vaulty-keeper apollo set prod --appid xx SOME_KEY value
- vaulty-keeper apollo set prod --appid xx SOME_KEY value --plain    # 显式标记为安全：AI/脚本可读明文
- vaulty-keeper apollo set prod --appid xx SOME_KEY value --secret   # 显式标记为敏感：始终掩码
- vaulty-keeper apollo mark prod --appid xx SOME_KEY --plain|--secret  # 不改值，只翻转安全/敏感标记
- vaulty-keeper apollo unset prod --appid xx SOME_KEY
- vaulty-keeper apollo compare prod test --appid xx --appid-to yy   # added/removed/changed，默认全部掩码
- vaulty-keeper apollo compare prod test --json
- vaulty-keeper apollo reveal prod --appid xx SECRET_TOKEN          # 显示敏感值明文（仅 TTY）
- vaulty-keeper apollo reveal prod --appid xx app.fs.oss.secret-key --key <aes> --iv <aes>   # 解密外部 AES 密文（仅 TTY）
- vaulty-keeper apollo edit prod --appid xx         # $EDITOR 打开明文编辑，保存后自动重新加密（仅 TTY）
- vaulty-keeper apollo export prod --appid xx       # 解密全量输出，供粘贴回 Apollo（仅 TTY）
- vaulty-keeper apollo export prod --appid xx --copy # 直接复制到剪贴板（pbcopy）（仅 TTY）
- vaulty-keeper apollo rm prod --appid xx           # 删除快照（TTY 确认；非 TTY 需 --yes）
- ```
+vaulty-keeper apollo list                          # 列出快照（环境 + AppID）
+vaulty-keeper apollo list prod --appid xx          # 非 TTY 未放行值掩码；--reveal 要求 stdin TTY
+vaulty-keeper apollo list prod --appid xx --json   # JSON 输出（AI 友好）
+vaulty-keeper apollo get prod --appid xx SOME_KEY  # 非 TTY 下只对标记为安全的 key 输出明文，其余掩码
+vaulty-keeper apollo set prod --appid xx SOME_KEY value
+vaulty-keeper apollo set prod --appid xx SOME_KEY value --plain    # 显式标记为安全：AI/脚本可读明文
+vaulty-keeper apollo set prod --appid xx SOME_KEY value --secret   # 敏感分类；不放行默认非 TTY 输出
+vaulty-keeper apollo mark prod --appid xx SOME_KEY --plain|--secret  # 不改值，只翻转安全/敏感标记
+vaulty-keeper apollo unset prod --appid xx SOME_KEY
+vaulty-keeper apollo compare prod test --appid xx --appid-to yy   # added/removed/changed，默认掩码规则见下
+vaulty-keeper apollo compare prod test --appid xx --appid-to yy --json
+vaulty-keeper apollo reveal prod --appid xx SECRET_TOKEN          # 显示敏感值明文（仅 TTY）
+vaulty-keeper apollo reveal prod --appid xx app.fs.oss.secret-key --key <aes> --iv <aes>   # 解密外部 AES 密文（仅 TTY）
+vaulty-keeper apollo edit prod --appid xx         # $EDITOR 打开明文编辑，保存后自动重新加密（仅 TTY）
+vaulty-keeper apollo export prod --appid xx       # 解密全量输出，供粘贴回 Apollo（仅 TTY）
+vaulty-keeper apollo export prod --appid xx --copy # 先打印，再用 macOS pbcopy 复制（仅 TTY）
+vaulty-keeper apollo rm prod --appid xx           # 删除快照（TTY 确认；非 TTY 需 --yes）
+```
 
-> 明文命令（`reveal`/`export`/`edit`/`list|compare --reveal`/`aes decrypt`）**只在交互式终端可用**；AI/脚本环境一律拒绝，加 `--yes` 也无法放行。
+> 明文命令（`reveal`/`export`/`edit`/`list|compare --reveal`/`aes decrypt`）要求 **stdin 为 TTY**，`--yes` 不绕过此检查。这是防误操作门禁，不是真人认证，也不检查 stdout。TTY 下 `get` 可以直接输出明文。agent 不得调用真实秘密的明文出口或伪造 TTY。
 >
-> **反转默认（reverse default）**：`get`/`list`/`compare` 在 AI/脚本（非 TTY）环境下默认**全部掩码**，不靠 key 名猜测——除非某个 key 被显式标记为安全（`set --plain` 或 `mark --plain`）。这样即使有大量未知名字的 key，AI 也拿不到任何明文；需要 AI 读取的少量已知安全 key 才单独放行。
+> **反转默认**：非 TTY 下 `get`/`list`/`compare` 对未显式 safe（`set --plain` 或 `mark --plain`）的值掩码。safe 是允许输出明文的授权，不只是非敏感分类。普通 TTY list/compare 也可能显示非敏感值。
+
+CLI `compare --json` 在无变化时仍输出文本消息，不是 JSON。需要桥接指纹时用 `remote list <env> --appid <id> --json`；`remote get` 只打印掩码值字符串。尽管 CLI 标作 `chars`，长度实际是 UTF-8 **字节数**。指纹使用同一快照 HMAC 密钥对归一化值计算并截断为 8 字节，是高置信比较信号，不是原始字节完全相同的证明。CLI 和 HTTP JSON 结构不同。
+
+CLI 导入覆盖已有快照需要 TTY 确认或非 TTY 显式 `--force`；UI 导入重名环境/AppID 返回 409。导入替换和整份编辑都会重建条目、重新分类，不保留全部 safe/secret 标记。省略或无法解析的条目可能消失；保存后复核解析警告（并非所有编辑路径都会展示）、key 集合及分类。CLI 编辑还会创建明文临时文件，编辑器可能另留备份。
 
 快照以「环境 + AppID」为唯一键，存储为 `{env}__{appid}.json`；旧版无 AppID 的 `{env}.json` 仍可读取（不指定 `--appid` 时访问）。
 
@@ -115,64 +144,58 @@ vaulty-keeper apollo import - --name prod --appid xx   # 从 stdin 读（旧写�
 - 一行内粘在一起的多个 `KEY = ` 条目自动拆分并警告（如 `A = 1B = 2`）。
 - key 校验 `[A-Za-z_][A-Za-z0-9_.-]*`，非法行跳过并警告。
 
-两把密钥（都在系统密钥库，均可环境变量覆盖，均不进明文文件）：
+两把快照密钥（通常存于系统密钥库；非空环境变量覆盖优先）：
 
 - **快照密钥**（`VAULTY_KEEPER_APOLLO_KEY`，`apollo init` 创建）：加密所有非敏感值。
-- **敏感值密钥**（`VAULTY_KEEPER_SENSITIVE_KEY`，`sensitive init` 创建）：加密所有敏感值（password/token/secret/...）。敏感值只有这把密钥能解开，`reveal`/`--reveal` 显示明文靠它，AI 进程拿不到它就无法读取敏感值明文。文件权限 0600，值为 AES-256-GCM + 每条独立随机 nonce。
+- **敏感值密钥**（`VAULTY_KEEPER_SENSITIVE_KEY`，`sensitive init` 创建）：独立于快照密钥加密新写入的敏感值。旧格式敏感密文仍可能回退快照密钥解密；双密钥隔离承诺适用于独立新加密的数据。文件权限 0600，加密值使用 AES-256-GCM 和每条独立随机 nonce。
 
-**Linux 说明**：桌面会话（gnome-keyring / kwallet）下 `apollo init` / `sensitive init` / `db init` 开箱即用（Secret Service）；无头服务器没有 Secret Service 时用环境变量兜底——先在任意机器生成 32 字节 base64 密钥，再写进无头服务器的 shell 配置（文件 0600）：
+**Linux**：初始化需要可用的桌面 Secret Service（例如 gnome-keyring / kwallet）。无头宿主可由可信操作者通过受控秘密注入提供 `VAULTY_KEEPER_APOLLO_KEY`、`VAULTY_KEEPER_SENSITIVE_KEY` 和 `VAULTY_KEEPER_DB_KEY`，每项都须 Base64 解码后恰好 32 字节。即使 keyring 可用，环境覆盖仍优先；无效/错误覆盖不会自动回退 keyring。重新生成密钥前先检查来源，否则可能使已有数据无法解密。`openssl rand -base64 32` 会打印新秘密，真实密钥不要在 agent/录制会话中生成。将密钥写入 shell profile 会形成明文文件，即使权限 0600 也不属于加密存储。
 
-```sh
-# 生成密钥（任意机器，一次即可；密钥不要进终端日志/剪贴板）
-openssl rand -base64 32    # → 快照密钥
-openssl rand -base64 32    # → 敏感值密钥
-
-# 无头服务器 ~/.profile（0600）——密钥是红线，不要放进 AI 会话/命令行参数
-export VAULTY_KEEPER_APOLLO_KEY='<base64>'
-export VAULTY_KEEPER_SENSITIVE_KEY='<base64>'
-```
-
-敏感识别（默认掩码，`--reveal` 显示；`--reveal` 仅 TTY 可用）：
+敏感分类（导入/新 set 时使用并持久化；读取不改写，已有条目无 flag 的 `set` 保留分类）：
 
 - **key 名命中**：`password|passwd|pwd|token|secret|salt|credential|private|access[_-]?key|secret[_-]?key|api[_-]?key`（不区分大小写）
 - **值带凭据的 URI/DSN**：key 名含 `uri|url|dsn|connection|endpoint|addr|address`，且值形如 `scheme://user[:password]@host`（如 `mongodb://root:pw@...`）
 - **JWT**：值形如 `eyJ...` 三段式 base64url（如 `SUPABASE_SERVICE_ROLE_KEY`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`）
 
-宁多掩不漏掩，TTY 下 `--reveal` 可补救。
+`MONGODB_URI` 不是名称直接命中敏感规则，而是示例中的带凭据值使其敏感。分类选择加密行为；显式 **safe** 授权独立控制普通非 TTY/UI 明文输出。不要用 `--plain` 暴露真实秘密。
 
 ## vaulty-keeper aes — AES 加解密（Java CryptoUtil 兼容）
 
 用于解密 Apollo 里 OSS AK/SK 这类**值本身就是 CryptoUtil 密文**的配置。算法对齐 `CryptoUtil.java`：AES/GCM/NoPadding、tag 128 bits、key 为 UTF-8 字节（16/24/32）、iv 为 UTF-8 字节直接作 GCM IV、密文为 Base64。
 
-key/iv 统一存在 `~/.vaulty/aes.json`（0600）的**命名列表**里，格式为数组 `[{name, secret-key, iv}, ...]`（旧版单对象 `{key, iv}` 自动迁移为 `default` 条目）。CLI 用 `--name` 引用；Web UI 的 AES 工具与快照"显示"解密均为**手动输入 key/iv**（不读取列表）。
+key/iv 存在 `~/.vaulty/aes.json`（0600）的**明文命名列表**里，格式为数组 `[{name, secret-key, iv}, ...]`（旧版单对象 `{key, iv}` 读取为 `default` 条目）。CLI 用 `--name` 引用；Web UI 的 AES 工具与快照“显示”解密均为**手动输入 key/iv**（不读取列表）。快照存储加密与值本身的外部 CryptoUtil 加密是两层。UI 的外部 AES 字段只在 reveal 失败后出现，不是始终可展开的高级选项。
+
+**新加密不得对不同消息重复使用同一 key/IV**。命名条目保留 IV，Java 兼容不代表可安全反复使用；解密必须使用原配对。下文是语法参考，不是可反复执行的真实秘密流程：字面密钥/行内环境赋值可能进入 shell history 和进程检查，stdin 不会清除上游 shell 命令。`aes gen-key` 即使非 TTY 也会打印生成的 key/IV。
 
 ```sh
-# 列出 / 新增 / 删除条目
+# 列出 / 生成 / 添加条目（参考备选操作，不是连续脚本）
 vaulty-keeper aes list
-vaulty-keeper aes gen-key --name oss              # 生成并保存到 aes.json
+vaulty-keeper aes gen-key --name oss              # 生成、打印秘密并保存明文 aes.json
 vaulty-keeper aes add --name oss --key <k> --iv <i>   # 手动保存条目
 
 # 用列表条目加解密（decrypt 仅 TTY 输出明文）
 vaulty-keeper aes encrypt --name oss 'hello'
 vaulty-keeper aes decrypt --name oss '<base64>'
 
-# 或手动指定 / 环境变量（避免进 shell history）
+# 仅语法：手动参数 / 行内 env 会暴露真实秘密
 vaulty-keeper aes encrypt --key <k> --iv <i> 'hello'
 VAULTY_KEEPER_AES_KEY=<k> VAULTY_KEEPER_AES_IV=<i> vaulty-keeper aes decrypt '<base64>'
 
 # 解密外部 AES 密文值（仅 TTY）
-vaulty-keeper apollo reveal prod app.fs.oss.secret-key --key <k> --iv <i>
+vaulty-keeper apollo reveal prod app.fs.oss.secret-key --appid xx --key <k> --iv <i>
 ```
 
-输入可走 `--file`、参数或 stdin。`decrypt` 输出明文，**仅交互式终端可用**（脚本/AI 环境一律拒绝）。
+输入可走 `--file`、参数或 stdin。`decrypt` 输出明文且要求 stdin TTY，管道传密文不会绕过门禁；确有需要时由人工在终端使用文件/参数。输入文件与输出各有自己的明文生命周期。
 
 ## 其他
+
+下方命令参考中的备选项/占位不是可复制的 shell 管道：
 
 ```sh
 vaulty-keeper ui                              # 启动本地 Web UI（默认 127.0.0.1:8080，占用时自动顺延）
 vaulty-keeper serve --addr 0.0.0.0:8970       # 掩码代理（host 持有密钥时对容器/隔离域开放）
 vaulty-keeper remote list|get|compare ...     # 通过掩码代理读（形态与 apollo 子命令一致）
-vaulty-keeper db <init|add|list|test|connect|show|rm|shell|regen> ... # 加密数据库连接 + 隧道（见「数据库隧道代理」）
+vaulty-keeper db <init|add|list|test|connect|show|rm|shell|regen|on|off> ... # 加密数据库连接 + 隧道
 vaulty-keeper completion zsh | source /dev/stdin   # 或 bash / fish，加到 shell 配置
 vaulty-keeper lang [en|zh]    # 查看或设置共享的 UI/CLI 语言
 vaulty-keeper version
@@ -180,67 +203,70 @@ vaulty-keeper version
 
 ## 容器隔离部署（防"故意对抗"AI，跨 macOS / Windows）
 
-默认安全模型防的是"守规矩的 AI"；对**故意不读文档、主动拿密钥**的 AI，唯一可靠的办法是把它放进一个**摸不到密钥和密文**的隔离域。方案用 Docker 统一（macOS/Windows 的 Docker 都是 Linux VM）：
+掩码和 TTY 门禁不能约束恶意同用户进程。隔离必须把密钥和密文放在 agent 不可访问的位置；仓库 Docker 配置是一种起点（Docker Desktop 使用 Linux VM），但不强制限制网络出口，也不阻止访问已授权的数据库内容。详见[安全模型](docs/security-model.zh-CN.md)。
 
 ```
 [Docker 容器：codex / claude / opencode / pi]
       │  vaulty-keeper remote list|get|compare（只拿掩码）
       ▼
 [Host：持有密钥]
-      vaulty-keeper serve --addr 0.0.0.0:8970   ← 掩码代理，永不回明文
+      vaulty-keeper serve --addr 0.0.0.0:8970   ← 快照 API 掩码值；DB 隧道返回数据
       ▼
-      系统密钥库 + ~/.vaulty/（容器永远看不到）
+      系统密钥库 + ~/.vaulty/（提供的 compose 不挂载这些路径）
 ```
 
 ### Host 侧：启动掩码代理
+
+人工宿主终端 1：保持 `serve` 运行。使用可信且由防火墙限制的接口；下方绑定所有接口。需要隧道时先注册数据库再启动。
 
 ```sh
 vaulty-keeper serve --addr 0.0.0.0:8970     # 打印 token 并写入 ~/.vaulty/bridge-token
 ```
 
-- 只输出掩码：`*** (n chars)` + 长度 + 指纹，**即使 `set --plain` 标记为安全的 key 也不回明文**
-- 所有 `/api` 端点都要 token（0600 写入 `~/.vaulty/bridge-token`），失败限速（指数退避）
-- `0.0.0.0` 是为了让 Docker VM 能通过 `host.docker.internal` 访问；token 门控 + 只回掩码，暴露到局域网也可接受（只想本机用就绑 `127.0.0.1`，但容器将连不上）
+- 快照 API 的值始终掩码，**即使 `set --plain` 标记为 safe 也不回明文**。JSON list/compare 响应包含长度/指纹；`remote get` 只打印掩码。
+- 所有 `/api` 端点都要 token（0600 写入 `~/.vaulty/bridge-token`）；失败检查每次增加 50 ms 延迟，上限 2 秒。该 token 也授权新旧 PG/MySQL/Redis 隧道连接，不是无害的元数据 token。
+- `0.0.0.0` 使 Docker 可访问宿主，也把明文 HTTP 和隧道监听暴露给可达网络。token 检查不加密传输，也不使局域网暴露变安全；必须用网络控制限制访问。仅宿主使用时绑定 `127.0.0.1`。
 
 ### 容器侧：agent 隔离域
 
+人工宿主终端 2，从仓库目录执行：选择不含秘密文件的项目目录。以下 token 交付是一项授权决定；当前入口脚本会**把 token 打印进容器日志**，不要分享这些日志。镜像在 Docker 内构建 Go，默认不安装可选 agent CLI 或数据库客户端。
+
 ```sh
-# 构建镜像（host 先 make build，二进制会被拷进镜像）
+# 在 Docker 内从源码构建，无需宿主先 make build
 docker build -t vaulty-keeper-agent:local .
 
-# 启动（token 从 host 读，只值掩码）
+# 人工宿主交付：授权快照元数据及 PG/MySQL/Redis 数据库访问
 export VAULTY_KEEPER_BRIDGE_TOKEN="$(cat ~/.vaulty/bridge-token)"
-export VAULTY_KEEPER_PROJECT_DIR=/path/to/your/project   # 只挂载项目目录
+export VAULTY_KEEPER_PROJECT_DIR="$PWD"   # 当前仓库，挂载前检查内容
 docker compose up -d
 
-# 进容器跑 agent；读配置用 vaulty-keeper remote（命令形态与本地一致）
-docker compose exec agent codex
-docker compose exec agent vaulty-keeper remote list prod --appid xx
-
-# 容器里同样可以用 DB 隧道（见「数据库隧道代理」）：连 host.docker.internal 的隧道端口
-docker compose exec agent bash -c 'psql "postgresql://$VAULTY_KEEPER_BRIDGE_TOKEN@host.docker.internal:15432/appdb" -c "SELECT 1;"'
+# 无需安装 agent CLI 即可使用，列出宿主桥接服务的快照
+docker compose exec agent vaulty-keeper remote list
+docker compose exec agent vaulty-keeper remote dblist
 ```
+
+需要 `codex` 时，在创建容器前设置 `VAULTY_KEEPER_INSTALL_AGENTS='@openai/codex'`，单独完成其登录/配置，再执行 `docker compose exec agent codex`。原生数据库命令还要求客户端环境安装 `psql`、MySQL `mysql`、`redis-cli` 或 `mongosh`。由宿主执行 `db connect <name> --container` 生成命令，仅交付获授权的隧道凭据，不交付宿主加密密钥。
 
 隔离要点（`docker-compose.yml` 已内置）：
 
-- **不挂载** `~/.vaulty`、系统密钥库、`~/.ssh`、docker socket → 容器拿不到密钥和密文
+- **不显式挂载** `~/.vaulty`、系统密钥库、`~/.ssh` 或 Docker socket。不要选择含这些文件的项目目录，也不要通过环境变量传入加密密钥而破坏隔离。
 - 非 root 用户 + `cap_drop: ALL` + `no-new-privileges`
-- 容器只通过 `VAULTY_KEEPER_BRIDGE_ADDR` / `VAULTY_KEEPER_BRIDGE_TOKEN` 连掩码代理
+- `VAULTY_KEEPER_BRIDGE_ADDR` / `VAULTY_KEEPER_BRIDGE_TOKEN` 配置桥接访问；compose **没有**把桥接服务设为唯一网络目的地。
 - 装 agent CLI：`VAULTY_KEEPER_INSTALL_AGENTS='@openai/codex @anthropic-ai/claude-code opencode-ai'`（进容器时自动 npm 安装到用户目录）
-- **持久化**：`agent-home` 命名卷挂到 `/home/agent`，已装的 CLI 与 agent 会话历史跨容器重建保留；想完全重置就 `docker volume rm vaulty-keeper_agent-home`
+- **持久化**：`agent-home` 命名卷挂到 `/home/agent`，CLI 与会话历史跨重建保留。实际卷名取决于 Compose 项目；确需清空历史和已安装工具时，先解除容器使用，再仅删除核实过的该卷。
 - **Linux 兼容**：compose 已加 `extra_hosts: host.docker.internal:host-gateway`（macOS/Windows 的 Docker Desktop 本就提供，无影响）
 
-### 为什么这样能防住"故意对抗"AI
+### 隔离能做什么、不能做什么
 
-容器里的 AI 就算不读任何文档：拿不到系统密钥库（VM 隔离）、拿不到快照文件（未挂载）、拿不到密钥（不传 env）；唯一出口是掩码代理，而它**只回掩码**。明文在密码学意义上无法离开 host。
+挂载、权限和凭据遵守上述边界时，容器没有直接访问宿主密钥存储或快照文件的路径。但它仍可能读取挂载项目中的秘密、使用 bridge token 连接 PG/MySQL/Redis、查询业务数据，或把可访问的数据发送到网络。这些属于独立权限，不是加密失效。
 
-**注意 Docker 本身不是绝对隔离**：`cap_drop ALL` + `no-new-privileges` 已大幅收窄容器逃逸面，但 Docker daemon 是 root 服务，容器逃逸是真实攻击面。对**极高威胁等级**（专业对抗 / 合规审计）应升级到独立 macOS 账号、VM 或云沙箱（见下节）；Docker 方案适合"防止绝大多数 AI 主动拿密钥"的场景。
+**Docker 本身不是绝对隔离**：减少 capability 和 `no-new-privileges` 可降低攻击面，但 daemon 权限和容器逃逸仍是风险。更强威胁需要另行评估账号/VM/沙箱及网络控制；此处配置没有可量化的防护成功率证据。
 
 ### Windows 用户
 
 - 同一套 compose/镜像；Windows 版 Docker Desktop 底层是 WSL2，`host.docker.internal` 同样可用
 - 密钥存 **Windows 凭据管理器**（`vaulty-keeper apollo init` / `sensitive init` 自动适配，无需 `security` 命令）
-- 交互式菜单 / 明文命令需要真实控制台 TTY（`isTTY` 按 `GetConsoleMode` 检测）；脚本 / 代理环境自动掩码
+- 明文 CLI 门禁检查 stdin 控制台状态（Windows 用 `GetConsoleMode`），不认证真人；当前没有交互菜单。非 TTY 本地读取掩码未放行值，桥接快照读取始终掩码。
 
 ### 不用 Docker 的替代用法
 
@@ -248,41 +274,43 @@ docker compose exec agent bash -c 'psql "postgresql://$VAULTY_KEEPER_BRIDGE_TOKE
 
 **① 本机直接跑（无隔离，防"守规矩"的 AI）**
 
+终端 1 执行 `vaulty-keeper serve --addr 127.0.0.1:8970` 并保持运行。同一宿主终端 2 执行：
+
 ```sh
-vaulty-keeper serve --addr 127.0.0.1:8970    # 终端1：host 起代理（持有密钥）
 export VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8970
-vaulty-keeper remote list prod --appid xx    # 终端2：只拿掩码
+vaulty-keeper remote list   # 未设环境覆盖时读取宿主 token 文件
 ```
 
 AI 与你在同一账号下时，靠的是掩码 + TTY 门禁；对会主动读密钥的 AI 不设防。
 
 **② 独立 macOS 账号（真隔离，替代 Docker）**
 
+通过 macOS 账号设置创建标准非管理员 `ai` 账号，并检查文件权限，不要把真实密码写入 shell 命令。另行安装 `codex` 后，人工宿主可显式委托 bridge token：
+
 ```sh
-sudo sysadminctl -addUser ai -password '<pw>' -admin no   # 一次性创建
-# 启动 agent（token 只值掩码，进 ai 会话无害）：
 sudo -u ai env VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8970 \
   VAULTY_KEEPER_BRIDGE_TOKEN="$(cat ~/.vaulty/bridge-token)" codex
 ```
 
-`ai` 账号的 Keychain 里没有你的密钥、读不了 `~/.vaulty/`（0700），隔离效果与 Docker 相当；代价是要管理账号、git 凭据与文件权限。
+独立账号不应持有宿主密钥，也不应可读宿主 0700 的 `~/.vaulty/`。需验证权限和其他共享文件；委托的 token 仍授权 PG/MySQL/Redis 访问。账号凭据、agent 安装及文件权限须自行管理。
 
 **③ 远程机器 / WSL2**
 
-agent 放另一台机器或 Windows WSL2，host 的 `vaulty-keeper serve --addr 0.0.0.0:8970` 走网络可达（token 门控 + 只回掩码）。
+将 agent 放在独立受控机器/VM，并把桥接/隧道可达性限制在可信网络。仅使用 WSL2 不保证与 Windows 宿主文件隔离。token 门控的快照掩码不保护明文传输，也不脱敏数据库结果。
 
-## 数据库隧道代理（AI 查库，DSN 不暴露）
+## 数据库隧道代理（AI 使用隧道凭据查询）
 
 > 完整的 ASCII 图解（Docker 里是什么 / 凭据存哪 / 三库认证注入 / 安全边界 / 时序）见 **[`docs/db-proxy-architecture.zh-CN.md`](docs/db-proxy-architecture.zh-CN.md)**（[English](docs/db-proxy-architecture.md)）。
-> 大量实测过的用法示例（多连接/各客户端/容器 AI/权限/脚本）见 **[`docs/db-proxy-examples.zh-CN.md`](docs/db-proxy-examples.zh-CN.md)**（[English](docs/db-proxy-examples.md)）。
+> 多连接/原生客户端/容器/权限示例及夹具前提见 **[`docs/db-proxy-examples.zh-CN.md`](docs/db-proxy-examples.zh-CN.md)**（[English](docs/db-proxy-examples.md)）；请查看各示例的证据和版本范围。
+> MongoDB 8 固定端点的命令感知隧道、完整 URL 选项、安全边界及验证矩阵见 **[MongoDB 隧道指南](docs/mongodb-tunnel-guide.zh-CN.md)**（[English](docs/mongodb-tunnel-guide.md)）。下方旧图及示例范围为 PG/MySQL/Redis。
 
-让容器/隔离域里的 AI 用**原生客户端**（psql / mysql / redis-cli）查询数据库并拿到数据，但数据库连接 URL（地址/账号/密码）**绝不暴露给 AI**。URL 只以密文形式存在 host 的 vaulty-keeper 里（独立 DB 密钥，`VAULTY_KEEPER_DB_KEY` / 系统密钥库），`serve` 为每条连接起一个 TCP 隧道，在握手阶段注入真实凭据后纯字节转发。
+让容器/隔离域里的 AI 用**原生客户端**（psql / mysql / redis-cli / mongosh）和隧道凭据查询数据库，而非获得真实后端 URL。URL 在宿主通过独立 DB 密钥（`VAULTY_KEEPER_DB_KEY` / 系统密钥库）加密存储。`serve` 为每条连接起 TCP 隧道并认证后端。PG/MySQL/Redis 随后转发原始字节；MongoDB 持续按帧执行命令白名单并重建控制回包。业务数据不脱敏，详见各协议安全边界。
 
 ```
 [Docker 容器：AI agent]
-  psql "postgresql://$TOKEN@host.docker.internal:15432/appdb"   # token 放 user 字段
-  mysql -h host.docker.internal -P 15435 -u "$TOKEN" -px         # token 放 username 字段
-  redis-cli -a "$TOKEN" -p 15434                                  # token 放 AUTH
+  psql "postgresql://$PG_TOKEN:x@host.docker.internal:15432/appdb"
+  mysql -h host.docker.internal -P 15435 -u "$MYSQL_TOKEN" -px --ssl-mode=DISABLED
+  redis-cli -h host.docker.internal -a "$REDIS_TOKEN" -p 15434
         ▼ TCP
 [Host: vaulty-keeper serve --addr 0.0.0.0:8970]
   HTTP 掩码桥（原有）+ 每连接一个 TCP 隧道（校验 token → 用解密 URL 连真实库 → 注入真实凭据 → 转发）
@@ -290,43 +318,84 @@ agent 放另一台机器或 Windows WSL2，host 的 `vaulty-keeper serve --addr 
   真实数据库
 ```
 
-**用法**
+图为示意，不是夹具准备流程：各 token 和端口须对应已注册连接。PG/MySQL/Redis 转发上游业务回包/错误，可能暴露后端元数据，不是通用响应脱敏器。
+
+**人工宿主入门：合成 PostgreSQL**
+
+需要 Docker、PATH 中当前源码构建的二进制，以及宿主原生 `psql`。示例向宿主默认 DB store 写入演示注册，不要复用已有连接名。预留后端端口 **25432**、隧道 **15432**、桥接 **8970**；自动分配不检查 OS 端口占用。固定演示容器名须未使用，重名时 Docker 会拒绝，不会删除已有容器。下文行内凭据全部为合成数据，不是真实秘密的输入模式。
+
+宿主终端 1：
 
 ```sh
-vaulty-keeper db init                                                          # 首次：生成 DB 密钥
-printf 'postgres://app:pass@db.example.com:5432/orders' \
-  | vaulty-keeper db add orders [--port 15432]                                 # URL 走 stdin，不进 argv/history
-vaulty-keeper db list                                                          # orders (postgres) :15432
-vaulty-keeper db regen orders                                                  # 轮换该连接的隧道 token，旧 token 立即失效
-vaulty-keeper db regen --all                                                   # 轮换所有连接的隧道 token
-vaulty-keeper db off orders [--all]                                            # 关闭隧道，端口停止监听（serve 约 2 秒内生效）
-vaulty-keeper db on orders [--all]                                             # 重新开启隧道
-vaulty-keeper serve --addr 0.0.0.0:8970                                        # 同时起掩码桥 + 隧道
+vaulty-keeper db init   # 仅首次使用，不要强制重新生成已有密钥
+docker run -d --name vaulty-readme-pg --rm \
+  -e POSTGRES_USER=app -e POSTGRES_PASSWORD=synthetic-demo-pass -e POSTGRES_DB=appdb \
+  -p 127.0.0.1:25432:5432 postgres:17.6-alpine
+docker exec vaulty-readme-pg pg_isready -U app -d appdb
 ```
 
-- 类型从 URL scheme 自动识别：`postgres://`/`postgresql://`、`mysql://`、`redis://`/`rediss://`
-- **同类可配多个**：每个连接一个名字 + 一个独立隧道端口，数量不限（如 3 个 MySQL：`mysql-orders`/`mysql-billing`/`mysql-reporting`，`db add` 时各指定/自动分配端口），`db connect <name>` 逐个取命令
-- 容器/隔离域内用 `vaulty-keeper db list`（无本地 store 时自动经桥读取）或 `vaulty-keeper remote dblist` 查隧道端口，再用原生客户端连（`$TOKEN` 取 `vaulty-keeper db connect <name>` 打印的连接专属 token；旧连接无专属 token 时回退全局 `VAULTY_KEEPER_BRIDGE_TOKEN`）
-- **热加载**：`serve` 每 2 秒同步 `db.json`——`db add`/`db rm`/`db regen`/`db on`/`db off` 后隧道自动开/关，**不用重启 serve**
-- **隧道默认开启**；`db off <name>|--all` 按连接关闭（端口停止监听），`db on` 重新开启；`db list`/`remote dblist` 显示 `[关]` 标记；UI 连接表格每行有「开启/关闭隧道」按钮
-- `vaulty-keeper db connect <name>` 直接打印**带 token 的完整客户端命令**（psql/mysql/redis-cli，token 已填好），`--container` 换成 `host.docker.internal`，`--host` 指定其他主机、`--cmd` 只输出单行命令；隧道链接统一带 **user+password**（token 在 PG/MySQL 的 user 字段、Redis 的 AUTH 密码，另一字段是占位 `x`，被隧道忽略），GUI 工具不挑字段
-- `vaulty-keeper db regen <name>|--all` 轮换隧道 token：每条连接有**专属 token**（128 位随机，随 URL 一起加密落盘），`db add` 时自动生成；token 泄露时单独轮换即可，全局 bridge token 不受影响
-- **凭据注入**：PG 假 server 直接放行（trust 风格，token 在 user 字段）；MySQL 握手时把真实密码的认证应答换进去（支持 `mysql_native_password` / `caching_sha2_password`）；Redis 代理代发真实 `AUTH`。客户端永远不需要真实密码
-- **TLS**：PG 按 URL 的 `sslmode`（require/verify-ca/verify-full/prefer）、MySQL 用 `?tls=true`、Redis 用 `rediss://` 连接真实库；客户端↔代理为本机/局域网明文
+等待 `pg_isready` 报告接受连接，再在终端 1 继续：
+
+```sh
+printf '%s\n' 'postgres://app:synthetic-demo-pass@127.0.0.1:25432/appdb?sslmode=disable' \
+  | vaulty-keeper db add readme-orders --port 15432
+vaulty-keeper db list
+vaulty-keeper serve --addr 127.0.0.1:8970   # 长驻，等待监听成功输出
+```
+
+宿主终端 2：
+
+```sh
+vaulty-keeper db connect readme-orders --cmd
+```
+
+在终端 2 执行打印的 `psql` 命令，输入 `SELECT 1;`（预期结果 `1`），再输入 `\q`。打印的 token 是访问凭据。可选生命周期命令同样在终端 2 执行：
+
+```sh
+vaulty-keeper db regen readme-orders   # 重新分发生成的新客户端命令
+vaulty-keeper db off readme-orders    # watcher 下次同步时停止监听
+vaulty-keeper db on readme-orders
+```
+
+清理本演示时，仅在终端 1 用 Ctrl-C 停止自己启动的 `serve`，再在终端 2 执行：
+
+```sh
+vaulty-keeper db rm readme-orders --yes
+docker stop vaulty-readme-pg   # --rm 删除这个演示容器
+```
+
+真实注册可由人工执行 `vaulty-keeper db add <name>`，在 stdin 提示后粘贴 URL；当前输入会**在终端回显**。管道避免 URL 进入 vaulty-keeper 的 argv，但字面 `printf 'URL'` 仍会进入上游 shell history。使用可信输入源，避免录制终端；agent 不得为此读取真实 URL。需要全量 `regen`/`on`/`off` 时用 `--all` 替代连接名，不要照抄 `name [--all]`。
+
+- 类型从 URL scheme 自动识别：`postgres://`/`postgresql://`、`mysql://`、`redis://`/`rediss://`、`mongodb://`
+- **同类可配多个**：每个连接独立名称和隧道端口，受可用端口/资源限制。`db add` 可显式指定或自动分配端口，在宿主逐个获取客户端命令。
+- **宿主与容器**：`db connect <name> --container` 必须在持有本地 DB store/key 的宿主执行，仅向获授权客户端交付生成的命令/token。无密钥容器通过 `remote dblist`（或 `db list` 回退）取元数据，不能用 `db connect` 生成专属 token。不要为此挂载宿主密钥。`--container` 只改变打印地址，不改变监听；容器访问需要可达且受限的宿主接口。
+- **Watcher 前提**：`serve` 仅在启动时 DB store 已存在且密钥可用才启动监听同步。bridge-only 启动后首次注册数据库，需要重启 `serve` 并重新分发新的全局 token。已启动的 watcher 每 2 秒同步增删/on/off，新连接读取 token 变化。修改已有端口可能需要重启监听（`off`，等关闭后再 `on`）。
+- **隧道默认开启**；`db off <name>` 关闭单个监听，`db off --all` 关闭全部，在 watcher 下次同步时生效。`db on` 重新启用；列表显示关闭状态，UI 提供逐行开启/关闭按钮。
+- `vaulty-keeper db connect <name>` 打印**可直接运行的带 token 命令**（psql/mysql/redis-cli/mongosh）；`--container` 使用 `host.docker.internal`，`--host` 选择主机，`--cmd` 仅输出一行。PG/MySQL 以 token 为用户、密码占位 `x`；Redis 以 token 为密码、用户占位 `x`；MongoDB 使用**用户 `vaulty`、专属 token 作为 SCRAM-SHA-256 密码、`authSource=admin`**，并带 `directConnection=true&retryWrites=false`。生成的 mongosh 命令只把隧道 URI/token 放入 argv，不含后端 URI；token 是供获授权 agent 使用的访问凭据，不是无害公开数据。
+- `vaulty-keeper db regen <name>`（或 `db regen --all`）轮换 128 位专属 token，随后重新分发生成的链接；既有会话保留，全局 token 不受影响。**新旧 PG/MySQL/Redis 连接都接受全局或专属 token**；CLI 优先打印专属 token 不代表禁用了全局访问。MongoDB 仅接受专属 token。
+- 同名 `db add` 未指定端口时保留原端口，但生成新 token 并恢复 enabled。之后须重新分发链接并检查暴露范围。UI enabled/off 是保存的配置，不是监听/后端健康状态；`Broken` 表示注册 URL 解密失败，token 解密可在 Resolve 时单独失败。
+- **凭据注入**：PG 使用 trust 风格前端认证；MySQL 替换认证应答（`mysql_native_password` / `caching_sha2_password`）；Redis 代发后端 `AUTH`；MongoDB 使用注册的后端 SHA-256/SHA-1 凭据/认证库独立认证。隧道客户端不需要真实密码。
+- **后端 TLS**：PG 由客户端库处理 `sslmode`，Redis 使用 `rediss://`。**MySQL `?tls=true` 会与后端协商 TLS**（C01 修复：已有单测；曾对 `require_secure_transport=ON` 的 MySQL 8 做过一次性原生 TLS 查询，经隧道可见 `Ssl_cipher` 非空、TLSv1.3，但该证据未被集成测试固化——依赖前请对真实 TLS 后端复测）；如需信任私有/自签 CA，加 `tlsCAFile=<路径>`。MongoDB 实现了 `tls=true`/`ssl=true` 和可选 `tlsCAFile` 的证书/主机名验证，但真实 MongoDB TLS 仍未验证。客户端到代理为明文，仅用于 localhost 或隔离可信网络。
 - **只读控制**：代理层不强制只读，用只读账号的 URL 注册即天然只读
-- `vaulty-keeper db shell <name>` 可在 host 上直接打开原生客户端（TTY-only，凭据走环境变量不进 argv）
-- Mongo 未支持（无成熟 Go 代理库；host 上用 `vaulty-keeper db shell` 或直接 mongosh 自用）
+- `vaulty-keeper db shell <name>` 在宿主直接打开已安装的原生客户端（stdin-TTY 门禁）。密码使用子进程环境变量；MySQL/Redis 主机和 MySQL 用户仍可能进入 argv。MongoDB 通过临时子进程环境变量传入后端 URI，再由启动脚本移除。此流程不是脱敏隧道访问。
+- **MongoDB 8** 支持单固定端点上的常见读取、要求服务端写入确认的 CRUD（不是人工审批）、已审查只读聚合及游标。后端账号需要 `listCollections` 权限以检查普通集合；不支持视图/时序、事务、可重试写入、SRV/故障转移、压缩或完整管理/GUI 兼容。常见不支持的选项/命令包括 `comment`、`collation`、`create` 和 `createIndexes`。对允许的集合使用有界读取，例如 `db.getCollection('orders').find({}).limit(5)`。[指南](docs/mongodb-tunnel-guide.zh-CN.md)维护完整密码提示命令、注册后端 URL 与客户端 URI 的区别及排错；仅错误码 13 不能区分代理策略和后端角色拒绝。
 
 **安全边界**
 
-- 隧道监听地址跟随 `--addr`：默认 `127.0.0.1`；容器要连需 `0.0.0.0`（局域网可达），**由 token 门控兜底**——token 在 PG/MySQL 的 username 字段、Redis 的 AUTH 首命令里校验（连接专属 token 或全局 bridge token 任一匹配），无 token 的局域网用户连上即被断开
-- 不需要暴露的连接用 `db off` 关闭（端口完全停止监听），需要时 `db on` 恢复；隧道默认开启、状态随 db.json 持久化
-- 真实 URL/凭据只存在于 host 内存，db.json 无明文、日志不记录、任何回包不含
-- 隧道 token 为连接专属（128 位随机，随 URL 一并加密落盘），`db regen` 可轮换；旧连接回退全局 bridge token（掩码桥用，128 位随机）+ 失败限速；token 泄露给 AI 是设计内的（AI 本就该能用），防的是"无 token 的第三方"
+此处仅为摘要；[安全模型](docs/security-model.zh-CN.md)维护完整边界，包括 UI token 暴露和协议限制。
 
-### 手动验证（Docker 一键）
+- 隧道监听地址跟随 `--addr`，默认 `127.0.0.1`；容器访问需要可达接口。明文监听仅限隔离可信网络。PG/MySQL 校验用户字段 token，Redis 校验 AUTH，支持专属/全局 token；MongoDB 校验虚拟用户密码中的专属 token，无全局兜底。Mongo 客户端认证前只提供有限 hello/监控，不提供业务命令。
+- 不用的监听用 `db off` 关闭，需要时用 `db on` 恢复，状态持久化。token 轮换约束新连接，关闭监听不承诺终止已建立会话。
+- 注册 URL 加密存储。Mongo 认证/控制回包及代理错误/日志不含后端凭据/主机，但业务文档不改写。可信 DBA 定义变更和上游 Mongo 日志不在代理保证内；人工直连 `db shell` 不是脱敏隧道会话。
+- 专属隧道 token 为 128 位随机，可由 `db regen` 轮换，只交给获授权 agent/工具。全局 bridge token 兜底适用于 PG/MySQL/Redis，不适用于 MongoDB；持有隧道 token 即可在后端角色及代理策略范围内访问数据库。
 
-`scripts/dbtest.sh` 用 Docker 起 postgres + MySQL(8.4，含模拟 shop 业务库) + redis 三个容器、注册连接、起 `serve`、跑全量正/负向测试并保持运行：
+### 验证夹具
+
+MongoDB 夹具入口为 `bash scripts/mongotest.sh --mongosh` 和 `bash scripts/mongotest.sh --replica-set --mongosh`，使用合成凭据及显式临时存储/test key。[验证矩阵](docs/mongodb-tunnel-guide.zh-CN.md#验证状态)统一维护 2026-09-07 实现工作区的 MongoDB 8.0.13 standalone/固定副本集及 test/race/vet/build 带日期证据；这些历史结果不代表本次重跑或发布保证。真实 MongoDB TLS、人工交互 `db shell` 和最终独立复审仍未验证。
+
+**`scripts/dbtest.sh` 已隔离重构，可以安全运行（C02 完成）。** 当前脚本按 PID 与容器标签跟踪自己启动的 serve 和容器，使用每次运行独立的临时目录与假 HOME、合成密钥，`--clean` 只清理它登记的资源——不再像历史版本那样宽泛 pkill serve 进程、删除固定容器（`aipg`、`aimysql8`、`aimariadb`、`airedis`）或覆盖真实 `~/.vaulty/bridge-token`。使用前先读脚本头注释；不要放进 CI。
+
+历史脚本接口，**不是快速开始推荐**：
 
 ```sh
 make build
@@ -334,83 +403,69 @@ make build
 ./scripts/dbtest.sh --clean  # 收尾：停 serve、删容器
 ```
 
-也可以手动分步验（环境就绪后）：
+实际夹具镜像为 PostgreSQL `postgres:17.6-alpine`、MySQL `dockerproxy.net/library/mysql:8.0`（历史本地镜像为 8.0.46，不是 8.4/MariaDB）及 Redis `redis:7`。脚本需要 Docker、Python 3 和已构建二进制。后端宿主端口动态分配，隧道端口及种子查询如下：
 
-```sh
-TOKEN=$(cat ~/.vaulty/bridge-token)   # serve 每次重启会换 token，先取
+| 注册名 | 隧道端口 | 已准备数据 / 查询 |
+|---|---|---|
+| `pgdb` | 15432 | `appdb.t`，`SELECT id,name FROM t ORDER BY id;` |
+| `mysqltest` / `mysqlnative` | 15435 / 15436 | `shop.customers`、`products`、`orders`；`SELECT COUNT(*) FROM shop.orders;` |
+| `cache` | 15434 | 需认证的 Redis；`PING`、合成 `SET`/`GET` |
 
-# ① 本机直接测 Redis（token 放 AUTH，不碰真实密码）
-redis-cli -p 15434 -a "$TOKEN" --no-auth-warning ping
-redis-cli -p 15434 -a "$TOKEN" --no-auth-warning set k v && redis-cli -p 15434 -a "$TOKEN" --no-auth-warning get k
-
-# ② 模拟容器内 AI：原生客户端经 host.docker.internal 走隧道（token 放 user/username）
-docker run --rm postgres:17.6-alpine psql "postgresql://$TOKEN@host.docker.internal:15432/appdb" -c "SELECT 1;"
-docker run --rm mysql:8.4 mysql -h host.docker.internal -P 15435 -u "$TOKEN" -pxxx --ssl-mode=DISABLED -e "SELECT COUNT(*) FROM shop.orders;"
-#   （15435=caching_sha2 用户、15436=mysql_native_password 用户，两种认证都覆盖）
-
-# ③ 负向：错 token 一律拒绝
-redis-cli -p 15434 -a WRONG --no-auth-warning ping        # → ERR authentication required
-
-# ④ 隧道信息 / 掩码桥（不配 DB 密钥也能读）
-export VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8972 VAULTY_KEEPER_BRIDGE_TOKEN="$TOKEN"
-vaulty-keeper remote dblist      # 连接名/类型/端口
-
-# ⑤ 交互式 db shell（TTY-only；redis 本机即用，PG/MySQL 需装 psql/mysql）
-vaulty-keeper db shell cache
-
-# ⑥ 审计日志（成功 authenticated / 拒绝 invalid bridge token；无 DSN）
-cat /tmp/vaulty-keeper-dbtest-serve.log | grep dbproxy:
-```
+脚本使用桥接端口 8972 及独立 DB 目录/密钥，不是宿主默认 `db shell` 上下文。其中命令/日志是特定夹具的历史示例，不证明所有客户端/配置可用。原生客户端准备及正/负向查询见 [DB 示例指南](docs/db-proxy-examples.zh-CN.md)；分享日志前先检查，其中可能含上游元数据和访问 token。
 
 ## AI / 脚本使用安全指引
 
 ### 安全模型总览
 
-一句话：**明文出口只在用户本人终端可用（AI/脚本环境一律拒绝，`--yes` 也无法放行），掩码默认反转**。对"会主动读取密钥的同用户 AI"本工具不承诺防护（见信任边界）。
+**默认掩码和 stdin-TTY 门禁减少意外泄露，但不认证真人，也不隔离同用户进程。** [安全模型](docs/security-model.zh-CN.md)为统一依据，以下仅为入口摘要和操作者检查清单。
 
 | 层 | 机制 |
 |---|---|
-| 静态加密 | 快照所有值 AES-256-GCM 落盘（0600，无明文）；两把独立密钥：快照密钥（非敏感值）+ 敏感值密钥（敏感值），都在系统密钥库（macOS Keychain / Windows 凭据管理器 / Linux Secret Service） |
-| 信任边界 | 系统密钥库**不防同用户进程**（实测：同 UID 进程可无弹窗 `security find-generic-password -w` 读出两把密钥）；它防的是其他用户/其他机器/意外明文。对**故意对抗**的同用户 AI，用「容器隔离部署」把 AI 放进摸不到密钥的隔离域 |
-| 掩码代理 | `vaulty-keeper serve`（host 持有密钥）+ `vaulty-keeper remote`（容器/隔离域内）——容器侧只拿到 `*** (n chars)` + 长度 + 指纹，**即使 `set --plain` 标记安全的 key 也不回明文**；token 门控 + 限速 |
-| AI 读 | **反转默认**：`get`/`list`/`compare` 非 TTY 下默认全部掩码 `*** (n chars)`，不靠 key 名猜测；只有 `set --plain` / `mark --plain` 显式标记为安全的 key 才输出明文。明文出口（reveal、export、edit、`--reveal`、`aes decrypt`）**非交互终端一律拒绝，即使 `--yes`**——只在用户本人 TTY 可用 |
-| AI 写 | `set`/`unset`/`mark`/`import` 安全（写入即加密），无需 `--yes` |
-| DB 隧道 | `vaulty-keeper db add` 只加密 URL（独立 DB 密钥 + `~/.vaulty/db.json`，0600），并为每条连接生成**专属隧道 token**；`serve` 起 TCP 隧道在握手注入真实凭据，客户端用专属 token（旧连接回退 bridge token，PG/MySQL username 字段 / Redis AUTH）；`db regen` 可轮换 token；**隧道默认开启，`db on/off` 按连接开关（端口停止/恢复监听，状态持久化）**；DSN 永不离开 host、不进日志/回包 |
-| Web UI | 仅 127.0.0.1 + 随机 token 门控写操作/明文出口，GET 只返回掩码（未标记安全的 key 一律掩码）；**明文接口（reveal/export/明文编辑/AES 解密）默认禁用**，需 `--allow-plaintext` 显式开启，否则带 token 也返回 403；token 失败限速（指数退避） |
-| 防破解 | 指纹为 HMAC-SHA256（密钥为快照密钥），密钥不泄露时无法离线枚举弱值匹配掩码指纹；token 为 128 位随机 |
-| 判断一致性 | 用 `compare`（掩码 + 长度 + 指纹），不要 `get` 明文 |
+| 静态加密 | 快照值及注册 DB URL/token 加密；元数据、明文 AES key/IV JSON、输入/导出/编辑器文件不在此范围。独立新加密使用快照/敏感值密钥；旧格式敏感密文有快照密钥回退。 |
+| 信任边界 | 系统密钥存储不是同用户进程隔离边界。宿主密钥/密文应在不可信 agent 的权限之外；容器挂载、权限和网络访问同样需要审查。 |
+| 掩码代理 | 快照 API 值始终掩码，包括 safe 值。桥接 list/compare JSON 含长度/指纹；`remote get` 只打印掩码。全局 token 同时授权 PG/MySQL/Redis 隧道访问。 |
+| AI 读 | 非 TTY 本地读取仅放行显式 safe 值。TTY `get` 输出明文；显式明文命令检查 stdin TTY，不检查调用者身份/stdout。agent 不得对真实秘密使用这些出口或伪造 TTY。 |
+| AI 写 | 写入会加密保存值，但能替换/删除数据和改变可见性，须有任务授权；导入覆盖及敏感转 safe 另有门禁。 |
+| DB 隧道 | 加密注册 URL 和专属 token；PG/MySQL 以 token 为用户，Redis 以 token 为密码，MongoDB 使用用户 `vaulty` + token 密码，无全局兜底。MongoDB 持续按命令分帧并脱敏控制回包，不脱敏业务数据。`db regen` 影响新连接；`db on/off` 切换持久化监听状态，不保证终止既有会话。范围与证据见 [Mongo 指南](docs/mongodb-tunnel-guide.zh-CN.md)。 |
+| Web UI | 仅 loopback；非 GET 操作要求 UI token，显式明文路由还要求 `--allow-plaintext`。GET 无需 UI 认证即可返回 safe 值及可用 DB token。失败 token 检查是有上限的线性延迟，不是指数退避。 |
+| 指纹 | 同密钥 HMAC-SHA256，对归一化值计算并截断为 8 字节；无密钥时抵抗离线猜测，不是字节相等证明。长度为 UTF-8 字节数。 |
+| 判断一致性 | 用掩码 `compare`；需要指纹时使用桥接 list/compare JSON。不要只为比较而读取真实明文。 |
 
-vaulty-keeper 的所有子命令在非 TTY（脚本 / AI agent）下均可正常使用，且 `--json` 输出为 AI 友好格式。但明文一旦出现在 stdout，就会进入对话上下文、会话日志（如 `~/.codex`、终端 scrollback），可能被持久化或同步。请区分安全与危险命令：
+非 TTY 支持取决于具体命令：明文出口刻意拒绝，写操作可能需要显式 flag。`--json` 也非通用（包括 `apollo compare --json` 无差异时的文本结果）。stdout 明文可能进入对话上下文、会话日志和同步系统。含 token 的命令也必须按凭据对待。
 
-**安全（默认掩码，放心给 AI/脚本用）**
-- `apollo list <env> --appid xx [--json]` — 未标记安全的 key 显示 `*** (n chars)`，不靠 key 名猜测
-- `apollo compare <a> <b> --appid xx --appid-to yy [--json]` — 未标记安全的值掩码 + 长度
-- `apollo get <env> <key>` — 未标记安全的 key 输出 `*** (n chars)`
-- `apollo set/unset/mark`、`init`、`rm --yes` — 写入/删除类，安全
+**日常读取及获授权写入（不是统一授权）**
+- `apollo list <env> --appid xx [--json]` — 非 TTY 未放行值显示 `*** (n chars)`
+- `apollo compare <a> <b> --appid xx --appid-to yy [--json]` — 非 TTY 未放行值掩码 + 长度
+- `apollo get <env> <key> --appid xx` — 非 TTY 下未放行值掩码，TTY 可能输出明文
+- `apollo set/unset/mark`、`init`、`rm --yes` — 改变状态，先核对范围、值及覆盖/删除影响
 - `remote list|get|compare` — 经掩码代理读，**永远只有掩码**（即使 key 标记为安全）
 - `db list` / `remote dblist` — 只列连接名/类型/端口，**不返回 URL**
-- `db add` — 只写入（加密），安全；URL 从 stdin 读，不进 argv/shell history
+- `db add` — 写入加密 URL 和新 token；stdin 不清除上游历史或终端回显。同名注册重置 token/enabled 状态。真实 URL 应由可信人工提供，agent 不得自行读取。
 
 **需要放行给 AI 的 key**：先显式标记为安全，AI 才看得到明文（例如 `APP_NAME`、`LOG_LEVEL` 这类确定无敏感内容的值）：
-- `apollo set <env> <key> <value> --plain`（改值时同时标记）
-- `apollo mark <env> <key> --plain`（不改值，只标记）
+- `apollo set <env> <key> <value> --appid xx --plain`（改值时同时标记）
+- `apollo mark <env> <key> --appid xx --plain`（不改值，只标记）
 
 **防误标守卫**：`set --plain` / `mark --plain` 时若 key 名或值命中敏感规则（password/token/secret/JWT/带凭据 URI），**非 TTY 一律拒绝**、TTY 下需二次确认——防止把敏感 key 误标成安全而泄漏给 AI。
 
-**危险（输出明文；只在交互式终端（TTY）可用，AI/脚本环境一律拒绝，加 `--yes` 也无法放行）**
-- `apollo reveal <env> <key>` → 解密后的明文
-- `apollo export <env>` → 全量明文
+**明文出口（stdin-TTY 门禁；agent 不得用于真实秘密）**
+- `apollo reveal <env> <key> --appid xx` → 解密后的明文
+- `apollo export <env> --appid xx` → 全量明文，`--copy` 也会打印
+- `apollo edit <env> --appid xx` → 明文编辑器文件及整份快照替换
 - `apollo list/compare --reveal` → 明文
 - `aes decrypt` → 明文
+- `db show` / `db shell` → 真实 URL 或后端直连，不是脱敏隧道会话
 
-明文命令在非交互终端（脚本 / AI agent）下**无条件拒绝**，即使显式加 `--yes` 也不输出——AI 被诱导要求也无法拿到明文。明文只在用户本人终端（TTY）可见，且会进入终端会话记录，用完注意清理。
+`--yes` 不绕过 stdin-TTY 门禁，但不能由此推断 AI 永远拿不到明文：TTY 不代表身份，stdout 可重定向，safe 值刻意可见，同用户进程可能访问密钥。agent 不得绕过这些操作边界；人工须考虑日志、临时文件、编辑器备份、导出和剪贴板副本。
 
 其他注意事项：
-- **密钥不进 AI 环境**：快照密钥走 macOS Keychain（`vaulty-keeper apollo init`），敏感值密钥走 Keychain（`vaulty-keeper sensitive init`），不要在 AI 会话里 `export VAULTY_KEEPER_APOLLO_KEY` / `VAULTY_KEEPER_SENSITIVE_KEY`——AI 拿到快照密钥能解非敏感值，拿到敏感值密钥能解全部敏感值。`VAULTY_KEEPER_AES_KEY` / `VAULTY_KEEPER_AES_IV` 同理，不要作为 `--key`/`--iv` 命令行参数传（会出现在 `ps` 与 shell history）。注意：与 AI 同权限的进程可以读取 `~/.vaulty/aes.json`（明文 AES key/iv）与 Keychain 项（`security find-generic-password -w`），真正的隔离是把密钥放在 AI 进程读不到的地方（不同账号/沙箱）。
-- `import` 在快照已存在时会拒绝覆盖（TTY 下询问确认）；脚本 / AI 需要覆盖时显式加 `--force`，避免静默丢失旧快照。
-- 需要判断两个环境某 key 是否一致时用 `compare`（掩码 + 长度即可判断），不要 get 明文。
+- **不要向 agent 提供真实加密密钥**：包括 `VAULTY_KEEPER_APOLLO_KEY`、`VAULTY_KEEPER_SENSITIVE_KEY`、`VAULTY_KEEPER_DB_KEY`、`VAULTY_KEEPER_AES_KEY` 和 `VAULTY_KEEPER_AES_IV`。不放入 agent 环境、argv 或 history。默认系统存储和 0600 AES JSON 不隔离同用户进程，必要时使用独立权限域。这是操作规则，不是密钥存储强制实现的承诺。
+- CLI `import` 在 TTY 下覆盖前询问，脚本必须显式 `--force`。获授权替换仍会丢弃省略条目及已有标记，须按全量替换复核。
+- 比较环境时使用掩码 `compare`；长度相同不足以判断值相同。桥接指纹在不读取明文的情况下提供同密钥归一化比较信号。
 
 ## 验证
+
+以下是覆盖范围指针，不代表本次文档更新执行过测试。代码变化后须针对确切源码版本运行相关检查；MongoDB 带日期证据与剩余缺口统一维护在指南中。
 
 - `internal/aesx`: 与 `tools/javaref/CryptoUtil.java`（Java 8 参考实现）生成的向量逐字节对齐（GCM 确定性），另覆盖 key 长度校验、错误 key/iv、非法 base64。
 - `internal/apollo`: 真实粘贴样例（含合并行）、注释、首个 `=`、URL 参数不误拆、快照加密落盘（文件无明文、权限 0600）、diff、敏感识别。

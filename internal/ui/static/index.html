@@ -150,7 +150,7 @@
               </label>
             </div>
             <label class="field" for="db-url"><span data-i18n="db.url">Database URL (with credentials; encrypted in the browser before sending)</span>
-              <textarea id="db-url" rows="3" placeholder="postgres://user:pass@host:5432/dbname&#10;mysql://user:pass@host:3306/dbname&#10;redis://:pass@host:6379/0" spellcheck="false"></textarea>
+              <textarea id="db-url" rows="3" data-i18n-ph="db.url-ph" placeholder="postgres://user:pass@host:5432/dbname&#10;mysql://user:pass@host:3306/dbname&#10;redis://:pass@host:6379/0&#10;mongodb://user:pass@host:27017/dbname?authSource=admin" spellcheck="false"></textarea>
             </label>
             <div class="row-actions">
               <button class="ghost" type="button" id="db-test-btn" data-i18n="db.test-btn">Test connection</button>

@@ -1,6 +1,10 @@
 # Local Web UI Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+English | [中文](2026-08-25-local-web-ui.zh-CN.md)
+
+> **Historical plan source, 2026-08-25; lifecycle annotated 2026-09-07. Non-executable: do not replay.** All original tasks, code, expected outcomes and completion notes are retained, not certified as completed or current. The former instruction to invoke `subagent-driven-development`/`executing-plans` applied only to that session and has expired. Current use and security: [UI guide](../../ui-guide.md), [Apollo guide](../../apollo-snapshot-guide.md). Design source: [initial UI](../specs/2026-08-25-claude-style-web-ui-design.md); successor: [full migration](2026-08-25-full-ui-migration.md) and [Env+AppID](../specs/2026-08-25-env-appid-and-snapshot-delete.md).
+>
+> **Retention responsibility:** This English file is the shared historical code/command source for both languages; the Chinese pair translates the narrative and links each task here. Keep code, test bodies, expected outputs and embedded README examples intact when maintaining the pair. Chinese strings inside those blocks are historical source, not untranslated English narrative. Checkboxes and `Expected: PASS` describe the old plan, not today's test results. Its optional AppID, no-reveal scope and sensitivity-only masking are superseded; never use its manual plaintext checks against real storage/keys.
 
 **Goal:** Add `vaulty-keeper ui`, a loopback-only, Claude-light-theme Web UI for managing encrypted Apollo snapshots without exposing sensitive plaintext during ordinary browsing or comparison.
 
@@ -749,9 +753,9 @@ Expected: PASS.
 
 - [ ] **Step 5: Document the Web UI**
 
-Add a `## 本地 Web UI` section to `README.md` after the interactive-mode section:
+The proposed README section was titled `## 本地 Web UI` (Local Web UI), after the then-existing interactive-mode section. Original Chinese README source:
 
-```md
+````md
 ## 本地 Web UI
 
 ```sh
@@ -764,7 +768,7 @@ vaulty-keeper ui --no-open
 - 浏览、搜索与环境对比默认遮罩敏感值；Web UI 首版不提供 reveal。
 - 导出会先显示明文风险确认，确认后仅作为本地下载生成。
 - 浏览器端不持久化快照内容，API 响应使用 `Cache-Control: no-store`。
-```
+````
 
 Also update the command list and completion documentation to include `ui`.
 
@@ -792,6 +796,6 @@ Run the UI with temporary snapshots whose sensitive values are distinctive strin
 
 ## Completion Notes
 
-- Do not create commits: the repository has no initial commit and the user did not request one.
+- Historical session note (2026-08-25, expired): the plan recorded no initial commit and no user request to commit. This is not a statement about the current repository or authorization for later work.
 - Do not include `.superpowers/brainstorm/` preview artifacts in implementation changes. They are design-session artifacts, not product assets.
 - Before declaring completion, run the verification commands above and report their actual outcomes.

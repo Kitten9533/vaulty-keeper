@@ -16,6 +16,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -72,11 +73,13 @@ func handleMySQL(client net.Conn, u *url.URL, globalToken, connToken string) err
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", hostPort(u.Host, 3306), err)
 	}
-	defer server.Close()
-
-	if err := myAuthenticate(server, u); err != nil {
+	upgraded, err := myAuthenticate(server, u)
+	if err != nil {
+		server.Close()
 		return err
 	}
+	server = upgraded
+	defer server.Close()
 
 	splice(clientBR, client, server)
 	return nil
@@ -85,8 +88,10 @@ func handleMySQL(client net.Conn, u *url.URL, globalToken, connToken string) err
 // myAuthenticate completes the MySQL client-side handshake against the real
 // server using the credentials in u: native/caching_sha2 auth responses,
 // full-auth (RSA/TLS) exchange and auth switches. The connection must already
-// be established. Returns nil once the server sends OK/EOF.
-func myAuthenticate(server net.Conn, u *url.URL) error {
+// be established. It returns the connection the session must use from now on
+// (the TLS-upgraded connection when tls=true) plus the auth result error (nil
+// once the server sends OK/EOF).
+func myAuthenticate(server net.Conn, u *url.URL) (net.Conn, error) {
 	user, pass := "", ""
 	if u.User != nil {
 		user = u.User.Username()
@@ -96,19 +101,22 @@ func myAuthenticate(server net.Conn, u *url.URL) error {
 
 	seq, hs, err := myReadPacket(server)
 	if err != nil {
-		return fmt.Errorf("server handshake: %w", err)
+		return server, fmt.Errorf("server handshake: %w", err)
 	}
 	serverSalt, plugin, err := myParseHandshakeV10(hs)
 	if err != nil {
-		return err
+		return server, err
 	}
 	authResp, err := myAuthResponse(plugin, pass, serverSalt)
 	if err != nil {
-		return err
+		return server, err
 	}
 
 	useTLS := strings.EqualFold(u.Query().Get("tls"), "true")
 	caps := uint32(myClientProtocol41 | myClientSecureConnection | myClientPluginAuth)
+	if useTLS {
+		caps |= myClientSSL
+	}
 	if db != "" {
 		caps |= myClientConnectWithDB
 	}
@@ -119,19 +127,27 @@ func myAuthenticate(server net.Conn, u *url.URL) error {
 		// 1) SSLRequest (prefix only) over plaintext, 2) TLS handshake,
 		// 3) full handshake response inside TLS.
 		if err := myWritePacket(server, seq+1, prefix); err != nil {
-			return err
+			return server, err
 		}
-		tlsConn := tls.Client(server, &tls.Config{ServerName: hostOnly(u.Host)})
+		tlsConfig := &tls.Config{ServerName: hostOnly(u.Host)}
+		if caFile := u.Query().Get("tlsCAFile"); caFile != "" {
+			pool, err := myCAFilePool(caFile)
+			if err != nil {
+				return server, err
+			}
+			tlsConfig.RootCAs = pool
+		}
+		tlsConn := tls.Client(server, tlsConfig)
 		if err := tlsConn.Handshake(); err != nil {
-			return fmt.Errorf("tls handshake: %w", err)
+			return server, fmt.Errorf("tls handshake: %w", err)
 		}
 		server = tlsConn
 		if err := myWritePacket(server, seq+2, append(prefix, body...)); err != nil {
-			return err
+			return server, err
 		}
 	} else {
 		if err := myWritePacket(server, seq+1, append(prefix, body...)); err != nil {
-			return err
+			return server, err
 		}
 	}
 
@@ -140,7 +156,7 @@ func myAuthenticate(server net.Conn, u *url.URL) error {
 	for {
 		s, p, err := myReadPacket(server)
 		if err != nil {
-			return fmt.Errorf("server auth result: %w", err)
+			return server, fmt.Errorf("server auth result: %w", err)
 		}
 		authSeq = s
 		if len(p) == 0 {
@@ -148,9 +164,9 @@ func myAuthenticate(server net.Conn, u *url.URL) error {
 		}
 		switch p[0] {
 		case 0x00: // OK
-			return nil
+			return server, nil
 		case 0xff: // ERR
-			return fmt.Errorf("server authentication failed: %s", myParseErr(p))
+			return server, fmt.Errorf("server authentication failed: %s", myParseErr(p))
 		case 0x01: // AuthMoreData (plugin extra data)
 			if len(p) < 2 {
 				continue
@@ -158,35 +174,58 @@ func myAuthenticate(server net.Conn, u *url.URL) error {
 			switch p[1] {
 			case 0x04: // caching_sha2_password: full authentication required
 				if _, err := myFullAuth(server, pass, serverSalt, useTLS, authSeq); err != nil {
-					return err
+					return server, err
 				}
 			case 0x03: // caching_sha2_password: fast auth success (OK follows)
 			}
 			continue
 		case 0xfe:
 			if len(p) == 1 { // EOF (old protocol): authenticated
-				return nil
+				return server, nil
 			}
 			// AuthSwitchRequest: 0xfe + plugin name (NUL-terminated) + new salt.
 			rest := p[1:]
 			nul := bytes.IndexByte(rest, 0)
 			if nul < 0 {
-				return errors.New("malformed auth switch request")
+				return server, errors.New("malformed auth switch request")
 			}
 			newPlugin := string(rest[:nul])
 			newSalt := rest[nul+1:]
 			newSalt = bytes.TrimSuffix(newSalt, []byte{0})
 			authResp, err := myAuthResponse(newPlugin, pass, newSalt)
 			if err != nil {
-				return err
+				return server, err
 			}
 			if err := myWritePacket(server, authSeq+1, authResp); err != nil {
-				return err
+				return server, err
 			}
 			authSeq++
 			continue
 		}
 	}
+}
+
+// myCAFilePool builds a cert pool from a PEM CA file so a self-signed or
+// private-CA backend certificate can be verified. The file must be a regular
+// file no larger than 1 MiB; errors never include the path so a misconfigured
+// URL cannot leak it.
+func myCAFilePool(path string) (*x509.CertPool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, errors.New("cannot read the TLS CA file")
+	}
+	if !info.Mode().IsRegular() || info.Size() > 1<<20 {
+		return nil, errors.New("the TLS CA file must be a regular file no larger than 1 MiB")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.New("cannot read the TLS CA file")
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(data) {
+		return nil, errors.New("the TLS CA file contains no valid certificates")
+	}
+	return pool, nil
 }
 
 // myFullAuth completes caching_sha2/sha256 full authentication: cleartext

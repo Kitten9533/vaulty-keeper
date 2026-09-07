@@ -7,12 +7,17 @@ import (
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"encoding/pem"
 	"fmt"
 	"net"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -471,6 +476,187 @@ func (f *fakeMySQLSwitch) handle(c net.Conn) {
 		return
 	}
 	myWritePacket(c, seq+1, myOKPacket())
+}
+
+// fakeMySQLTLS is a TLS-requiring fake MySQL server. It verifies the client's
+// SSLRequest carries the CLIENT_SSL capability bit and is exactly the 32-byte
+// prefix, performs the server side of the TLS handshake, and only then reads
+// the full handshake response and any COM_QUERY inside the encrypted channel.
+// It records whether SSL was requested and the first query it received, so a
+// test can prove the upgraded connection is used for both authentication and
+// business forwarding.
+type fakeMySQLTLS struct {
+	ln       net.Listener
+	pass     string
+	salt     []byte
+	cert     tls.Certificate
+	caPEM    []byte
+	mu       sync.Mutex
+	sawSSL   bool
+	gotQuery string
+}
+
+func newFakeMySQLTLS(t *testing.T, pass string) *fakeMySQLTLS {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certServer := httptest.NewTLSServer(nil)
+	cert := certServer.TLS.Certificates[0]
+	certServer.Close()
+	f := &fakeMySQLTLS{
+		ln:    ln,
+		pass:  pass,
+		salt:  []byte("0123456789abcdefghij"),
+		cert:  cert,
+		caPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}),
+	}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go f.handle(c)
+		}
+	}()
+	t.Cleanup(func() { ln.Close() })
+	return f
+}
+
+func (f *fakeMySQLTLS) port() int { return f.ln.Addr().(*net.TCPAddr).Port }
+
+func (f *fakeMySQLTLS) handle(c net.Conn) {
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := myWritePacket(c, 0, myHandshakeV10("8.0.0-fake", 7, f.salt, "mysql_native_password")); err != nil {
+		return
+	}
+	_, payload, err := myReadPacket(c)
+	if err != nil {
+		return
+	}
+	f.mu.Lock()
+	f.sawSSL = len(payload) == 32 && binary.LittleEndian.Uint32(payload[:4])&myClientSSL != 0
+	f.mu.Unlock()
+	if !f.sawSSL {
+		return // no CLIENT_SSL in the SSLRequest: never upgrade, drop the connection
+	}
+	tlsConn := tls.Server(c, &tls.Config{Certificates: []tls.Certificate{f.cert}})
+	if err := tlsConn.Handshake(); err != nil {
+		return
+	}
+	_, payload, err = myReadPacket(tlsConn)
+	if err != nil {
+		return
+	}
+	user, auth, db, _, err := myParseResponse(payload)
+	if err != nil || user != "app" || db != "appdb" {
+		return
+	}
+	if !bytes.Equal(auth, myNativeScramble(f.pass, f.salt)) {
+		return
+	}
+	if err := myWritePacket(tlsConn, 2, myOKPacket()); err != nil {
+		return
+	}
+	seq, payload, err := myReadPacket(tlsConn)
+	if err != nil || len(payload) == 0 || payload[0] != 0x03 {
+		return
+	}
+	f.mu.Lock()
+	f.gotQuery = string(payload[1:])
+	f.mu.Unlock()
+	myWritePacket(tlsConn, seq+1, myOKPacket())
+}
+
+// TestMySQLTunnelTLS proves that ?tls=true makes the proxy advertise the
+// CLIENT_SSL capability bit to the backend, negotiate TLS, and use the upgraded
+// connection for authentication and the spliced business traffic.
+func TestMySQLTunnelTLS(t *testing.T) {
+	fake := newFakeMySQLTLS(t, "tlspass")
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	tunnelPort := freePort(t)
+	caPath := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(caPath, fake.caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	realURL := fmt.Sprintf("mysql://app:tlspass@127.0.0.1:%d/appdb?tls=true&tlsCAFile=%s", fake.port(), url.QueryEscape(caPath))
+	if err := Add(path, key, "orders", realURL, tunnelPort); err != nil {
+		t.Fatal(err)
+	}
+	const token = "mysql-tls-tok"
+	startTunnel(t, path, key, tunnelPort, token)
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", tunnelPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	_, hs, err := myReadPacket(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := myParseHandshakeV10(hs); err != nil {
+		t.Fatal(err)
+	}
+	caps := uint32(myClientProtocol41 | myClientSecureConnection | myClientPluginAuth | myClientConnectWithDB)
+	resp := append(myHandshakeResponsePrefix(caps),
+		myHandshakeResponseBody(caps, token, []byte("x"), "ignored", "mysql_native_password")...)
+	if err := myWritePacket(conn, 1, resp); err != nil {
+		t.Fatal(err)
+	}
+	seq, p, err := myReadPacket(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p) == 0 || p[0] != 0x00 {
+		t.Fatalf("expected OK from tunnel, got %x", p)
+	}
+	query := append([]byte{0x03}, "SELECT 'tls-up'"...)
+	if err := myWritePacket(conn, seq+1, query); err != nil {
+		t.Fatal(err)
+	}
+	_, reply, err := myReadPacket(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reply) == 0 || reply[0] != 0x00 {
+		t.Fatalf("expected query reply over the TLS-upgraded tunnel, got %x", reply)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if !fake.sawSSL {
+		t.Fatal("backend SSLRequest did not advertise the CLIENT_SSL capability bit")
+	}
+	if fake.gotQuery != "SELECT 'tls-up'" {
+		t.Fatalf("backend received query %q over TLS, want %q", fake.gotQuery, "SELECT 'tls-up'")
+	}
+}
+
+// TestTestConnMySQLTLS proves the TestConn path completes the same TLS upgrade
+// the tunnel performs.
+func TestTestConnMySQLTLS(t *testing.T) {
+	fake := newFakeMySQLTLS(t, "tlspass")
+	dir := t.TempDir()
+	caPath := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(caPath, fake.caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	conn := Conn{Type: "mysql", URL: fmt.Sprintf("mysql://app:tlspass@127.0.0.1:%d/appdb?tls=true&tlsCAFile=%s", fake.port(), url.QueryEscape(caPath))}
+	if err := TestConn(conn); err != nil {
+		t.Fatalf("TestConn with TLS failed: %v", err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if !fake.sawSSL {
+		t.Fatal("backend SSLRequest did not advertise the CLIENT_SSL capability bit")
+	}
 }
 
 func TestMySQLTunnelAuthSwitch(t *testing.T) {

@@ -18,15 +18,19 @@ import (
 // PG/MySQL username field, or the first Redis AUTH command); the proxy then
 // connects to the real database using the decrypted URL and substitutes the
 // real credentials during the handshake before relaying raw bytes.
+// MongoDB instead authenticates the dedicated token as a SCRAM password and
+// retains command-aware framing and metadata filtering for the whole session.
 //
 // The real URL and credentials never leave this process: no value derived
 // from them is ever written back to the client or the log.
 type Tunnel struct {
-	Path  string
-	Key   []byte
-	Host  string
-	Token string
-	Log   io.Writer
+	Path       string
+	Key        []byte
+	Host       string
+	Token      string
+	Log        io.Writer
+	mongoOnce  sync.Once
+	mongoState *mongoTunnelState
 }
 
 // Start runs the per-connection listeners until ctx is done. It watches
@@ -141,6 +145,9 @@ func (t *Tunnel) handle(ctx context.Context, client net.Conn, name string) {
 		err = handlePostgres(client, u, t.Token, conn.Token)
 	case "mysql":
 		err = handleMySQL(client, u, t.Token, conn.Token)
+	case "mongodb":
+		t.mongoOnce.Do(func() { t.mongoState = newMongoTunnelState() })
+		err = handleMongo(ctx, client, u, conn.Token, name, t.mongoState)
 	default:
 		err = fmt.Errorf("unsupported type %q", conn.Type)
 	}

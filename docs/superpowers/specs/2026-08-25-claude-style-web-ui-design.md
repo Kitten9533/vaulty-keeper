@@ -1,5 +1,11 @@
 # Claude-Style Local Web UI Design
 
+English | [中文](2026-08-25-claude-style-web-ui-design.zh-CN.md)
+
+> **Historical design source, 2026-08-25; lifecycle annotated 2026-09-07. Not executable guidance.** Retained for the first UI's rationale, boundaries and proposed tests, not evidence that every proposal shipped. Successors: [full UI migration](2026-08-25-full-ui-migration-design.md) and [Env+AppID identity](2026-08-25-env-appid-and-snapshot-delete.md). Current operations and security belong to the [UI guide](../../ui-guide.md) and [Apollo guide](../../apollo-snapshot-guide.md); the [historical plan](../plans/2026-08-25-local-web-ui.md) retains implementation source.
+>
+> The optional AppID, no-reveal/no-AES first-release scope and sensitivity-based visible values below are historical assumptions, not current promises. Explicit safe-output classification is distinct from sensitivity; current plaintext gates and confirmation behavior must not be inferred from this proposal. Do not replay its commands or restore its older security model.
+
 ## Goal
 
 Add a local Web UI for the existing encrypted Apollo snapshot workflow. The UI

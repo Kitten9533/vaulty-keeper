@@ -17,6 +17,7 @@ jobs:
           cache: true
       - run: go vet ./...
       - run: node scripts/check-ui.mjs
+      - run: node scripts/check-docs.mjs
       - run: go test ./...
 
   release:

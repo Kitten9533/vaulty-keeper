@@ -64,7 +64,7 @@ func TestDBAddAndList(t *testing.T) {
 
 func TestDBAddRejectsUnknownScheme(t *testing.T) {
 	dir := dbTestEnv(t)
-	withStdin(t, "mongodb://u:p@h/db\n")
+	withStdin(t, "cassandra://u:p@h/db\n")
 	if code := Run([]string{"db", "add", "m", "--dir", filepath.Join(dir, "db")}); code == 0 {
 		t.Fatal("db add accepted unsupported scheme")
 	}

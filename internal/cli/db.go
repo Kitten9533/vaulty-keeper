@@ -323,19 +323,23 @@ func dbTest(args []string) int {
 		fmt.Fprintf(os.Stderr, "%s\n", i18n.T("db.test-fix", name))
 		return 1
 	}
+	printDBTestOK(conn)
+	return 0
+}
+
+func printDBTestOK(conn dbproxy.Conn) {
 	user := ""
 	if u, perr := url.Parse(conn.URL); perr == nil && u.User != nil {
 		user = u.User.Username()
 	}
-	fmt.Printf(i18n.T("db.ok"), name, conn.Type)
-	if user != "" {
+	fmt.Printf(i18n.T("db.ok"), conn.Name, conn.Type)
+	if conn.Type != "mongodb" && user != "" {
 		fmt.Printf(i18n.T("db.ok-user"), user)
 	}
 	if db := strings.TrimPrefix(mustURLPath(conn.URL), "/"); db != "" {
 		fmt.Printf(i18n.T("db.ok-db"), db)
 	}
 	fmt.Printf("\n")
-	return 0
 }
 
 func mustURLPath(raw string) string {
@@ -577,6 +581,9 @@ func printConnCommand(typ, token, host string, port int, db string) {
 		fmt.Printf("mysql -h %s -P %d -u %s -px --ssl-mode=DISABLED %s\n", host, port, token, db)
 	case "redis":
 		fmt.Printf("redis-cli -h %s -p %d -a %s --no-auth-warning\n", host, port, token)
+	case "mongodb":
+		_, links, _ := dbproxy.TunnelLinks(typ, token, host, port, db, i18n.T)
+		fmt.Println(links[0].Value)
 	}
 }
 
@@ -634,9 +641,23 @@ func dbShell(args []string) int {
 // openShell runs the native client for a connection, passing credentials via
 // environment variables (not argv) so they do not appear in ps output.
 func openShell(conn dbproxy.Conn) error {
-	u, err := url.Parse(conn.URL)
+	cmd, err := shellCommand(conn)
 	if err != nil {
 		return err
+	}
+	if err := cmd.Run(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return fmt.Errorf("%s", i18n.T("db.shell-bin-missing", cmd.Args[0]))
+		}
+		return err
+	}
+	return nil
+}
+
+func shellCommand(conn dbproxy.Conn) (*exec.Cmd, error) {
+	u, err := url.Parse(conn.URL)
+	if err != nil {
+		return nil, err
 	}
 	host, port := splitHostPort(u.Host, conn.Type)
 	user := ""
@@ -651,36 +672,43 @@ func openShell(conn dbproxy.Conn) error {
 	case "postgres":
 		env := append(os.Environ(),
 			"PGHOST="+host, "PGPORT="+port, "PGUSER="+user, "PGPASSWORD="+pass, "PGDATABASE="+dbname)
-		return runClient("psql", nil, env)
+		return clientCommand("psql", nil, env), nil
 	case "mysql":
 		args := []string{"-h", host, "-P", port, "-u", user, dbname}
 		env := append(os.Environ(), "MYSQL_PWD="+pass)
-		return runClient("mysql", args, env)
+		return clientCommand("mysql", args, env), nil
 	case "redis":
 		args := []string{"-h", host, "-p", port}
 		if dbname != "" && dbname != "0" {
 			args = append(args, "-n", dbname)
 		}
 		env := append(os.Environ(), "REDISCLI_AUTH="+pass)
-		return runClient("redis-cli", args, env)
+		return clientCommand("redis-cli", args, env), nil
+	case "mongodb":
+		// Keep the URI out of argv and the interactive global scope, and remove
+		// it from the child environment before connecting (including on failure).
+		const startup = `await (async () => { const uri = process.env.VAULTY_KEEPER_MONGODB_URI; delete process.env.VAULTY_KEEPER_MONGODB_URI; db = await connect(uri); })()`
+		env := os.Environ()
+		filtered := env[:0]
+		for _, entry := range env {
+			if !strings.HasPrefix(entry, "VAULTY_KEEPER_MONGODB_URI=") {
+				filtered = append(filtered, entry)
+			}
+		}
+		filtered = append(filtered, "VAULTY_KEEPER_MONGODB_URI="+conn.URL)
+		return clientCommand("mongosh", []string{"--nodb", "--shell", "--eval", startup}, filtered), nil
 	default:
-		return fmt.Errorf("%s", i18n.T("db.connect-unsupported", conn.Type))
+		return nil, fmt.Errorf("%s", i18n.T("db.connect-unsupported", conn.Type))
 	}
 }
 
-func runClient(bin string, args []string, env []string) error {
+func clientCommand(bin string, args []string, env []string) *exec.Cmd {
 	cmd := exec.Command(bin, args...)
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return fmt.Errorf("%s", i18n.T("db.shell-bin-missing", bin))
-		}
-		return err
-	}
-	return nil
+	return cmd
 }
 
 func splitHostPort(hostport, typ string) (host, port string) {
@@ -692,6 +720,8 @@ func splitHostPort(hostport, typ string) (host, port string) {
 		return hostport, "5432"
 	case "mysql":
 		return hostport, "3306"
+	case "mongodb":
+		return hostport, "27017"
 	default:
 		return hostport, "6379"
 	}

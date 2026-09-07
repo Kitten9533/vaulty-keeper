@@ -1,6 +1,10 @@
 # Full UI Migration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+English | [中文](2026-08-25-full-ui-migration.zh-CN.md)
+
+> **Historical plan source, 2026-08-25; lifecycle annotated 2026-09-07. Non-executable: do not replay.** Retained in full for application-layer extraction rationale, proposed code, tests and known snippet mistakes. The former `subagent-driven-development`/`executing-plans` instruction applied only to that session and has expired. Current operations/security: [UI guide](../../ui-guide.md), [Apollo guide](../../apollo-snapshot-guide.md). Design: [full migration](../specs/2026-08-25-full-ui-migration-design.md); identity successor: [Env+AppID](../specs/2026-08-25-env-appid-and-snapshot-delete.md).
+>
+> **Retention responsibility:** This English file owns the shared historical code/commands for both languages; the Chinese pair translates narrative and links each task here. Preserve every code/test body, expected outcome, embedded README block and the stray `</style>` correction. Chinese literals within source blocks are deliberately retained. Checkboxes and expected passes are not current status. The TTY menu, optional AppID, `/api/aes/config` routes, deferred AI plaintext boundary and universal confirmation claims are superseded assumptions, not features to restore. In particular, the old smoke test can write Keychain and expose generated secrets: it is not an isolated fixture and must not be run.
 
 **Goal:** Migrate all vaulty-keeper functionality (apollo + aes + key management) into the loopback-only Web UI, with a shared `internal/app` domain layer that both the UI and the preserved CLI call, keeping every CLI command, flag, and output format byte-identical.
 
@@ -8,7 +12,7 @@
 
 **Tech Stack:** Go standard library (`net/http`, `embed`, `httptest`), existing `internal/apollo` + `internal/aesx`, vanilla HTML/CSS/JS.
 
-**Spec:** `docs/superpowers/specs/2026-08-25-full-ui-migration-design.md`
+**Historical spec:** [Full UI Migration Design](../specs/2026-08-25-full-ui-migration-design.md)
 
 ---
 
@@ -32,9 +36,9 @@
 
 ## Completion Notes
 
-- Do not create commits: the repository has no initial commit and the user did not request one.
+- Historical session note (2026-08-25, expired): the plan recorded no initial commit and no user request to commit. This does not describe the current repository or authorize later work.
 - `internal/apollo` and `internal/aesx` are NOT modified by this plan (they already hold the encryption primitives).
-- Keychain-backed `InitKey` is not unit-tested (writing to the macOS Keychain cannot be isolated in a test); it is covered by the manual verification checklist and the UI handler's non-keychain paths.
+- Historical coverage intention: Keychain-backed `InitKey` was excluded from unit tests because this plan did not isolate Keychain writes. It was listed for manual verification and handler non-keychain paths, not demonstrated as passed by this checklist. Do not execute those checks against a real Keychain.
 
 ---
 
@@ -2164,7 +2168,7 @@ Expected: `GET / -> 200`; gen-key returns `{"key":"...","iv":"..."}`; init eithe
 
 Replace the `## 本地 Web UI` section with:
 
-```md
+````md
 ## 本地 Web UI
 
 ```sh
@@ -2177,9 +2181,9 @@ vaulty-keeper ui --no-open
 - 覆盖全部功能：快照浏览/搜索/增删改、导入、环境对比、明文编辑、导出、AES 加解密、密钥初始化。
 - 明文出口（reveal / 明文编辑 / 导出 / AES 解密）均需二次确认后才显示，响应 `Cache-Control: no-store`，浏览器不持久化明文。
 - 浏览器端不持久化快照内容。
-```
+````
 
-Also update the opening paragraph (README line 3): change `vaulty-keeper ui` 提供本地 Web UI 浏览快照（仅本机监听）` to state that the UI covers all snapshot and AES tools (still loopback-only). The `## 其他` command list entry for `vaulty-keeper ui` stays as-is.
+The old README opening paragraph (then line 3) described `vaulty-keeper ui` as a local, loopback-only snapshot browser. The proposed edit expanded that description to all snapshot and AES tools, still loopback-only. The command entry under `## 其他` (Other) was to remain unchanged.
 
 - [ ] **Step 2: Run gofmt on all Go files**
 

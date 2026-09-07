@@ -304,7 +304,7 @@ func (h *handler) dbTestURL(w http.ResponseWriter, r *http.Request) {
 
 func dbUser(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
+	if err != nil || u.User == nil || u.Scheme == "mongodb" {
 		return ""
 	}
 	return u.User.Username()

@@ -22,6 +22,12 @@ func TestConn(conn Conn) error {
 		return errors.New("cannot parse the registered connection URL")
 	}
 	switch conn.Type {
+	case "mongodb":
+		server, err := mongoDial(u)
+		if err != nil {
+			return err
+		}
+		return server.close()
 	case "postgres":
 		server, err := pgDial(hostPort(u.Host, 5432), u)
 		if err != nil {
@@ -34,8 +40,13 @@ func TestConn(conn Conn) error {
 		if err != nil {
 			return errDial("MySQL")
 		}
-		defer server.Close()
-		return sanitizeTestErr(myAuthenticate(server, u), u)
+		upgraded, err := myAuthenticate(server, u)
+		if err != nil {
+			server.Close()
+			return sanitizeTestErr(err, u)
+		}
+		upgraded.Close()
+		return nil
 	case "redis":
 		addr := hostPort(u.Host, 6379)
 		var server net.Conn
