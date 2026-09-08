@@ -24,6 +24,9 @@ Entry points and current-owner map for `vaulty-keeper` docs. Keep this index thi
 | [db-proxy-architecture](db-proxy-architecture.md) · [中文](db-proxy-architecture.zh-CN.md) | DB tunnel architecture for PG/MySQL/Redis: what runs where, credential injection, sequence. |
 | [db-proxy-examples](db-proxy-examples.md) · [中文](db-proxy-examples.zh-CN.md) | DB usage examples and synthetic fixtures (source-checked, not re-executed during doc work). |
 | [mongodb-tunnel-guide](mongodb-tunnel-guide.md) · [中文](mongodb-tunnel-guide.zh-CN.md) | MongoDB 8 tunnel: exact URL options, security limits, troubleshooting, dated verification matrix. |
+| [postgres-tunnel-guide](postgres-tunnel-guide.md) · [中文](postgres-tunnel-guide.zh-CN.md) | PostgreSQL tunnel: connection model, registered URL, client setup, limits, troubleshooting. |
+| [mysql-tunnel-guide](mysql-tunnel-guide.md) · [中文](mysql-tunnel-guide.zh-CN.md) | MySQL tunnel: connection model, registered URL, backend TLS, client setup, troubleshooting. |
+| [redis-tunnel-guide](redis-tunnel-guide.md) · [中文](redis-tunnel-guide.zh-CN.md) | Redis tunnel: connection model, registered URL, client setup, limits, troubleshooting. |
 | [container-isolation](container-isolation.md) · [中文](container-isolation.zh-CN.md) | Docker/agent isolation from host keys and ciphertext, plus Docker-free alternatives. |
 
 ## Principles

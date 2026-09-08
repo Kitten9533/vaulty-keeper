@@ -2,7 +2,7 @@
 
 English | [中文](db-proxy-architecture.zh-CN.md)
 
-Current PG/MySQL/Redis behavior, checked against source on 2026-09-07. These diagrams are explanatory, not a running-environment snapshot or new test evidence. See [usage and synthetic fixtures](db-proxy-examples.md) for preparation and explicit ports, and the [security model](security-model.md) for the canonical security boundary.
+Current PG/MySQL/Redis behavior, checked against source on 2026-09-07. These diagrams are explanatory, not a running-environment snapshot or new test evidence. See [usage and synthetic fixtures](db-proxy-examples.md) for preparation and explicit ports, the per-protocol operation guides ([PostgreSQL](postgres-tunnel-guide.md) / [MySQL](mysql-tunnel-guide.md) / [Redis](redis-tunnel-guide.md)) for URL options, client setup and troubleshooting, and the [security model](security-model.md) for the canonical security boundary.
 
 MongoDB is deliberately separate: the [MongoDB 8 guide](mongodb-tunnel-guide.md) owns its fixed-endpoint, persistent command-aware relay, virtual user `vaulty`, dedicated token as SCRAM-SHA-256 password, no global fallback, reviewed CRUD/read aggregation and sanitized control metadata. The raw-splice diagrams below do not apply to MongoDB. No protocol promises immediate session revocation.
 

@@ -15,6 +15,9 @@ Every user-facing doc is English-default with a `.zh-CN.md` sibling linked at it
 | Full command reference (apollo / aes / misc) | [docs/cli-reference.md](docs/cli-reference.md) |
 | DB tunnel: architecture, sequence, credentials | [docs/db-proxy-architecture.md](docs/db-proxy-architecture.md) |
 | DB tunnel: usage examples & fixtures | [docs/db-proxy-examples.md](docs/db-proxy-examples.md) |
+| PostgreSQL tunnel: setup, options, troubleshooting | [docs/postgres-tunnel-guide.md](docs/postgres-tunnel-guide.md) |
+| MySQL tunnel: setup, TLS, troubleshooting | [docs/mysql-tunnel-guide.md](docs/mysql-tunnel-guide.md) |
+| Redis tunnel: setup, options, troubleshooting | [docs/redis-tunnel-guide.md](docs/redis-tunnel-guide.md) |
 | MongoDB 8 tunnel: options, limits, verification matrix | [docs/mongodb-tunnel-guide.md](docs/mongodb-tunnel-guide.md) |
 | Container / agent isolation | [docs/container-isolation.md](docs/container-isolation.md) |
 | Web UI: pages, fields, confirmation flows | [docs/ui-guide.md](docs/ui-guide.md) |
@@ -42,7 +45,7 @@ The binaries are not code-signed, so a **browser-downloaded** archive may be blo
 
 Installing via npm or building from source avoids these prompts, because the file never carries a browser-download marker.
 
-This README describes the current source workspace. The latest release is **v0.8.0** (2026-09-07): it includes MongoDB 8 tunnel support and bundles both READMEs, LICENSE, AGENTS.md and the `docs/` guides (index, security model and five guides, English + Chinese). Archives built from the current tree additionally bundle CONTRIBUTING.md, SECURITY.md and the newer `cli-reference` / `container-isolation` guides; that packaging has not been published in a release yet. Historical implementation records are archived under git tag `docs-superpowers-archive`, not in this tree or the archives. Older archives such as **0.6.0** do not include `docs/`; for those, browse the matching tag's `docs/` in the [source repository](https://github.com/Kitten9533/vaulty-keeper). Guides in this workspace are not evidence for binaries older than v0.8.0.
+This README describes the current source workspace. The latest release is **v0.8.0** (2026-09-07): it includes MongoDB 8 tunnel support and bundles both READMEs, LICENSE, AGENTS.md and the `docs/` guides (index, security model and five guides, English + Chinese). Archives built from the current tree additionally bundle CONTRIBUTING.md, SECURITY.md and the newer `cli-reference`, `container-isolation` and per-protocol tunnel (`postgres` / `mysql` / `redis`) guides; that packaging has not been published in a release yet. Historical implementation records are archived under git tag `docs-superpowers-archive`, not in this tree or the archives. Older archives such as **0.6.0** do not include `docs/`; for those, browse the matching tag's `docs/` in the [source repository](https://github.com/Kitten9533/vaulty-keeper). Guides in this workspace are not evidence for binaries older than v0.8.0.
 
 The following setup is for a human on the host and creates local keys/state; it is not an isolated test or an instruction for an agent to access real secrets:
 
@@ -133,6 +136,7 @@ Snapshot reads are masked for non-TTY output unless a key is explicitly marked s
 
 > Full ASCII diagrams (what's in Docker / where credentials live / auth injection for three DBs / security boundary / sequence) live in **[`docs/db-proxy-architecture.md`](docs/db-proxy-architecture.md)** ([中文版](docs/db-proxy-architecture.zh-CN.md)).
 > Multi-connection / native-client / container / permission examples and their fixture prerequisites live in **[`docs/db-proxy-examples.md`](docs/db-proxy-examples.md)** ([中文版](docs/db-proxy-examples.zh-CN.md)); check each example's evidence and version scope.
+> Per-protocol operation guides: **[PostgreSQL](docs/postgres-tunnel-guide.md)** · **[MySQL](docs/mysql-tunnel-guide.md)** · **[Redis](docs/redis-tunnel-guide.md)** ([中文版各一篇](docs/README.zh-CN.md)).
 > MongoDB 8's fixed-endpoint command-aware tunnel, exact URL options, security limits and verification matrix: **[MongoDB tunnel guide](docs/mongodb-tunnel-guide.md)** ([中文版](docs/mongodb-tunnel-guide.zh-CN.md)). The older diagrams/examples below cover PG/MySQL/Redis.
 
 Lets an AI in a container/isolated domain query databases with **native clients** (psql / mysql / redis-cli / mongosh) using tunnel credentials instead of the real backend URL. URLs are encrypted on the host with the independent DB key (`VAULTY_KEEPER_DB_KEY` / OS secret store). `serve` opens one TCP tunnel per connection and authenticates to the backend. PG/MySQL/Redis then forward raw bytes; MongoDB retains a framed command allowlist and reconstructs control replies. Business data is not redacted; see each protocol's security boundary.

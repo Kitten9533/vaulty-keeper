@@ -15,6 +15,9 @@
 | 完整命令参考（apollo / aes / 其他） | [docs/cli-reference.zh-CN.md](docs/cli-reference.zh-CN.md) |
 | DB 隧道：架构、时序、凭据注入 | [docs/db-proxy-architecture.zh-CN.md](docs/db-proxy-architecture.zh-CN.md) |
 | DB 隧道：使用示例与夹具 | [docs/db-proxy-examples.zh-CN.md](docs/db-proxy-examples.zh-CN.md) |
+| PostgreSQL 隧道：设置、选项、排错 | [docs/postgres-tunnel-guide.zh-CN.md](docs/postgres-tunnel-guide.zh-CN.md) |
+| MySQL 隧道：设置、TLS、排错 | [docs/mysql-tunnel-guide.zh-CN.md](docs/mysql-tunnel-guide.zh-CN.md) |
+| Redis 隧道：设置、选项、排错 | [docs/redis-tunnel-guide.zh-CN.md](docs/redis-tunnel-guide.zh-CN.md) |
 | MongoDB 8 隧道：选项、限制、验证矩阵 | [docs/mongodb-tunnel-guide.zh-CN.md](docs/mongodb-tunnel-guide.zh-CN.md) |
 | 容器 / agent 隔离 | [docs/container-isolation.zh-CN.md](docs/container-isolation.zh-CN.md) |
 | Web UI：页面、字段、确认流程 | [docs/ui-guide.zh-CN.md](docs/ui-guide.zh-CN.md) |
@@ -42,7 +45,7 @@ npm 渠道通过包管理器下载预编译二进制，而不是浏览器，因�
 
 通过 npm 安装或源码构建不会触发这些提示，因为文件不会带有浏览器下载标记。
 
-本 README 描述当前源码工作区。最新发布是 **v0.8.0**（2026-09-07）：包含 MongoDB 8 隧道支持，压缩包内含两版 README、LICENSE、AGENTS.md 和当前 `docs/` 指南（索引、安全模型与五份指南，中英双语）。由当前工作区构建的压缩包还会额外打包 CONTRIBUTING.md、SECURITY.md 及较新的 `cli-reference` / `container-isolation` 指南，该打包尚未随发布发布。历史实现记录归档在 git tag `docs-superpowers-archive`，不在本树或压缩包内。更早的归档如 **0.6.0** 不含 `docs/`；如需离线阅读，请在[源码仓库](https://github.com/Kitten9533/vaulty-keeper)选择对应 tag 的 `docs/`。本工作区指南不是早于 v0.8.0 的二进制的能力证据。
+本 README 描述当前源码工作区。最新发布是 **v0.8.0**（2026-09-07）：包含 MongoDB 8 隧道支持，压缩包内含两版 README、LICENSE、AGENTS.md 和当前 `docs/` 指南（索引、安全模型与五份指南，中英双语）。由当前工作区构建的压缩包还会额外打包 CONTRIBUTING.md、SECURITY.md 及较新的 `cli-reference`、`container-isolation` 和逐协议隧道（`postgres` / `mysql` / `redis`）指南，该打包尚未随发布发布。历史实现记录归档在 git tag `docs-superpowers-archive`，不在本树或压缩包内。更早的归档如 **0.6.0** 不含 `docs/`；如需离线阅读，请在[源码仓库](https://github.com/Kitten9533/vaulty-keeper)选择对应 tag 的 `docs/`。本工作区指南不是早于 v0.8.0 的二进制的能力证据。
 
 以下初始化由人工在宿主执行，会创建本地密钥/状态；不是隔离测试，也不是让 agent 访问真实秘密的指令：
 
@@ -133,6 +136,7 @@ vaulty-keeper help            # 帮助树此时也是中文
 
 > 完整的 ASCII 图解（Docker 里是什么 / 凭据存哪 / 三库认证注入 / 安全边界 / 时序）见 **[`docs/db-proxy-architecture.zh-CN.md`](docs/db-proxy-architecture.zh-CN.md)**（[English](docs/db-proxy-architecture.md)）。
 > 多连接/原生客户端/容器/权限示例及夹具前提见 **[`docs/db-proxy-examples.zh-CN.md`](docs/db-proxy-examples.zh-CN.md)**（[English](docs/db-proxy-examples.md)）；请查看各示例的证据和版本范围。
+> 逐协议操作指南：**[PostgreSQL](docs/postgres-tunnel-guide.zh-CN.md)** · **[MySQL](docs/mysql-tunnel-guide.zh-CN.md)** · **[Redis](docs/redis-tunnel-guide.zh-CN.md)**（各自配套英文版）。
 > MongoDB 8 固定端点的命令感知隧道、完整 URL 选项、安全边界及验证矩阵见 **[MongoDB 隧道指南](docs/mongodb-tunnel-guide.zh-CN.md)**（[English](docs/mongodb-tunnel-guide.md)）。下方旧图及示例范围为 PG/MySQL/Redis。
 
 让容器/隔离域里的 AI 用**原生客户端**（psql / mysql / redis-cli / mongosh）和隧道凭据查询数据库，而非获得真实后端 URL。URL 在宿主通过独立 DB 密钥（`VAULTY_KEEPER_DB_KEY` / 系统密钥库）加密存储。`serve` 为每条连接起 TCP 隧道并认证后端。PG/MySQL/Redis 随后转发原始字节；MongoDB 持续按帧执行命令白名单并重建控制回包。业务数据不脱敏，详见各协议安全边界。

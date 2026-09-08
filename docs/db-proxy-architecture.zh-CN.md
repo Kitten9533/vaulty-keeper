@@ -2,7 +2,7 @@
 
 [English](db-proxy-architecture.md) | 中文
 
-当前 PG/MySQL/Redis 行为，2026-09-07 按源码核对。下图是说明图，不是运行环境快照或新测试证据。准备步骤和显式端口见[用法及合成夹具](db-proxy-examples.zh-CN.md)，统一安全边界见[安全模型](security-model.zh-CN.md)。
+当前 PG/MySQL/Redis 行为，2026-09-07 按源码核对。下图是说明图，不是运行环境快照或新测试证据。准备步骤和显式端口见[用法及合成夹具](db-proxy-examples.zh-CN.md)；URL 选项、客户端设置与排错见逐协议操作指南（[PostgreSQL](postgres-tunnel-guide.zh-CN.md) / [MySQL](mysql-tunnel-guide.zh-CN.md) / [Redis](redis-tunnel-guide.zh-CN.md)）；统一安全边界见[安全模型](security-model.zh-CN.md)。
 
 MongoDB 单独维护：[MongoDB 8 指南](mongodb-tunnel-guide.zh-CN.md) 负责固定端点、持续命令感知转发、虚拟用户 `vaulty`、专属 token 作为 SCRAM-SHA-256 密码、无全局兜底、已审查 CRUD/只读聚合和脱敏控制元数据。下方原始字节转发图不适用于 MongoDB。任何协议都不承诺即时撤销会话。
 
