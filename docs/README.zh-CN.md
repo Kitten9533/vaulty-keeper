@@ -23,10 +23,10 @@
 | [ui-guide](ui-guide.md) · [中文](ui-guide.zh-CN.md) | Web UI：导航、字段、确认流程、AES 分层、UI 内数据库隧道。 |
 | [db-proxy-architecture](db-proxy-architecture.md) · [中文](db-proxy-architecture.zh-CN.md) | PG/MySQL/Redis 隧道架构：什么在哪里运行、凭据注入、时序。 |
 | [db-proxy-examples](db-proxy-examples.md) · [中文](db-proxy-examples.zh-CN.md) | DB 用法示例与合成夹具（文档工作期间按源码核对，未重新执行）。 |
-| [mongodb-tunnel-guide](mongodb-tunnel-guide.md) · [中文](mongodb-tunnel-guide.zh-CN.md) | MongoDB 8 隧道：精确 URL 选项、安全限制、排错、带日期验证矩阵。 |
-| [postgres-tunnel-guide](postgres-tunnel-guide.md) · [中文](postgres-tunnel-guide.zh-CN.md) | PostgreSQL 隧道：连接模型、注册 URL、客户端设置、限制、排错。 |
-| [mysql-tunnel-guide](mysql-tunnel-guide.md) · [中文](mysql-tunnel-guide.zh-CN.md) | MySQL 隧道：连接模型、注册 URL、后端 TLS、客户端设置、排错。 |
-| [redis-tunnel-guide](redis-tunnel-guide.md) · [中文](redis-tunnel-guide.zh-CN.md) | Redis 隧道：连接模型、注册 URL、客户端设置、限制、排错。 |
+| [mongodb-tunnel-guide](tunnel/mongodb-tunnel-guide.md) · [中文](tunnel/mongodb-tunnel-guide.zh-CN.md) | MongoDB 8 隧道：精确 URL 选项、安全限制、排错、带日期验证矩阵。 |
+| [postgres-tunnel-guide](tunnel/postgres-tunnel-guide.md) · [中文](tunnel/postgres-tunnel-guide.zh-CN.md) | PostgreSQL 隧道：连接模型、注册 URL、客户端设置、限制、排错。 |
+| [mysql-tunnel-guide](tunnel/mysql-tunnel-guide.md) · [中文](tunnel/mysql-tunnel-guide.zh-CN.md) | MySQL 隧道：连接模型、注册 URL、后端 TLS、客户端设置、排错。 |
+| [redis-tunnel-guide](tunnel/redis-tunnel-guide.md) · [中文](tunnel/redis-tunnel-guide.zh-CN.md) | Redis 隧道：连接模型、注册 URL、客户端设置、限制、排错。 |
 | [container-isolation](container-isolation.md) · [中文](container-isolation.zh-CN.md) | Docker/agent 与宿主密钥、密文隔离，以及不用 Docker 的替代方案。 |
 
 ## 原则

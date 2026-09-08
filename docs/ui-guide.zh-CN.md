@@ -129,7 +129,7 @@ Windows 发布包名包含版本，例如 `vaulty-keeper-0.8.0-windows-x86_64.zi
 - **Tunnel port（可选）**：留空从 15432 起自动分配，仅跳过此存储中已注册的端口，不探测 OS 占用；需要可复现客户端配置时填写明确可用的端口。
 - **Database URL**：支持 `postgres://`、`mysql://`、`redis://`、`mongodb://` 等 scheme。例如 `postgres://demo:demo@localhost:5432/appdb` 是**合成语法示例**，不代表已准备数据库。
 
-MongoDB 8 接受单固定端点和普通用户名/密码认证。遵循[注册 URL 白名单](mongodb-tunnel-guide.zh-CN.md#注册-url)，而非通用驱动的全部选项：注册 `retryWrites` 会被拒绝，但生成的客户端 URI 包含 `retryWrites=false`。后端账号需要 `listCollections` 权限来验证普通集合；不支持视图/时序和完整管理/GUI 自省。连接测试成功不代表所有业务集合权限均已验证。
+MongoDB 8 接受单固定端点和普通用户名/密码认证。遵循[注册 URL 白名单](tunnel/mongodb-tunnel-guide.zh-CN.md#注册-url)，而非通用驱动的全部选项：注册 `retryWrites` 会被拒绝，但生成的客户端 URI 包含 `retryWrites=false`。后端账号需要 `listCollections` 权限来验证普通集合；不支持视图/时序和完整管理/GUI 自省。连接测试成功不代表所有业务集合权限均已验证。
 
 **注册和测试输入 URL 时，在 POST 前加密 URL**：浏览器先从 `/api/db/pubkey` 获取服务端 ECDH 公钥，派生 AES-GCM 密钥并加密 URL；私钥只在 UI 进程内存中，每次启动重生。此范围不包括通过 loopback HTTP 返回解密明文的 **View URL**，也不覆盖全部后续数据库流量，不能当作通用 TLS 保证。
 
@@ -162,9 +162,9 @@ MySQL 隧道 `?tls=true` 会与后端协商 TLS，并用升级后的连接完成
 
 PostgreSQL/MySQL/Redis 的新旧注册连接都接受当前全局 bridge token **或**连接专属 token。轮换专属 token 不会撤销全局 token 访问权。Mongo 的差异见下文。隧道链接隐藏后端认证凭据，但 token 赋予数据库访问权，查询结果也可能含秘密。
 
-Mongo **Connect info** 使用用户 `vaulty`、专属 token 作为 SCRAM-SHA-256 密码、`authSource=admin`、`directConnection=true` 和 `retryWrites=false`，无全局 bridge token 兜底。这些仅含代理信息的链接供获授权 agent/工具使用，与 UI 访问 token 或 **View URL** 输出不同。生成的 mongosh 命令把隧道 token 放入 argv，不含真实后端 URI；应作为访问凭据保护，人工客户端也可使用密码提示输入。关闭监听不承诺终止既有会话。明文网络限制、业务数据不改写及已验证/待验证矩阵见 [Mongo 指南](mongodb-tunnel-guide.zh-CN.md)。
+Mongo **Connect info** 使用用户 `vaulty`、专属 token 作为 SCRAM-SHA-256 密码、`authSource=admin`、`directConnection=true` 和 `retryWrites=false`，无全局 bridge token 兜底。这些仅含代理信息的链接供获授权 agent/工具使用，与 UI 访问 token 或 **View URL** 输出不同。生成的 mongosh 命令把隧道 token 放入 argv，不含真实后端 URI；应作为访问凭据保护，人工客户端也可使用密码提示输入。关闭监听不承诺终止既有会话。明文网络限制、业务数据不改写及已验证/待验证矩阵见 [Mongo 指南](tunnel/mongodb-tunnel-guide.zh-CN.md)。
 
-**证据范围：** 2026-09-07 实现记录报告，在基于 `7273bb21e8347777058a17fb95a16aa2a17a36dc` 的未提交 Mongo 工作树上（macOS 12.4 Intel），test/race/vet/build 及 MongoDB 8.0.13 standalone/固定副本集 Go 驱动/mongosh 检查已通过。这是历史证据，不是本次文档编辑后的重跑或人工浏览器验证。实际 Mongo TLS、人工 TTY `db shell` 和不可用的独立复审仍未验证；详细矩阵由 [Mongo 指南](mongodb-tunnel-guide.zh-CN.md) 维护。
+**证据范围：** 2026-09-07 实现记录报告，在基于 `7273bb21e8347777058a17fb95a16aa2a17a36dc` 的未提交 Mongo 工作树上（macOS 12.4 Intel），test/race/vet/build 及 MongoDB 8.0.13 standalone/固定副本集 Go 驱动/mongosh 检查已通过。这是历史证据，不是本次文档编辑后的重跑或人工浏览器验证。实际 Mongo TLS、人工 TTY `db shell` 和不可用的独立复审仍未验证；详细矩阵由 [Mongo 指南](tunnel/mongodb-tunnel-guide.zh-CN.md) 维护。
 
 ## 6 · 设置（Settings）
 

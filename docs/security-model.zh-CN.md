@@ -74,12 +74,12 @@ safe 值是**获得授权的明文输出**，不只是"非敏感"分类。因此
 
 - **PG**：`sslmode` 交给客户端库处理。**Redis**：TLS 用 `rediss://`。
 - **MySQL `?tls=true` 已修复**（原 C01）：代理会声明 `CLIENT_SSL`，用 TLS 升级后的连接完成认证与转发，并支持 `tlsCAFile` 信任私有/自签 CA。曾对 `require_secure_transport=ON`、使用自签 CA 的 MySQL 8 做过一次原生 TLS 查询验证（`Ssl_cipher` 非空、TLSv1.3、业务查询经隧道通过），但该证据**在仓库不可复现**——没有集成测试固化（只有假后端单测）。按"已修复且有单测"看待该能力，依赖它之前请先对真实 TLS 后端复测。不要关闭真实后端要求的 TLS。
-- **MongoDB 8**：固定单端点、用户 `vaulty` + 专属 token 作 SCRAM 密码、`authSource=admin`、`directConnection=true&retryWrites=false`、无全局兜底；双端认证 + 持续命令白名单（不是认证后裸转发）。视图、时序、事务、可重试写入、`comment`/`collation`/`create`/`createIndexes` 不开放。仅错误码 13 无法区分代理策略与后端角色拒绝。完整细节与限制：[mongodb-tunnel-guide.md](mongodb-tunnel-guide.md)。
+- **MongoDB 8**：固定单端点、用户 `vaulty` + 专属 token 作 SCRAM 密码、`authSource=admin`、`directConnection=true&retryWrites=false`、无全局兜底；双端认证 + 持续命令白名单（不是认证后裸转发）。视图、时序、事务、可重试写入、`comment`/`collation`/`create`/`createIndexes` 不开放。仅错误码 13 无法区分代理策略与后端角色拒绝。完整细节与限制：[mongodb-tunnel-guide.md](tunnel/mongodb-tunnel-guide.md)。
 - 客户端到代理的传输是明文；使用本机或受控隔离的可信网络。
 
 ## 8 · 验证状态
 
-此处只记录、不重跑：带日期的 MongoDB 8.0.13 standalone/固定副本集矩阵（单测/race/vet/build、原生 Go 驱动、容器内 `mongosh`）见 [mongodb-tunnel-guide.md](mongodb-tunnel-guide.md#验证状态)，是历史结果——不是本次文档工作期间的新运行。
+此处只记录、不重跑：带日期的 MongoDB 8.0.13 standalone/固定副本集矩阵（单测/race/vet/build、原生 Go 驱动、容器内 `mongosh`）见 [mongodb-tunnel-guide.md](tunnel/mongodb-tunnel-guide.md#验证状态)，是历史结果——不是本次文档工作期间的新运行。
 
 仍然**未验证**：真实 MongoDB TLS（只测过假后端证书/主机名）、人工交互 `db shell`、自动化独立复审。MySQL TLS **已修复**（C01：`CLIENT_SSL` 能力位 + TLS 升级连接贯穿认证与转发），但原生 TLS 证据**在仓库不可复现**（只有假后端单测；一次性真实 TLS 查询未固化为集成测试）。`scripts/dbtest.sh` **现已隔离**（C02 完成）：每次运行独立临时目录/容器、PID 与标签跟踪、假 HOME 与合成密钥，`--clean` 只清理自身登记资源；历史版本的宽泛 pkill 与真实 HOME token 覆盖已不适用。
 

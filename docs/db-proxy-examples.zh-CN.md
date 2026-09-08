@@ -2,7 +2,7 @@
 
 [English](db-proxy-examples.md) | 中文
 
-适用于当前工作区的 PG/MySQL/Redis。下方完整合成步骤已按源码核对，2026-09-07 文档更正期间**没有执行**；预期结果不是测试输出。配套见[架构](db-proxy-architecture.zh-CN.md)及统一[安全模型](security-model.zh-CN.md)；URL 选项、客户端设置与排错见逐协议操作指南（[PostgreSQL](postgres-tunnel-guide.zh-CN.md) / [MySQL](mysql-tunnel-guide.zh-CN.md) / [Redis](redis-tunnel-guide.zh-CN.md)）。MongoDB 8 有独立[指南和历史验证矩阵](mongodb-tunnel-guide.zh-CN.md)：固定单端点、`vaulty` 加专属密码 token、无全局兜底、持续命令/元数据检查，不承诺完整 GUI 支持或即时撤销会话。
+适用于当前工作区的 PG/MySQL/Redis。下方完整合成步骤已按源码核对，2026-09-07 文档更正期间**没有执行**；预期结果不是测试输出。配套见[架构](db-proxy-architecture.zh-CN.md)及统一[安全模型](security-model.zh-CN.md)；URL 选项、客户端设置与排错见逐协议操作指南（[PostgreSQL](tunnel/postgres-tunnel-guide.zh-CN.md) / [MySQL](tunnel/mysql-tunnel-guide.zh-CN.md) / [Redis](tunnel/redis-tunnel-guide.zh-CN.md)）。MongoDB 8 有独立[指南和历史验证矩阵](tunnel/mongodb-tunnel-guide.zh-CN.md)：固定单端点、`vaulty` 加专属密码 token、无全局兜底、持续命令/元数据检查，不承诺完整 GUI 支持或即时撤销会话。
 
 **`scripts/dbtest.sh` 已隔离重构，可以安全运行（C02 完成）：** 它按 PID 与容器标签跟踪自己启动的 serve 和容器，使用每次运行独立的临时目录和假 HOME、合成密钥，`--clean` 只清理登记的运行。历史版本会宽泛终止匹配的 serve 进程、删除固定容器 `aipg`/`aimysql8`/`aimariadb`/`airedis` 及固定 `/tmp/vaulty-keeper-dbtest*` 目录/日志，并可能覆盖真实 HOME 的 bridge-token——当前脚本均不再适用。其镜像是 PostgreSQL `17.6-alpine`、MySQL `8.0`（历史为 8.0.46，不是 8.4/MariaDB）和 Redis `7`。
 

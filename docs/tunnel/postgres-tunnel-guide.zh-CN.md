@@ -2,7 +2,7 @@
 
 > 中文 | [English](postgres-tunnel-guide.md)
 >
-> 当前 PostgreSQL 隧道接口，2026-09-07 按源码核对（工作区行为，非新测试运行）。统一安全边界见[安全模型](security-model.zh-CN.md)；三协议共享机制见[架构指南](db-proxy-architecture.zh-CN.md)；已准备夹具与生命周期见[示例指南](db-proxy-examples.zh-CN.md)。
+> 当前 PostgreSQL 隧道接口，2026-09-07 按源码核对（工作区行为，非新测试运行）。统一安全边界见[安全模型](../security-model.zh-CN.md)；三协议共享机制见[架构指南](../db-proxy-architecture.zh-CN.md)；已准备夹具与生命周期见[示例指南](../db-proxy-examples.zh-CN.md)。
 
 ## 连接模型
 
@@ -11,6 +11,23 @@
 后端认证完成后代理双向转发原始协议字节：无查询白名单、无结果脱敏。因此后端角色决定 token 持有者实际能做什么。后端参与自身认证（按服务端要求使用 SCRAM-SHA-256/MD5/明文），真实密码可能以明文认证形式经过宿主到后端这一段。不要把它描述成"凭据永不离开宿主"。
 
 PostgreSQL 对**新旧注册**都接受专属 token **或当前 serve 的全局 bridge token**。`db regen` 只轮换专属 token，全局兜底仍然有效。
+
+## 认证与数据流
+
+```text
+客户端                         serve                        后端
+  | 虚拟 token（用户名）           |                             |
+  +----------------------------->| 校验 token                   |
+  |                              | 连接 + 后端认证              |
+  |                              |（注册的用户名/密码/数据库）  |
+  |                              +---------------------------->|
+  |                              |<----------------------------+
+  | 查询                         |                             |
+  +----------------------------->+---------------------------->|
+  |<-----------------------------+<----------------------------+
+```
+
+客户端把隧道 token 当作用户名发送，密码任意占位。serve 校验后，用注册的用户名/密码/数据库连接后端并认证（按服务端要求使用 SCRAM-SHA-256/MD5/明文）。此后双向都是原始协议字节；代理不解析、不过滤查询。
 
 ## 注册 URL
 
@@ -98,4 +115,4 @@ psql/JDBC/psycopg 等对后端账号能做的事，隧道都转发，无逐命�
 
 `db show` 打印解密后的真实 URL；`db shell` 启动直接后端客户端。它们的 stdin-TTY 检查不确立人工身份。请使用 `db test`、元数据与授权有界查询，不要寻找秘密。
 
-源码核对：[PostgreSQL handler](../internal/dbproxy/postgres.go)、[隧道分发](../internal/dbproxy/tunnel.go)、[store/Resolve](../internal/dbproxy/store.go)、[CLI/db 链接](../internal/cli/db.go)、[watcher 启动](../internal/cli/remote.go)。本指南未运行任何运行时测试或真实数据操作。
+源码核对：[PostgreSQL handler](../../internal/dbproxy/postgres.go)、[隧道分发](../../internal/dbproxy/tunnel.go)、[store/Resolve](../../internal/dbproxy/store.go)、[CLI/db 链接](../../internal/cli/db.go)、[watcher 启动](../../internal/cli/remote.go)。本指南未运行任何运行时测试或真实数据操作。

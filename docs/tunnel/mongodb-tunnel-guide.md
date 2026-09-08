@@ -2,7 +2,7 @@
 
 > English | [中文](mongodb-tunnel-guide.zh-CN.md)
 >
-> Current MongoDB 8 interface, source-checked on 2026-09-07. This guide owns the dated historical validation matrix below; documentation corrections do not constitute a new test/build run. The general security authority is the [security model](security-model.md).
+> Current MongoDB 8 interface, source-checked on 2026-09-07. This guide owns the dated historical validation matrix below; documentation corrections do not constitute a new test/build run. The general security authority is the [security model](../security-model.md).
 
 ## Connection Model
 
@@ -174,4 +174,4 @@ go test -mod=readonly -tags=mongointegration ./internal/dbproxy -run '^TestMongo
 
 Running the tagged tests without fixture variables skips the live integration case and is not evidence of a native MongoDB pass. No complete GUI/introspection compatibility, actual MongoDB TLS or interactive shell validation is implied by the passing matrix.
 
-Source checks for this guide: [registered URL parser](../internal/dbproxy/mongodb_config.go), [backend auth/TLS/deadline](../internal/dbproxy/mongodb_auth.go), [persistent relay](../internal/dbproxy/mongodb.go), [command/metadata policy](../internal/dbproxy/mongodb_policy.go), [client links](../internal/dbproxy/links.go), [CLI prompt/direct shell](../internal/cli/db.go), [watcher startup](../internal/cli/remote.go), [store lifecycle](../internal/dbproxy/store.go) and [native fixture](../scripts/mongotest.sh). MySQL TLS C01 is fixed (unit-tested; a one-off native TLS query passed but is not pinned by an integration test). The old `scripts/dbtest.sh` was refactored into an isolated script (C02 done) and is safe to run; neither C01 nor C02 was a new Mongo TLS defect.
+Source checks for this guide: [registered URL parser](../../internal/dbproxy/mongodb_config.go), [backend auth/TLS/deadline](../../internal/dbproxy/mongodb_auth.go), [persistent relay](../../internal/dbproxy/mongodb.go), [command/metadata policy](../../internal/dbproxy/mongodb_policy.go), [client links](../../internal/dbproxy/links.go), [CLI prompt/direct shell](../../internal/cli/db.go), [watcher startup](../../internal/cli/remote.go), [store lifecycle](../../internal/dbproxy/store.go) and [native fixture](../../scripts/mongotest.sh). MySQL TLS C01 is fixed (unit-tested; a one-off native TLS query passed but is not pinned by an integration test). The old `scripts/dbtest.sh` was refactored into an isolated script (C02 done) and is safe to run; neither C01 nor C02 was a new Mongo TLS defect.

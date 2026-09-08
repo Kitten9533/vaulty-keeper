@@ -2,7 +2,7 @@
 
 > [中文](redis-tunnel-guide.zh-CN.md) | English
 >
-> Current Redis tunnel interface, source-checked on 2026-09-07 (working-tree behavior; not a new test run). The general security authority is the [security model](security-model.md); the shared three-protocol mechanism lives in the [architecture guide](db-proxy-architecture.md); prepared fixtures and lifecycle live in the [examples guide](db-proxy-examples.md).
+> Current Redis tunnel interface, source-checked on 2026-09-07 (working-tree behavior; not a new test run). The general security authority is the [security model](../security-model.md); the shared three-protocol mechanism lives in the [architecture guide](../db-proxy-architecture.md); prepared fixtures and lifecycle live in the [examples guide](../db-proxy-examples.md).
 
 ## Connection Model
 
@@ -11,6 +11,23 @@ Register one backend Redis endpoint with the backend AUTH password (and optional
 After backend authentication the proxy forwards raw RESP traffic in both directions: no command allowlist, no result redaction. Backend ACLs and the token holder's authorization therefore define what is possible.
 
 Redis accepts either the dedicated token **or the current serve global bridge token** for both newly registered and old connections. `db regen` rotates only the dedicated token; the global fallback remains valid.
+
+## Authentication And Data Flow
+
+```text
+Client                         serve                        Backend
+  | AUTH <token> (first cmd)      |                             |
+  +----------------------------->| validate token               |
+  |                              | connect + backend AUTH       |
+  |                              | + SELECT registered db       |
+  |                              +---------------------------->|
+  |                              |<----------------------------+
+  | PING / GET ...                |                             |
+  +----------------------------->+---------------------------->|
+  |<-----------------------------+<----------------------------+
+```
+
+The client's **first command must be `AUTH` with the tunnel token**. serve validates it, then authenticates to the backend with the registered AUTH password and SELECTs the registered database. Afterwards both directions are raw RESP protocol bytes; the proxy does not parse or filter commands.
 
 ## Registered URL
 
@@ -95,4 +112,4 @@ Whatever redis-cli/GUI can do against the backend, the tunnel forwards after the
 
 `db show` prints the decrypted real URL; `db shell` launches a direct backend client. Their stdin-TTY checks do not establish human identity. Use `db test`, metadata and authorized bounded queries without seeking secrets.
 
-Source checks: [Redis handler](../internal/dbproxy/redis.go), [tunnel dispatch](../internal/dbproxy/tunnel.go), [store/Resolve](../internal/dbproxy/store.go), [CLI/db links](../internal/cli/db.go), [watcher startup](../internal/cli/remote.go). No runtime tests or real-data operations were run for this guide.
+Source checks: [Redis handler](../../internal/dbproxy/redis.go), [tunnel dispatch](../../internal/dbproxy/tunnel.go), [store/Resolve](../../internal/dbproxy/store.go), [CLI/db links](../../internal/cli/db.go), [watcher startup](../../internal/cli/remote.go). No runtime tests or real-data operations were run for this guide.

@@ -2,7 +2,7 @@
 
 > [中文](postgres-tunnel-guide.zh-CN.md) | English
 >
-> Current PostgreSQL tunnel interface, source-checked on 2026-09-07 (working-tree behavior; not a new test run). The general security authority is the [security model](security-model.md); the shared three-protocol mechanism lives in the [architecture guide](db-proxy-architecture.md); prepared fixtures and lifecycle live in the [examples guide](db-proxy-examples.md).
+> Current PostgreSQL tunnel interface, source-checked on 2026-09-07 (working-tree behavior; not a new test run). The general security authority is the [security model](../security-model.md); the shared three-protocol mechanism lives in the [architecture guide](../db-proxy-architecture.md); prepared fixtures and lifecycle live in the [examples guide](../db-proxy-examples.md).
 
 ## Connection Model
 
@@ -11,6 +11,23 @@ Register one backend PostgreSQL endpoint with a normal username/password. The ho
 After backend authentication the proxy forwards raw protocol bytes in both directions: no query allowlist, no result redaction. Backend roles therefore define what a token holder can actually do. The backend participates in its own authentication — SCRAM-SHA-256/MD5/cleartext as requested by the server — so the real password can cross the host-to-backend leg in cleartext authentication. Do not describe this as credentials never leaving the host.
 
 PostgreSQL accepts either the dedicated token **or the current serve global bridge token** for both newly registered and old connections. `db regen` rotates only the dedicated token; the global fallback remains valid.
+
+## Authentication And Data Flow
+
+```text
+Client                         serve                        Backend
+  | virtual token (username)      |                             |
+  +----------------------------->| validate token               |
+  |                              | connect + backend auth       |
+  |                              | (registered credentials)     |
+  |                              +---------------------------->|
+  |                              |<----------------------------+
+  | query                         |                             |
+  +----------------------------->+---------------------------->|
+  |<-----------------------------+<----------------------------+
+```
+
+The client sends the tunnel token as the username with any placeholder password. serve validates it, connects to the backend with the registered username/password/database and authenticates (SCRAM-SHA-256/MD5/cleartext as the server requests). Afterwards both directions are raw protocol bytes; the proxy does not parse or filter queries.
 
 ## Registered URL
 
@@ -98,4 +115,4 @@ Whatever psql/JDBC/psycopg etc. can do against a backend account, the tunnel for
 
 `db show` prints the decrypted real URL; `db shell` launches a direct backend client. Their stdin-TTY checks do not establish human identity. Use `db test`, metadata and authorized bounded queries without seeking secrets.
 
-Source checks: [PostgreSQL handler](../internal/dbproxy/postgres.go), [tunnel dispatch](../internal/dbproxy/tunnel.go), [store/Resolve](../internal/dbproxy/store.go), [CLI/db links](../internal/cli/db.go), [watcher startup](../internal/cli/remote.go). No runtime tests or real-data operations were run for this guide.
+Source checks: [PostgreSQL handler](../../internal/dbproxy/postgres.go), [tunnel dispatch](../../internal/dbproxy/tunnel.go), [store/Resolve](../../internal/dbproxy/store.go), [CLI/db links](../../internal/cli/db.go), [watcher startup](../../internal/cli/remote.go). No runtime tests or real-data operations were run for this guide.

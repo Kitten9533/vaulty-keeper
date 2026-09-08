@@ -2,9 +2,9 @@
 
 [English](db-proxy-architecture.md) | 中文
 
-当前 PG/MySQL/Redis 行为，2026-09-07 按源码核对。下图是说明图，不是运行环境快照或新测试证据。准备步骤和显式端口见[用法及合成夹具](db-proxy-examples.zh-CN.md)；URL 选项、客户端设置与排错见逐协议操作指南（[PostgreSQL](postgres-tunnel-guide.zh-CN.md) / [MySQL](mysql-tunnel-guide.zh-CN.md) / [Redis](redis-tunnel-guide.zh-CN.md)）；统一安全边界见[安全模型](security-model.zh-CN.md)。
+当前 PG/MySQL/Redis 行为，2026-09-07 按源码核对。下图是说明图，不是运行环境快照或新测试证据。准备步骤和显式端口见[用法及合成夹具](db-proxy-examples.zh-CN.md)；URL 选项、客户端设置与排错见逐协议操作指南（[PostgreSQL](tunnel/postgres-tunnel-guide.zh-CN.md) / [MySQL](tunnel/mysql-tunnel-guide.zh-CN.md) / [Redis](tunnel/redis-tunnel-guide.zh-CN.md)）；统一安全边界见[安全模型](security-model.zh-CN.md)。
 
-MongoDB 单独维护：[MongoDB 8 指南](mongodb-tunnel-guide.zh-CN.md) 负责固定端点、持续命令感知转发、虚拟用户 `vaulty`、专属 token 作为 SCRAM-SHA-256 密码、无全局兜底、已审查 CRUD/只读聚合和脱敏控制元数据。下方原始字节转发图不适用于 MongoDB。任何协议都不承诺即时撤销会话。
+MongoDB 单独维护：[MongoDB 8 指南](tunnel/mongodb-tunnel-guide.zh-CN.md) 负责固定端点、持续命令感知转发、虚拟用户 `vaulty`、专属 token 作为 SCRAM-SHA-256 密码、无全局兜底、已审查 CRUD/只读聚合和脱敏控制元数据。下方原始字节转发图不适用于 MongoDB。任何协议都不承诺即时撤销会话。
 
 ## 总览
 
@@ -119,4 +119,4 @@ Compose 丢弃 capabilities、启用 `no-new-privileges`，挂载项目及持久
 
 现行行为依据：[存储/Resolve](../internal/dbproxy/store.go)、[监听同步和分发](../internal/dbproxy/tunnel.go)、[PostgreSQL](../internal/dbproxy/postgres.go)、[MySQL](../internal/dbproxy/mysql.go)、[Redis](../internal/dbproxy/redis.go)、[CLI 输入/链接/shell](../internal/cli/db.go)、[serve 启动](../internal/cli/remote.go)、[取钥匙](../internal/apollo/keyring.go)、[UI 连接输出](../internal/ui/db.go)、[Compose](../docker-compose.yml) 和 [entrypoint](../docker/agent-entrypoint.sh)。
 
-本指南描述工作区实现。最新发布 **v0.8.0** 已包含当前 DB 隧道与 MongoDB 行为并打包 `docs/` 指南；预编译 0.6.0 归档先于两者，且缺少所链接的 `docs/`。本次文档更正未生成发布包，未运行运行时测试、真实 TLS 测试或人工 TTY 检查。带日期的历史 Mongo 验证矩阵仅由 [Mongo 指南](mongodb-tunnel-guide.zh-CN.md#验证状态) 维护。
+本指南描述工作区实现。最新发布 **v0.8.0** 已包含当前 DB 隧道与 MongoDB 行为并打包 `docs/` 指南；预编译 0.6.0 归档先于两者，且缺少所链接的 `docs/`。本次文档更正未生成发布包，未运行运行时测试、真实 TLS 测试或人工 TTY 检查。带日期的历史 Mongo 验证矩阵仅由 [Mongo 指南](tunnel/mongodb-tunnel-guide.zh-CN.md#验证状态) 维护。

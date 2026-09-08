@@ -48,7 +48,7 @@ node scripts/check-docs.mjs
 
 ## 测试覆盖与 DB 夹具
 
-以下是覆盖范围指针，不代表本次文档更新执行过测试；代码变化后须针对确切源码版本运行相关检查。MongoDB 带日期证据与剩余缺口统一维护在 [MongoDB 指南](docs/mongodb-tunnel-guide.zh-CN.md) 中。
+以下是覆盖范围指针，不代表本次文档更新执行过测试；代码变化后须针对确切源码版本运行相关检查。MongoDB 带日期证据与剩余缺口统一维护在 [MongoDB 指南](docs/tunnel/mongodb-tunnel-guide.zh-CN.md) 中。
 
 - `internal/aesx`: 与 `tools/javaref/CryptoUtil.java`（Java 8 参考实现）生成的向量逐字节对齐（GCM 确定性），另覆盖 key 长度校验、错误 key/iv、非法 base64。
 - `internal/apollo`: 真实粘贴样例（含合并行）、注释、首个 `=`、URL 参数不误拆、快照加密落盘（文件无明文、权限 0600）、diff、敏感识别。

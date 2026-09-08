@@ -15,10 +15,10 @@
 | 完整命令参考（apollo / aes / 其他） | [docs/cli-reference.zh-CN.md](docs/cli-reference.zh-CN.md) |
 | DB 隧道：架构、时序、凭据注入 | [docs/db-proxy-architecture.zh-CN.md](docs/db-proxy-architecture.zh-CN.md) |
 | DB 隧道：使用示例与夹具 | [docs/db-proxy-examples.zh-CN.md](docs/db-proxy-examples.zh-CN.md) |
-| PostgreSQL 隧道：设置、选项、排错 | [docs/postgres-tunnel-guide.zh-CN.md](docs/postgres-tunnel-guide.zh-CN.md) |
-| MySQL 隧道：设置、TLS、排错 | [docs/mysql-tunnel-guide.zh-CN.md](docs/mysql-tunnel-guide.zh-CN.md) |
-| Redis 隧道：设置、选项、排错 | [docs/redis-tunnel-guide.zh-CN.md](docs/redis-tunnel-guide.zh-CN.md) |
-| MongoDB 8 隧道：选项、限制、验证矩阵 | [docs/mongodb-tunnel-guide.zh-CN.md](docs/mongodb-tunnel-guide.zh-CN.md) |
+| PostgreSQL 隧道：设置、选项、排错 | [docs/tunnel/postgres-tunnel-guide.zh-CN.md](docs/tunnel/postgres-tunnel-guide.zh-CN.md) |
+| MySQL 隧道：设置、TLS、排错 | [docs/tunnel/mysql-tunnel-guide.zh-CN.md](docs/tunnel/mysql-tunnel-guide.zh-CN.md) |
+| Redis 隧道：设置、选项、排错 | [docs/tunnel/redis-tunnel-guide.zh-CN.md](docs/tunnel/redis-tunnel-guide.zh-CN.md) |
+| MongoDB 8 隧道：选项、限制、验证矩阵 | [docs/tunnel/mongodb-tunnel-guide.zh-CN.md](docs/tunnel/mongodb-tunnel-guide.zh-CN.md) |
 | 容器 / agent 隔离 | [docs/container-isolation.zh-CN.md](docs/container-isolation.zh-CN.md) |
 | Web UI：页面、字段、确认流程 | [docs/ui-guide.zh-CN.md](docs/ui-guide.zh-CN.md) |
 | Apollo 快照：实现讲解 | [docs/apollo-snapshot-guide.zh-CN.md](docs/apollo-snapshot-guide.zh-CN.md) |
@@ -136,8 +136,8 @@ vaulty-keeper help            # 帮助树此时也是中文
 
 > 完整的 ASCII 图解（Docker 里是什么 / 凭据存哪 / 三库认证注入 / 安全边界 / 时序）见 **[`docs/db-proxy-architecture.zh-CN.md`](docs/db-proxy-architecture.zh-CN.md)**（[English](docs/db-proxy-architecture.md)）。
 > 多连接/原生客户端/容器/权限示例及夹具前提见 **[`docs/db-proxy-examples.zh-CN.md`](docs/db-proxy-examples.zh-CN.md)**（[English](docs/db-proxy-examples.md)）；请查看各示例的证据和版本范围。
-> 逐协议操作指南：**[PostgreSQL](docs/postgres-tunnel-guide.zh-CN.md)** · **[MySQL](docs/mysql-tunnel-guide.zh-CN.md)** · **[Redis](docs/redis-tunnel-guide.zh-CN.md)**（各自配套英文版）。
-> MongoDB 8 固定端点的命令感知隧道、完整 URL 选项、安全边界及验证矩阵见 **[MongoDB 隧道指南](docs/mongodb-tunnel-guide.zh-CN.md)**（[English](docs/mongodb-tunnel-guide.md)）。下方旧图及示例范围为 PG/MySQL/Redis。
+> 逐协议操作指南：**[PostgreSQL](docs/tunnel/postgres-tunnel-guide.zh-CN.md)** · **[MySQL](docs/tunnel/mysql-tunnel-guide.zh-CN.md)** · **[Redis](docs/tunnel/redis-tunnel-guide.zh-CN.md)**（各自配套英文版）。
+> MongoDB 8 固定端点的命令感知隧道、完整 URL 选项、安全边界及验证矩阵见 **[MongoDB 隧道指南](docs/tunnel/mongodb-tunnel-guide.zh-CN.md)**（[English](docs/tunnel/mongodb-tunnel-guide.md)）。下方旧图及示例范围为 PG/MySQL/Redis。
 
 让容器/隔离域里的 AI 用**原生客户端**（psql / mysql / redis-cli / mongosh）和隧道凭据查询数据库，而非获得真实后端 URL。URL 在宿主通过独立 DB 密钥（`VAULTY_KEEPER_DB_KEY` / 系统密钥库）加密存储。`serve` 为每条连接起 TCP 隧道并认证后端。PG/MySQL/Redis 随后转发原始字节；MongoDB 持续按帧执行命令白名单并重建控制回包。业务数据不脱敏，详见各协议安全边界。
 
@@ -213,7 +213,7 @@ docker stop vaulty-readme-pg   # --rm 删除这个演示容器
 - **后端 TLS**：PG 由客户端库处理 `sslmode`，Redis 使用 `rediss://`。**MySQL `?tls=true` 会与后端协商 TLS**（C01 修复：已有单测；曾对 `require_secure_transport=ON` 的 MySQL 8 做过一次性原生 TLS 查询，经隧道可见 `Ssl_cipher` 非空、TLSv1.3，但该证据未被集成测试固化——依赖前请对真实 TLS 后端复测）；如需信任私有/自签 CA，加 `tlsCAFile=<路径>`。MongoDB 实现了 `tls=true`/`ssl=true` 和可选 `tlsCAFile` 的证书/主机名验证，但真实 MongoDB TLS 仍未验证。客户端到代理为明文，仅用于 localhost 或隔离可信网络。
 - **只读控制**：代理层不强制只读，用只读账号的 URL 注册即天然只读
 - `vaulty-keeper db shell <name>` 在宿主直接打开已安装的原生客户端（stdin-TTY 门禁）。密码使用子进程环境变量；MySQL/Redis 主机和 MySQL 用户仍可能进入 argv。MongoDB 通过临时子进程环境变量传入后端 URI，再由启动脚本移除。此流程不是脱敏隧道访问。
-- **MongoDB 8** 支持单固定端点上的常见读取、要求服务端写入确认的 CRUD（不是人工审批）、已审查只读聚合及游标。后端账号需要 `listCollections` 权限以检查普通集合；不支持视图/时序、事务、可重试写入、SRV/故障转移、压缩或完整管理/GUI 兼容。常见不支持的选项/命令包括 `comment`、`collation`、`create` 和 `createIndexes`。对允许的集合使用有界读取，例如 `db.getCollection('orders').find({}).limit(5)`。[指南](docs/mongodb-tunnel-guide.zh-CN.md)维护完整密码提示命令、注册后端 URL 与客户端 URI 的区别及排错；仅错误码 13 不能区分代理策略和后端角色拒绝。
+- **MongoDB 8** 支持单固定端点上的常见读取、要求服务端写入确认的 CRUD（不是人工审批）、已审查只读聚合及游标。后端账号需要 `listCollections` 权限以检查普通集合；不支持视图/时序、事务、可重试写入、SRV/故障转移、压缩或完整管理/GUI 兼容。常见不支持的选项/命令包括 `comment`、`collation`、`create` 和 `createIndexes`。对允许的集合使用有界读取，例如 `db.getCollection('orders').find({}).limit(5)`。[指南](docs/tunnel/mongodb-tunnel-guide.zh-CN.md)维护完整密码提示命令、注册后端 URL 与客户端 URI 的区别及排错；仅错误码 13 不能区分代理策略和后端角色拒绝。
 
 **安全边界**
 
@@ -237,7 +237,7 @@ docker stop vaulty-readme-pg   # --rm 删除这个演示容器
 | 掩码代理 | 快照 API 值始终掩码，包括 safe 值。桥接 list/compare JSON 含长度/指纹；`remote get` 只打印掩码。全局 token 同时授权 PG/MySQL/Redis 隧道访问。 |
 | AI 读 | 非 TTY 本地读取仅放行显式 safe 值。TTY `get` 输出明文；显式明文命令检查 stdin TTY，不检查调用者身份/stdout。agent 不得对真实秘密使用这些出口或伪造 TTY。 |
 | AI 写 | 写入会加密保存值，但能替换/删除数据和改变可见性，须有任务授权；导入覆盖及敏感转 safe 另有门禁。 |
-| DB 隧道 | 加密注册 URL 和专属 token；PG/MySQL 以 token 为用户，Redis 以 token 为密码，MongoDB 使用用户 `vaulty` + token 密码，无全局兜底。MongoDB 持续按命令分帧并脱敏控制回包，不脱敏业务数据。`db regen` 影响新连接；`db on/off` 切换持久化监听状态，不保证终止既有会话。范围与证据见 [Mongo 指南](docs/mongodb-tunnel-guide.zh-CN.md)。 |
+| DB 隧道 | 加密注册 URL 和专属 token；PG/MySQL 以 token 为用户，Redis 以 token 为密码，MongoDB 使用用户 `vaulty` + token 密码，无全局兜底。MongoDB 持续按命令分帧并脱敏控制回包，不脱敏业务数据。`db regen` 影响新连接；`db on/off` 切换持久化监听状态，不保证终止既有会话。范围与证据见 [Mongo 指南](docs/tunnel/mongodb-tunnel-guide.zh-CN.md)。 |
 | Web UI | 仅 loopback；非 GET 操作要求 UI token，显式明文路由还要求 `--allow-plaintext`。GET 无需 UI 认证即可返回 safe 值及可用 DB token。失败 token 检查是有上限的线性延迟，不是指数退避。 |
 | 指纹 | 同密钥 HMAC-SHA256，对归一化值计算并截断为 8 字节；无密钥时抵抗离线猜测，不是字节相等证明。长度为 UTF-8 字节数。 |
 | 判断一致性 | 用掩码 `compare`；需要指纹时使用桥接 list/compare JSON。不要只为比较而读取真实明文。 |
@@ -276,4 +276,4 @@ docker stop vaulty-readme-pg   # --rm 删除这个演示容器
 
 ## 验证
 
-测试覆盖指针与隔离 DB 夹具脚本（`scripts/dbtest.sh`、`scripts/mongotest.sh`）见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)；MongoDB 带日期验证矩阵见 [MongoDB 指南](docs/mongodb-tunnel-guide.zh-CN.md#验证状态)。代码变化后须针对确切源码版本运行相关检查。
+测试覆盖指针与隔离 DB 夹具脚本（`scripts/dbtest.sh`、`scripts/mongotest.sh`）见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)；MongoDB 带日期验证矩阵见 [MongoDB 指南](docs/tunnel/mongodb-tunnel-guide.zh-CN.md#验证状态)。代码变化后须针对确切源码版本运行相关检查。

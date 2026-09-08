@@ -59,7 +59,7 @@ node scripts/check-docs.mjs
 These are coverage pointers, not evidence of a run during this documentation
 update; run relevant checks against the exact source revision after code
 changes. MongoDB's dated evidence and remaining gaps live in the
-[MongoDB guide](docs/mongodb-tunnel-guide.md).
+[MongoDB guide](docs/tunnel/mongodb-tunnel-guide.md).
 
 - `internal/aesx`: byte-for-byte aligned with vectors from `tools/javaref/CryptoUtil.java` (Java 8 reference implementation; GCM is deterministic), plus key-length validation, wrong key/iv, invalid base64.
 - `internal/apollo`: real pasted samples (incl. glued lines), comments, first `=`, URL params not split, encrypted snapshot on disk (no plaintext in file, 0600), diffs, sensitive detection.

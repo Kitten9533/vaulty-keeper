@@ -39,10 +39,10 @@ DOCS := docs/README.md docs/README.zh-CN.md \
         docs/ui-guide.md docs/ui-guide.zh-CN.md \
         docs/db-proxy-architecture.md docs/db-proxy-architecture.zh-CN.md \
         docs/db-proxy-examples.md docs/db-proxy-examples.zh-CN.md \
-        docs/postgres-tunnel-guide.md docs/postgres-tunnel-guide.zh-CN.md \
-        docs/mysql-tunnel-guide.md docs/mysql-tunnel-guide.zh-CN.md \
-        docs/redis-tunnel-guide.md docs/redis-tunnel-guide.zh-CN.md \
-        docs/mongodb-tunnel-guide.md docs/mongodb-tunnel-guide.zh-CN.md \
+        docs/tunnel/postgres-tunnel-guide.md docs/postgres-tunnel-guide.zh-CN.md \
+        docs/tunnel/mysql-tunnel-guide.md docs/mysql-tunnel-guide.zh-CN.md \
+        docs/tunnel/redis-tunnel-guide.md docs/redis-tunnel-guide.zh-CN.md \
+        docs/tunnel/mongodb-tunnel-guide.md docs/mongodb-tunnel-guide.zh-CN.md \
         docs/container-isolation.md docs/container-isolation.zh-CN.md
 
 # Cross-compile release binaries into release/ (one tarball/zip per platform,

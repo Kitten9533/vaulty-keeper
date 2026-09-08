@@ -2,7 +2,7 @@
 
 > [English](mongodb-tunnel-guide.md) | 中文
 >
-> 当前 MongoDB 8 接口，2026-09-07 按源码核对。本指南维护下方带日期的历史验证矩阵；文档更正不构成新的测试/构建证据。通用安全依据见[安全模型](security-model.zh-CN.md)。
+> 当前 MongoDB 8 接口，2026-09-07 按源码核对。本指南维护下方带日期的历史验证矩阵；文档更正不构成新的测试/构建证据。通用安全依据见[安全模型](../security-model.zh-CN.md)。
 
 ## 连接模型
 
@@ -174,4 +174,4 @@ go test -mod=readonly -tags=mongointegration ./internal/dbproxy -run '^TestMongo
 
 不提供夹具变量就运行 tagged tests 会跳过真实集成用例，不能作为原生 MongoDB 已通过的证据。上述通过矩阵不代表完整 GUI/自省兼容、实际 MongoDB TLS 或交互 shell 已验证。
 
-本指南源码核对：[注册 URL 解析器](../internal/dbproxy/mongodb_config.go)、[后端认证/TLS/截止时间](../internal/dbproxy/mongodb_auth.go)、[持续转发](../internal/dbproxy/mongodb.go)、[命令/元数据策略](../internal/dbproxy/mongodb_policy.go)、[客户端链接](../internal/dbproxy/links.go)、[CLI 提示/直连 shell](../internal/cli/db.go)、[watcher 启动](../internal/cli/remote.go)、[存储生命周期](../internal/dbproxy/store.go)及[原生夹具](../scripts/mongotest.sh)。MySQL TLS C01 已修复（有单测；一次性原生 TLS 查询通过但未被集成测试固化）。旧 `scripts/dbtest.sh` 已重构为隔离脚本（C02 完成），可安全运行；C01 与 C02 都不是新发现的 Mongo TLS 缺陷。
+本指南源码核对：[注册 URL 解析器](../../internal/dbproxy/mongodb_config.go)、[后端认证/TLS/截止时间](../../internal/dbproxy/mongodb_auth.go)、[持续转发](../../internal/dbproxy/mongodb.go)、[命令/元数据策略](../../internal/dbproxy/mongodb_policy.go)、[客户端链接](../../internal/dbproxy/links.go)、[CLI 提示/直连 shell](../../internal/cli/db.go)、[watcher 启动](../../internal/cli/remote.go)、[存储生命周期](../../internal/dbproxy/store.go)及[原生夹具](../../scripts/mongotest.sh)。MySQL TLS C01 已修复（有单测；一次性原生 TLS 查询通过但未被集成测试固化）。旧 `scripts/dbtest.sh` 已重构为隔离脚本（C02 完成），可安全运行；C01 与 C02 都不是新发现的 Mongo TLS 缺陷。

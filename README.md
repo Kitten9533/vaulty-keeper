@@ -15,10 +15,10 @@ Every user-facing doc is English-default with a `.zh-CN.md` sibling linked at it
 | Full command reference (apollo / aes / misc) | [docs/cli-reference.md](docs/cli-reference.md) |
 | DB tunnel: architecture, sequence, credentials | [docs/db-proxy-architecture.md](docs/db-proxy-architecture.md) |
 | DB tunnel: usage examples & fixtures | [docs/db-proxy-examples.md](docs/db-proxy-examples.md) |
-| PostgreSQL tunnel: setup, options, troubleshooting | [docs/postgres-tunnel-guide.md](docs/postgres-tunnel-guide.md) |
-| MySQL tunnel: setup, TLS, troubleshooting | [docs/mysql-tunnel-guide.md](docs/mysql-tunnel-guide.md) |
-| Redis tunnel: setup, options, troubleshooting | [docs/redis-tunnel-guide.md](docs/redis-tunnel-guide.md) |
-| MongoDB 8 tunnel: options, limits, verification matrix | [docs/mongodb-tunnel-guide.md](docs/mongodb-tunnel-guide.md) |
+| PostgreSQL tunnel: setup, options, troubleshooting | [docs/tunnel/postgres-tunnel-guide.md](docs/tunnel/postgres-tunnel-guide.md) |
+| MySQL tunnel: setup, TLS, troubleshooting | [docs/tunnel/mysql-tunnel-guide.md](docs/tunnel/mysql-tunnel-guide.md) |
+| Redis tunnel: setup, options, troubleshooting | [docs/tunnel/redis-tunnel-guide.md](docs/tunnel/redis-tunnel-guide.md) |
+| MongoDB 8 tunnel: options, limits, verification matrix | [docs/tunnel/mongodb-tunnel-guide.md](docs/tunnel/mongodb-tunnel-guide.md) |
 | Container / agent isolation | [docs/container-isolation.md](docs/container-isolation.md) |
 | Web UI: pages, fields, confirmation flows | [docs/ui-guide.md](docs/ui-guide.md) |
 | Apollo snapshots: implementation walkthrough | [docs/apollo-snapshot-guide.md](docs/apollo-snapshot-guide.md) |
@@ -136,8 +136,8 @@ Snapshot reads are masked for non-TTY output unless a key is explicitly marked s
 
 > Full ASCII diagrams (what's in Docker / where credentials live / auth injection for three DBs / security boundary / sequence) live in **[`docs/db-proxy-architecture.md`](docs/db-proxy-architecture.md)** ([中文版](docs/db-proxy-architecture.zh-CN.md)).
 > Multi-connection / native-client / container / permission examples and their fixture prerequisites live in **[`docs/db-proxy-examples.md`](docs/db-proxy-examples.md)** ([中文版](docs/db-proxy-examples.zh-CN.md)); check each example's evidence and version scope.
-> Per-protocol operation guides: **[PostgreSQL](docs/postgres-tunnel-guide.md)** · **[MySQL](docs/mysql-tunnel-guide.md)** · **[Redis](docs/redis-tunnel-guide.md)** ([中文版各一篇](docs/README.zh-CN.md)).
-> MongoDB 8's fixed-endpoint command-aware tunnel, exact URL options, security limits and verification matrix: **[MongoDB tunnel guide](docs/mongodb-tunnel-guide.md)** ([中文版](docs/mongodb-tunnel-guide.zh-CN.md)). The older diagrams/examples below cover PG/MySQL/Redis.
+> Per-protocol operation guides: **[PostgreSQL](docs/tunnel/postgres-tunnel-guide.md)** · **[MySQL](docs/tunnel/mysql-tunnel-guide.md)** · **[Redis](docs/tunnel/redis-tunnel-guide.md)** ([中文版各一篇](docs/README.zh-CN.md)).
+> MongoDB 8's fixed-endpoint command-aware tunnel, exact URL options, security limits and verification matrix: **[MongoDB tunnel guide](docs/tunnel/mongodb-tunnel-guide.md)** ([中文版](docs/tunnel/mongodb-tunnel-guide.zh-CN.md)). The older diagrams/examples below cover PG/MySQL/Redis.
 
 Lets an AI in a container/isolated domain query databases with **native clients** (psql / mysql / redis-cli / mongosh) using tunnel credentials instead of the real backend URL. URLs are encrypted on the host with the independent DB key (`VAULTY_KEEPER_DB_KEY` / OS secret store). `serve` opens one TCP tunnel per connection and authenticates to the backend. PG/MySQL/Redis then forward raw bytes; MongoDB retains a framed command allowlist and reconstructs control replies. Business data is not redacted; see each protocol's security boundary.
 
@@ -213,7 +213,7 @@ For real registration a human can run `vaulty-keeper db add <name>` and paste th
 - **Backend TLS**: PG delegates `sslmode` to its client library; Redis uses `rediss://`. **MySQL `?tls=true` negotiates TLS with the backend** (C01 fix: unit-tested; a one-off native TLS query against MySQL 8 with `require_secure_transport=ON` reported non-empty `Ssl_cipher` and TLSv1.3 over the tunnel, but that evidence is not pinned by an integration test — re-verify against a real TLS backend before relying on it); add `tlsCAFile=<path>` to trust a private/self-signed CA. MongoDB implements certificate/hostname verification for `tls=true`/`ssl=true` with optional `tlsCAFile`; actual MongoDB TLS remains unverified. Client-to-proxy transport is plaintext; use localhost or an isolated trusted network.
 - **Read-only control**: the proxy does not enforce read-only; registering a URL with a read-only account is naturally read-only
 - `vaulty-keeper db shell <name>` opens an installed native client directly on the host (stdin-TTY guarded). Passwords use child environment variables; MySQL/Redis host and MySQL user can still appear in argv. MongoDB passes its backend URI in a temporary child environment variable, removed by the startup script. This is not sanitized tunnel access.
-- **MongoDB 8** supports common reads, acknowledged CRUD (server write acknowledgement, not human approval), reviewed read aggregation and cursors at one fixed endpoint. The backend account needs `listCollections` privilege for ordinary collection checks; no views/time-series, transactions, retryable writes, SRV/failover, compression or full admin/GUI compatibility. Common unsupported options/commands include `comment`, `collation`, `create` and `createIndexes`. Use bounded reads such as `db.getCollection('orders').find({}).limit(5)` on an allowed collection. The [guide](docs/mongodb-tunnel-guide.md) owns complete password-prompt commands, registered-backend vs client-URI options and troubleshooting; error code 13 alone cannot distinguish proxy policy from backend role denial.
+- **MongoDB 8** supports common reads, acknowledged CRUD (server write acknowledgement, not human approval), reviewed read aggregation and cursors at one fixed endpoint. The backend account needs `listCollections` privilege for ordinary collection checks; no views/time-series, transactions, retryable writes, SRV/failover, compression or full admin/GUI compatibility. Common unsupported options/commands include `comment`, `collation`, `create` and `createIndexes`. Use bounded reads such as `db.getCollection('orders').find({}).limit(5)` on an allowed collection. The [guide](docs/tunnel/mongodb-tunnel-guide.md) owns complete password-prompt commands, registered-backend vs client-URI options and troubleshooting; error code 13 alone cannot distinguish proxy policy from backend role denial.
 
 **Security boundary**
 
@@ -237,7 +237,7 @@ This is a summary; the [security model](docs/security-model.md) owns the complet
 | Masking proxy | Snapshot API values are always masked, including safe values. Bridge list/compare JSON includes length/fingerprints; `remote get` prints only the mask. The global token also grants PG/MySQL/Redis tunnel access. |
 | AI reads | Non-TTY local reads expose explicitly safe values only. TTY `get` prints plaintext; explicit plaintext commands check stdin TTY, not caller identity/stdout. Agents must not use those exits on real secrets or fabricate TTYs. |
 | AI writes | Writes encrypt stored values but can replace/delete data and change visibility. They require task authorization; import overwrite and sensitive-to-safe marking have additional guards. |
-| DB tunnels | Encrypted registered URLs and dedicated tokens; PG/MySQL use token-as-user, Redis token-as-password, MongoDB user `vaulty` + token-as-password with no global fallback. MongoDB keeps command-aware framing and sanitized control replies, not business-data redaction. `db regen` affects new connections; `db on/off` toggles persisted listener state, not guaranteed termination of established sessions. See the [Mongo guide](docs/mongodb-tunnel-guide.md) for scope and evidence. |
+| DB tunnels | Encrypted registered URLs and dedicated tokens; PG/MySQL use token-as-user, Redis token-as-password, MongoDB user `vaulty` + token-as-password with no global fallback. MongoDB keeps command-aware framing and sanitized control replies, not business-data redaction. `db regen` affects new connections; `db on/off` toggles persisted listener state, not guaranteed termination of established sessions. See the [Mongo guide](docs/tunnel/mongodb-tunnel-guide.md) for scope and evidence. |
 | Web UI | Loopback-only; non-GET operations require the UI token, explicit plaintext routes also require `--allow-plaintext`. GET can return safe values and usable DB tokens without UI authentication. Failed token checks have capped linear delay, not exponential backoff. |
 | Fingerprints | Same-key HMAC-SHA256 over normalized values, truncated to 8 bytes; keyed comparison resists offline guessing without the key but is not proof of byte equality. Lengths are UTF-8 bytes. |
 | Consistency checks | Use masked `compare`; use bridge list/compare JSON when fingerprints are needed. Do not retrieve real plaintext merely to compare it. |
@@ -276,4 +276,4 @@ Other notes:
 
 ## Verification
 
-Test-coverage pointers and the isolated DB fixture scripts (`scripts/dbtest.sh`, `scripts/mongotest.sh`) live in [CONTRIBUTING.md](CONTRIBUTING.md); MongoDB's dated verification matrix lives in the [MongoDB guide](docs/mongodb-tunnel-guide.md#verification-status). Run relevant checks against the exact source revision after code changes.
+Test-coverage pointers and the isolated DB fixture scripts (`scripts/dbtest.sh`, `scripts/mongotest.sh`) live in [CONTRIBUTING.md](CONTRIBUTING.md); MongoDB's dated verification matrix lives in the [MongoDB guide](docs/tunnel/mongodb-tunnel-guide.md#verification-status). Run relevant checks against the exact source revision after code changes.

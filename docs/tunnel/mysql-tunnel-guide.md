@@ -2,7 +2,7 @@
 
 > [中文](mysql-tunnel-guide.zh-CN.md) | English
 >
-> Current MySQL tunnel interface, source-checked on 2026-09-07 (working-tree behavior; not a new test run). The general security authority is the [security model](security-model.md); the shared three-protocol mechanism lives in the [architecture guide](db-proxy-architecture.md); prepared fixtures and lifecycle live in the [examples guide](db-proxy-examples.md).
+> Current MySQL tunnel interface, source-checked on 2026-09-07 (working-tree behavior; not a new test run). The general security authority is the [security model](../security-model.md); the shared three-protocol mechanism lives in the [architecture guide](../db-proxy-architecture.md); prepared fixtures and lifecycle live in the [examples guide](../db-proxy-examples.md).
 
 ## Connection Model
 
@@ -11,6 +11,24 @@ Register one backend MySQL endpoint with a normal username/password. The host ke
 After backend authentication the proxy forwards raw protocol bytes in both directions: no query allowlist, no result redaction. Backend roles therefore define what a token holder can actually do. The backend participates in its own authentication, so the real password crosses the host-to-backend leg as part of that exchange.
 
 MySQL accepts either the dedicated token **or the current serve global bridge token** for both newly registered and old connections. `db regen` rotates only the dedicated token; the global fallback remains valid.
+
+## Authentication And Data Flow
+
+```text
+Client                         serve                        Backend
+  | virtual token (username)      |                             |
+  +----------------------------->| validate token               |
+  |                              | connect + backend auth       |
+  |                              | (mysql_native_password /     |
+  |                              |  caching_sha2_password)      |
+  |                              +---------------------------->|
+  |                              |<----------------------------+
+  | query                         |                             |
+  +----------------------------->+---------------------------->|
+  |<-----------------------------+<----------------------------+
+```
+
+The client sends the tunnel token as the username with any placeholder password. serve validates it, connects to the backend with the registered credentials and authenticates using `mysql_native_password` or `caching_sha2_password` (including RSA full authentication). Afterwards both directions are raw protocol bytes; the proxy does not parse or filter queries.
 
 ## Registered URL
 
@@ -104,4 +122,4 @@ Whatever the MySQL client/GUI can do against a backend account, the tunnel forwa
 
 `db show` prints the decrypted real URL; `db shell` launches a direct backend client. Their stdin-TTY checks do not establish human identity. Use `db test`, metadata and authorized bounded queries without seeking secrets.
 
-Source checks: [MySQL handler/TLS](../internal/dbproxy/mysql.go), [tunnel dispatch](../internal/dbproxy/tunnel.go), [store/Resolve](../internal/dbproxy/store.go), [CLI/db links](../internal/cli/db.go), [watcher startup](../internal/cli/remote.go). The C01 TLS fix is unit-tested; its one-off native TLS query evidence is not pinned by an integration test — re-verify against a real TLS backend before relying on it. No runtime tests or real-data operations were run for this guide.
+Source checks: [MySQL handler/TLS](../../internal/dbproxy/mysql.go), [tunnel dispatch](../../internal/dbproxy/tunnel.go), [store/Resolve](../../internal/dbproxy/store.go), [CLI/db links](../../internal/cli/db.go), [watcher startup](../../internal/cli/remote.go). The C01 TLS fix is unit-tested; its one-off native TLS query evidence is not pinned by an integration test — re-verify against a real TLS backend before relying on it. No runtime tests or real-data operations were run for this guide.

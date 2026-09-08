@@ -2,7 +2,7 @@
 
 > 中文 | [English](redis-tunnel-guide.md)
 >
-> 当前 Redis 隧道接口，2026-09-07 按源码核对（工作区行为，非新测试运行）。统一安全边界见[安全模型](security-model.zh-CN.md)；三协议共享机制见[架构指南](db-proxy-architecture.zh-CN.md)；已准备夹具与生命周期见[示例指南](db-proxy-examples.zh-CN.md)。
+> 当前 Redis 隧道接口，2026-09-07 按源码核对（工作区行为，非新测试运行）。统一安全边界见[安全模型](../security-model.zh-CN.md)；三协议共享机制见[架构指南](../db-proxy-architecture.zh-CN.md)；已准备夹具与生命周期见[示例指南](../db-proxy-examples.zh-CN.md)。
 
 ## 连接模型
 
@@ -11,6 +11,23 @@
 后端认证完成后代理双向转发原始 RESP 流量：无命令白名单、无结果脱敏。后端 ACL 与 token 持有者授权决定实际可做什么。
 
 Redis 对**新旧注册**都接受专属 token **或当前 serve 的全局 bridge token**。`db regen` 只轮换专属 token，全局兜底仍然有效。
+
+## 认证与数据流
+
+```text
+客户端                         serve                        后端
+  | AUTH <token>（首命令）        |                             |
+  +----------------------------->| 校验 token                   |
+  |                              | 连接 + 后端 AUTH             |
+  |                              | + SELECT 注册的数据库        |
+  |                              +---------------------------->|
+  |                              |<----------------------------+
+  | PING / GET ...                |                             |
+  +----------------------------->+---------------------------->|
+  |<-----------------------------+<----------------------------+
+```
+
+客户端**第一条命令必须是带隧道 token 的 `AUTH`**。serve 校验后，用注册的 AUTH 密码向后端认证并 SELECT 注册的数据库。此后双向都是原始 RESP 协议字节；代理不解析、不过滤命令。
 
 ## 注册 URL
 
@@ -95,4 +112,4 @@ redis-cli/GUI 对后端能做的事，初始 AUTH 后隧道都转发：
 
 `db show` 打印解密后的真实 URL；`db shell` 启动直接后端客户端。它们的 stdin-TTY 检查不确立人工身份。请使用 `db test`、元数据与授权有界查询，不要寻找秘密。
 
-源码核对：[Redis handler](../internal/dbproxy/redis.go)、[隧道分发](../internal/dbproxy/tunnel.go)、[store/Resolve](../internal/dbproxy/store.go)、[CLI/db 链接](../internal/cli/db.go)、[watcher 启动](../internal/cli/remote.go)。本指南未运行任何运行时测试或真实数据操作。
+源码核对：[Redis handler](../../internal/dbproxy/redis.go)、[隧道分发](../../internal/dbproxy/tunnel.go)、[store/Resolve](../../internal/dbproxy/store.go)、[CLI/db 链接](../../internal/cli/db.go)、[watcher 启动](../../internal/cli/remote.go)。本指南未运行任何运行时测试或真实数据操作。
