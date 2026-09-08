@@ -10,6 +10,25 @@ Register one backend MongoDB endpoint with a normal username/password. The host 
 
 The proxy performs independent backend SCRAM-SHA-256 or SCRAM-SHA-1 authentication. Backend username, password, auth source and TLS settings come from the registered URL, not from the client's virtual credentials. Use a dedicated least-privileged backend account; the proxy's command allowlist does not make a writable account read-only. The account needs `listCollections` privilege on each business database so the proxy can verify ordinary collection types, in addition to its business read/write permissions. MongoDB does not use the other tunnels' global bridge-token fallback.
 
+## Authentication And Data Flow
+
+```text
+Client                         serve                        Backend
+  | SCRAM: user vaulty           |                             |
+  | + dedicated token            |                             |
+  +----------------------------->| validate dedicated token    |
+  |                              | + backend SCRAM auth        |
+  |                              +---------------------------->|
+  |                              |<----------------------------+
+  | command frame                |                             |
+  +----------------------------->| allowlist + metadata check  |
+  |                              +---------------------------->|
+  |<-----------------------------+<----------------------------+
+  | sanitized control replies; business documents unchanged    |
+```
+
+The client authenticates to the proxy as user `vaulty` with the dedicated token as its SCRAM-SHA-256 password (`authSource=admin`). serve validates the token, then performs its own backend SCRAM-SHA-256/SHA-1 authentication using the registered credentials. Unlike PG/MySQL/Redis there is **no raw byte splicing after authentication**: every command frame is validated against the reviewed allowlist and metadata policy before forwarding, and control replies are reconstructed/sanitized while business documents pass unchanged.
+
 ## Registered URL
 
 Only `mongodb://` with one hostname or bracketed IPv6 address is accepted. The default port is `27017`; explicit ports must be `1..65535`. Username and password must both be nonempty. Percent-encode reserved characters in credentials and option values. No SRV, seed list, URL fragment or external authentication.
