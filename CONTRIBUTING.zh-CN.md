@@ -46,6 +46,38 @@ node scripts/check-docs.mjs
 
 `git diff --check` 必须保持干净。
 
+## 测试覆盖与 DB 夹具
+
+以下是覆盖范围指针，不代表本次文档更新执行过测试；代码变化后须针对确切源码版本运行相关检查。MongoDB 带日期证据与剩余缺口统一维护在 [MongoDB 指南](docs/mongodb-tunnel-guide.zh-CN.md) 中。
+
+- `internal/aesx`: 与 `tools/javaref/CryptoUtil.java`（Java 8 参考实现）生成的向量逐字节对齐（GCM 确定性），另覆盖 key 长度校验、错误 key/iv、非法 base64。
+- `internal/apollo`: 真实粘贴样例（含合并行）、注释、首个 `=`、URL 参数不误拆、快照加密落盘（文件无明文、权限 0600）、diff、敏感识别。
+- `internal/cli`: 参数混排、import 自动取名、reveal（敏感值明文 / 显式 `--key`/`--iv` 解密外部密文 / 多 key JSON）、edit（假编辑器脚本）、list/compare JSON、gen-key 可用性、aes `--name` 列表、completion。
+- 重新生成 Java 向量：`cd tools/javaref && javac CryptoUtil.java && java CryptoUtil encrypt <key> <iv> <plaintext>`
+
+隔离 DB 夹具脚本（需要 Docker、Python 3 和已构建二进制；只用合成凭据与显式临时存储/test key，绝不碰真实 `~/.vaulty` 或 keyring）：
+
+- **MongoDB**：入口为 `bash scripts/mongotest.sh --mongosh` 和 `bash scripts/mongotest.sh --replica-set --mongosh`。
+- **`scripts/dbtest.sh` 已隔离重构，可以安全运行（C02 完成）。** 当前脚本按 PID 与容器标签跟踪自己启动的 serve 和容器，使用每次运行独立的临时目录与假 HOME、合成密钥，`--clean` 只清理它登记的资源——不再像历史版本那样宽泛 pkill serve 进程、删除固定容器（`aipg`、`aimysql8`、`aimariadb`、`airedis`）或覆盖真实 `~/.vaulty/bridge-token`。使用前先读脚本头注释；不要放进 CI。
+
+历史脚本接口，**不是快速开始推荐**：
+
+```sh
+make build
+./scripts/dbtest.sh          # 启动并测试；测完环境保持运行，打印连接方式
+./scripts/dbtest.sh --clean  # 收尾：停 serve、删容器
+```
+
+实际夹具镜像为 PostgreSQL `postgres:17.6-alpine`、MySQL `dockerproxy.net/library/mysql:8.0`（历史本地镜像为 8.0.46，不是 8.4/MariaDB）及 Redis `redis:7`。后端、隧道与桥接端口每次运行动态分配（可用 `PGP`/`TUN_PG` 等环境变量覆盖），以脚本打印的连接方式为准；已准备数据及查询如下：
+
+| 注册名 | 已准备数据 / 查询 |
+|---|---|
+| `pgdb` | `appdb.t`，`SELECT id,name FROM t ORDER BY id;` |
+| `mysqltest` / `mysqlnative` | `shop.customers`、`products`、`orders`；`SELECT COUNT(*) FROM shop.orders;` |
+| `cache` | 需认证的 Redis；`PING`、合成 `SET`/`GET` |
+
+脚本使用独立 DB 目录/密钥，不是宿主默认 `db shell` 上下文。其中命令/日志是特定夹具的历史示例，不证明所有客户端/配置可用。原生客户端准备及正/负向查询见 [DB 示例指南](docs/db-proxy-examples.zh-CN.md)；分享日志前先检查，其中可能含上游元数据和访问 token。
+
 ## 代码约定
 
 - 遵循现有包结构与命名；改动保持最小并修根因，不做无关重构。

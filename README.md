@@ -4,7 +4,24 @@
 
 Personal AI toolbox (single Go binary). Snapshot values and registered database URLs/tunnel tokens are encrypted at rest. This does not cover every local file: the AES key/IV list is plaintext JSON, and import sources, exports/downloads and editor temporary files can contain plaintext. `vaulty-keeper ui` serves a loopback-only web UI for snapshots, AES and database connections. OS key storage and optional native clients require platform facilities.
 
-Start here for installation and examples; the [documentation index](docs/README.md) links current guides and historical records. The [security model](docs/security-model.md) is the canonical reference for security boundaries, [SECURITY.md](SECURITY.md) covers reporting, and [CONTRIBUTING.md](CONTRIBUTING.md) covers building and contributing.
+Start here for installation and examples; the [documentation index](docs/README.md) links current guides. The [security model](docs/security-model.md) is the canonical reference for security boundaries, [SECURITY.md](SECURITY.md) covers reporting, and [CONTRIBUTING.md](CONTRIBUTING.md) covers building and contributing.
+
+## Documentation map
+
+Every user-facing doc is English-default with a `.zh-CN.md` sibling linked at its top. The database tunnel is the flagship feature; its implementation and usage live in the three `db-*` guides below.
+
+| What you want | Read |
+|---|---|
+| Full command reference (apollo / aes / misc) | [docs/cli-reference.md](docs/cli-reference.md) |
+| DB tunnel: architecture, sequence, credentials | [docs/db-proxy-architecture.md](docs/db-proxy-architecture.md) |
+| DB tunnel: usage examples & fixtures | [docs/db-proxy-examples.md](docs/db-proxy-examples.md) |
+| MongoDB 8 tunnel: options, limits, verification matrix | [docs/mongodb-tunnel-guide.md](docs/mongodb-tunnel-guide.md) |
+| Container / agent isolation | [docs/container-isolation.md](docs/container-isolation.md) |
+| Web UI: pages, fields, confirmation flows | [docs/ui-guide.md](docs/ui-guide.md) |
+| Apollo snapshots: implementation walkthrough | [docs/apollo-snapshot-guide.md](docs/apollo-snapshot-guide.md) |
+| Security boundary (canonical) | [docs/security-model.md](docs/security-model.md) |
+| Build, test, contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Security reporting | [SECURITY.md](SECURITY.md) |
 
 ## Quick start
 
@@ -25,7 +42,7 @@ The binaries are not code-signed, so a **browser-downloaded** archive may be blo
 
 Installing via npm or building from source avoids these prompts, because the file never carries a browser-download marker.
 
-This README describes the current source workspace. The latest release is **v0.8.0** (2026-09-07): it includes MongoDB 8 tunnel support and bundles both READMEs, LICENSE, AGENTS.md and the `docs/` guides (index, security model and five guides, English + Chinese); historical `docs/superpowers/` records are source-only. The current working tree additionally adds CONTRIBUTING.md/SECURITY.md to future release archives; that packaging change has not been published yet. Older archives such as **0.6.0** do not include `docs/`; for those, browse the matching tag's `docs/` in the [source repository](https://github.com/Kitten9533/vaulty-keeper). Guides in this workspace are not evidence for binaries older than v0.8.0.
+This README describes the current source workspace. The latest release is **v0.8.0** (2026-09-07): it includes MongoDB 8 tunnel support and bundles both READMEs, LICENSE, AGENTS.md and the `docs/` guides (index, security model and five guides, English + Chinese). Archives built from the current tree additionally bundle CONTRIBUTING.md, SECURITY.md and the newer `cli-reference` / `container-isolation` guides; that packaging has not been published in a release yet. Historical implementation records are archived under git tag `docs-superpowers-archive`, not in this tree or the archives. Older archives such as **0.6.0** do not include `docs/`; for those, browse the matching tag's `docs/` in the [source repository](https://github.com/Kitten9533/vaulty-keeper). Guides in this workspace are not evidence for binaries older than v0.8.0.
 
 The following setup is for a human on the host and creates local keys/state; it is not an isolated test or an instruction for an agent to access real secrets:
 
@@ -98,221 +115,20 @@ vaulty-keeper help            # help tree is now in Chinese too
 
 Some prompts, flag descriptions, shell-completion descriptions and low-level library errors remain English.
 
-## vaulty-keeper apollo — Apollo snapshot tool
+## CLI at a glance
 
-> A walkthrough of the snapshot implementation (encrypted file layout / dual-key design / sensitive detection / masking & fingerprints / explicit allowlisting) with tested examples lives in **[`docs/apollo-snapshot-guide.md`](docs/apollo-snapshot-guide.md)** ([中文版](docs/apollo-snapshot-guide.zh-CN.md)).
+The full command reference (apollo snapshot tool, aes encrypt/decrypt, misc) lives in **[\`docs/cli-reference.md\`](docs/cli-reference.md)** ([中文版](docs/cli-reference.zh-CN.md)). Every command self-documents: \`vaulty-keeper <cmd> -h\`.
 
-A fallback for when the Apollo Open API is unavailable: copy key-value pairs from the Apollo portal and import them into an encrypted snapshot. AI/script access follows the masking and write permissions below. Snapshots live under `~/.vaulty/apollo/` by default (override with `--dir` or `VAULTY_KEEPER_APOLLO_DIR`).
+| Area | Commands |
+|---|---|
+| Snapshots | \`apollo init\` · \`sensitive init\` · \`apollo import/list/get/set/unset/mark/compare/reveal/edit/export/rm\` |
+| AES (Java CryptoUtil compatible) | \`aes list\` · \`aes gen-key\` · \`aes add\` · \`aes encrypt\` · \`aes decrypt\` |
+| Web UI | \`ui\` |
+| Masking proxy | \`serve\` · \`remote list/get/compare\` |
+| DB tunnels | \`db init/add/list/test/connect/show/rm/shell/regen/on/off\` |
+| Other | \`completion\` · \`lang\` · \`version\` |
 
-After human host key initialization above, this complete example creates two snapshots in a new temporary directory using **synthetic values only**. Keep the directory variable in this terminal for all commands:
-
-```sh
-DEMO_SNAP_DIR=$(mktemp -d)
-printf '%s\n' 'APP_NAME = demo' 'LOG_LEVEL = info' 'SECRET_TOKEN = synthetic-prod' \
-  | vaulty-keeper apollo import - --dir "$DEMO_SNAP_DIR" --name prod --appid demo
-printf '%s\n' 'APP_NAME = demo' 'LOG_LEVEL = debug' 'SECRET_TOKEN = synthetic-test' \
-  | vaulty-keeper apollo import - --dir "$DEMO_SNAP_DIR" --name test --appid demo
-vaulty-keeper apollo list prod --dir "$DEMO_SNAP_DIR" --appid demo --json </dev/null
-vaulty-keeper apollo compare prod test --dir "$DEMO_SNAP_DIR" --appid demo --appid-to demo --json </dev/null
-```
-
-The comparison reports `LOG_LEVEL` and `SECRET_TOKEN` as changed with masked values. This uses host key storage, not an isolated key fixture. The following is a **command reference**, not a script: substitute filenames, names, AppIDs and keys; `<...>`, `[...]` and `a|b` denote placeholders/choices, never literal shell input.
-
-```sh
-vaulty-keeper apollo init                          # first run: create snapshot key (OS secret store)
-vaulty-keeper sensitive init                       # first run: create sensitive-value key (independent)
-vaulty-keeper apollo import prod.txt --appid xx    # parse pasted content; --appid required; --name defaults to file name; existing snapshot needs --force
-vaulty-keeper apollo import - --name prod --appid xx   # read from stdin (legacy --app-id still accepted)
-vaulty-keeper apollo list                          # list snapshots (env + AppID)
-vaulty-keeper apollo list prod --appid xx          # non-TTY: unmarked values masked; --reveal requires stdin TTY
-vaulty-keeper apollo list prod --appid xx --json   # JSON output (AI-friendly)
-vaulty-keeper apollo get prod --appid xx SOME_KEY  # non-TTY: plaintext only for keys explicitly marked safe, everything else masked
-vaulty-keeper apollo set prod --appid xx SOME_KEY value
-vaulty-keeper apollo set prod --appid xx SOME_KEY value --plain    # explicitly mark as safe: AI/scripts may read plaintext
-vaulty-keeper apollo set prod --appid xx SOME_KEY value --secret   # sensitive classification; not safe for default non-TTY output
-vaulty-keeper apollo mark prod --appid xx SOME_KEY --plain|--secret  # flip the safe/sensitive mark without changing the value
-vaulty-keeper apollo unset prod --appid xx SOME_KEY
-vaulty-keeper apollo compare prod test --appid xx --appid-to yy   # added/removed/changed; masking rules below
-vaulty-keeper apollo compare prod test --appid xx --appid-to yy --json
-vaulty-keeper apollo reveal prod --appid xx SECRET_TOKEN          # show sensitive plaintext (TTY only)
-vaulty-keeper apollo reveal prod --appid xx app.fs.oss.secret-key --key <aes> --iv <aes>   # decrypt external AES ciphertext (TTY only)
-vaulty-keeper apollo edit prod --appid xx         # $EDITOR plaintext edit, re-encrypted on save (TTY only)
-vaulty-keeper apollo export prod --appid xx       # decrypt everything for pasting back into Apollo (TTY only)
-vaulty-keeper apollo export prod --appid xx --copy # prints first, then copies using macOS pbcopy (TTY only)
-vaulty-keeper apollo rm prod --appid xx           # delete snapshot (TTY confirms; non-TTY needs --yes)
-```
-
-> Plaintext commands (`reveal`/`export`/`edit`/`list|compare --reveal`/`aes decrypt`) require **stdin to be a TTY**; `--yes` does not bypass that check. This is an accident-prevention gate, not human authentication or a check on stdout. TTY `get` can print plaintext directly. Agents must not invoke real-secret plaintext exits or fabricate a TTY.
->
-> **Reversed default**: non-TTY `get`/`list`/`compare` mask values unless explicitly safe (`set --plain` or `mark --plain`). A safe value is authorized plaintext output, not merely a non-secret classification. Ordinary TTY list/compare can also show non-sensitive values.
-
-CLI `compare --json` currently prints a text message, not JSON, when there are no changes. For bridge fingerprints use `remote list <env> --appid <id> --json`; `remote get` prints only the masked value string. Lengths use UTF-8 **bytes** despite the CLI label `chars`. Fingerprints use the same snapshot HMAC key over normalized values, truncated to 8 bytes: a high-confidence comparison signal, not proof of raw-byte identity. CLI and HTTP JSON shapes differ.
-
-CLI import replaces an existing snapshot only after TTY confirmation or explicit non-TTY `--force`; UI import rejects duplicate names/AppIDs with 409. Import replacement and whole-snapshot edit rebuild entries, reclassify values and do not preserve all safe/secret marks. Omitted or unparseable entries can disappear; review parser warnings (not all edit paths expose them), the resulting keys and classifications after saving. CLI editing also creates a plaintext temporary file, and editors may keep backups.
-
-Snapshots are keyed by "env + AppID", stored as `{env}__{appid}.json`; legacy AppID-less `{env}.json` files are still readable (accessed when `--appid` is omitted).
-
-Parsing rules:
-
-- Each line is `KEY = value`, split at the first `=`, both sides trimmed (values may contain `=`).
-- Blank lines and whole lines starting with `#` (single/multi-line comments) are skipped.
-- Multiple `KEY = ` entries glued onto one line starting with an uppercase letter are split automatically with a warning (e.g. `A = 1B = 2`; only all-uppercase keys are recognized).
-- Keys are validated against `[A-Za-z_][A-Za-z0-9_.-]*`; invalid lines are skipped with a warning.
-
-Two snapshot keys (normally in the OS secret store; nonempty environment overrides take precedence):
-
-- **Snapshot key** (`VAULTY_KEEPER_APOLLO_KEY`, created by `apollo init`): encrypts all non-sensitive values.
-- **Sensitive-value key** (`VAULTY_KEEPER_SENSITIVE_KEY`, created by `sensitive init`): encrypts newly written sensitive values independently of the snapshot key. Legacy sensitive ciphertext can still use a snapshot-key decryption fallback; the separation claim applies to independently encrypted new data. Files are 0600; encrypted values use AES-256-GCM with an independent random nonce per item.
-
-**Linux**: initialization requires a working desktop Secret Service (for example gnome-keyring / kwallet). On headless hosts, a trusted operator can supply `VAULTY_KEEPER_APOLLO_KEY`, `VAULTY_KEEPER_SENSITIVE_KEY` and `VAULTY_KEEPER_DB_KEY` through controlled secret injection. Each must decode from Base64 to exactly 32 bytes. Overrides apply even when keyring is available; an invalid/wrong override does not retry keyring. Check the configured source before regenerating keys, which can make existing data unreadable. `openssl rand -base64 32` prints a new secret; do not run it in an agent/logged session for real keys. Putting keys in shell profiles creates plaintext files, even at 0600, and is not an encrypted-storage solution.
-
-Sensitive classification (used on import/new set and persisted; reads do not rewrite it; existing `set` without a flag preserves classification):
-
-- **Key name match**: `password|passwd|pwd|token|secret|salt|credential|private|access[_-]?key|secret[_-]?key|api[_-]?key` (case-insensitive)
-- **Credential-bearing URI/DSN**: key name contains `uri|url|dsn|connection|endpoint|addr|address` and the value looks like `scheme://user[:password]@host` (e.g. `mongodb://root:pw@...`)
-- **JWT**: value looks like a three-part base64url `eyJ...` (e.g. `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`)
-
-`MONGODB_URI` is not a direct secret-name match: the credential-bearing value makes that example sensitive. Classification selects encryption behavior; explicit **safe** authorization controls ordinary non-TTY/UI plaintext output independently. Do not use `--plain` to expose a real secret.
-
-## vaulty-keeper aes — AES encrypt/decrypt (Java CryptoUtil compatible)
-
-For decrypting Apollo values whose **value itself is CryptoUtil ciphertext** (OSS AK/SK and similar). Algorithm aligned with `CryptoUtil.java`: AES/GCM/NoPadding, 128-bit tag, key is UTF-8 bytes (16/24/32), iv is UTF-8 bytes used directly as the GCM IV, ciphertext is Base64.
-
-key/iv live in a **plaintext named list** at `~/.vaulty/aes.json` (0600), format `[{name, secret-key, iv}, ...]` (legacy single-object `{key, iv}` is read as a `default` entry). The CLI references entries with `--name`; the web UI's AES tool and snapshot "view" decryption take **manually entered key/iv** (they do not read the list). Snapshot storage encryption and external CryptoUtil value encryption are separate layers. The UI's external-AES fields appear after reveal fails, not as an always-open advanced option.
-
-For **new encryption, never reuse a key/IV pair for different messages**. Named entries retain their IV; Java compatibility does not make repeated use safe. Decryption needs the original pair. The reference below is syntax, not a repeatable real-secret workflow: literal keys/inline environment assignments can enter shell history and process inspection; stdin does not erase the upstream shell command. `aes gen-key` prints generated key/IV even without a TTY.
-
-```sh
-# list / generate / add entries (reference alternatives, not a sequence)
-vaulty-keeper aes list
-vaulty-keeper aes gen-key --name oss              # generates, prints secrets and saves plaintext aes.json
-vaulty-keeper aes add --name oss --key <k> --iv <i>   # save an entry manually
-
-# encrypt/decrypt with a list entry (decrypt prints plaintext, TTY only)
-vaulty-keeper aes encrypt --name oss 'hello'
-vaulty-keeper aes decrypt --name oss '<base64>'
-
-# syntax only: manual flags / inline env can expose real secrets
-vaulty-keeper aes encrypt --key <k> --iv <i> 'hello'
-VAULTY_KEEPER_AES_KEY=<k> VAULTY_KEEPER_AES_IV=<i> vaulty-keeper aes decrypt '<base64>'
-
-# decrypt an external AES ciphertext value (TTY only)
-vaulty-keeper apollo reveal prod app.fs.oss.secret-key --appid xx --key <k> --iv <i>
-```
-
-Input can come from `--file`, an argument, or stdin. `decrypt` prints plaintext and requires stdin TTY, so piping ciphertext does not bypass its guard; use a file/argument in a human terminal when appropriate. Input files and outputs have their own plaintext lifecycle.
-
-## Misc
-
-Command-reference notation below uses alternatives/placeholders, not copyable shell pipelines:
-
-```sh
-vaulty-keeper ui                              # start local web UI (default 127.0.0.1:8080, auto-increments if busy)
-vaulty-keeper serve --addr 0.0.0.0:8970       # masking proxy (for containers/isolated domains when the host holds keys)
-vaulty-keeper remote list|get|compare ...     # read through the masking proxy (same shape as apollo subcommands)
-vaulty-keeper db <init|add|list|test|connect|show|rm|shell|regen|on|off> ... # encrypted DB connections + tunnels
-vaulty-keeper completion zsh | source /dev/stdin   # or bash / fish; add to your shell config
-vaulty-keeper lang [en|zh]    # show or set the shared UI/CLI language
-vaulty-keeper version
-```
-
-## Container isolation (against deliberately hostile AI, macOS / Windows)
-
-Masking and TTY guards do not constrain a hostile same-user process. Isolation must put keys and ciphertext outside the agent's reach; the provided Docker configuration is one starting point (Docker Desktop uses a Linux VM). It does not enforce network egress restrictions or prevent access to authorized database contents. See the [security model](docs/security-model.md).
-
-```
-[Docker container: codex / claude / opencode / pi]
-      │  vaulty-keeper remote list|get|compare (masked only)
-      ▼
-[Host: holds the keys]
-      vaulty-keeper serve --addr 0.0.0.0:8970   ← snapshot API masks values; DB tunnels return data
-      ▼
-      OS secret store + ~/.vaulty/ (not mounted by the supplied compose file)
-```
-
-### Host side: start the masking proxy
-
-Human host terminal 1: leave `serve` running. Use a trusted, firewall-restricted interface; the following binds all interfaces. Register databases before starting it if tunnels are needed.
-
-```sh
-vaulty-keeper serve --addr 0.0.0.0:8970     # prints token and writes ~/.vaulty/bridge-token
-```
-
-- Snapshot API values are always masked, **even for keys marked safe with `set --plain`**. JSON list/compare responses include length/fingerprint metadata; `remote get` prints only the mask.
-- Every `/api` endpoint requires the token (written 0600 to `~/.vaulty/bridge-token`); failed checks add 50 ms per failure, capped at 2 seconds. This token also authorizes new and legacy PG/MySQL/Redis tunnel connections, so it is not a harmless metadata token.
-- `0.0.0.0` lets Docker reach the host but also exposes plaintext HTTP and tunnel listeners to reachable networks. Token checks do not encrypt transport or make LAN exposure safe; restrict access with network controls. Use `127.0.0.1` for host-only access.
-
-### Container side: agent isolation domain
-
-Human host terminal 2, from the repository: choose a project directory containing no secret files. The token handoff below is an authorization decision; the entrypoint prints only a `<set>`/`<unset>` marker, never the token itself. The image builds Go inside Docker and includes neither optional agent CLIs nor database clients by default.
-
-```sh
-# build from source inside Docker; no host make build needed
-docker build -t vaulty-keeper-agent:local .
-
-# human host handoff: grants snapshot metadata and PG/MySQL/Redis database access
-export VAULTY_KEEPER_BRIDGE_TOKEN="$(cat ~/.vaulty/bridge-token)"
-export VAULTY_KEEPER_PROJECT_DIR="$PWD"   # current repository; review contents before mounting
-docker compose up -d
-
-# usable without installing an agent CLI; lists the host bridge's snapshots
-docker compose exec agent vaulty-keeper remote list
-docker compose exec agent vaulty-keeper remote dblist
-```
-
-To use `codex`, set `VAULTY_KEEPER_INSTALL_AGENTS='@openai/codex'` before creating the container and supply the CLI's own login/config separately, then run `docker compose exec agent codex`. Native DB commands additionally require `psql`, MySQL `mysql`, `redis-cli` or `mongosh` in the client environment. Generate tunnel commands on the host with `db connect <name> --container`, then deliver only the authorized tunnel credentials, never host encryption keys.
-
-Isolation essentials (already built into `docker-compose.yml`):
-
-- **No explicit mounts** of `~/.vaulty`, the OS secret store, `~/.ssh`, or the Docker socket. Do not defeat this by choosing a project directory containing those files or passing encryption keys via environment variables.
-- Non-root user + `cap_drop: ALL` + `no-new-privileges`
-- `VAULTY_KEEPER_BRIDGE_ADDR` / `VAULTY_KEEPER_BRIDGE_TOKEN` configure bridge access; compose does **not** make it the container's only network destination.
-- Agent CLIs: `VAULTY_KEEPER_INSTALL_AGENTS='@openai/codex @anthropic-ai/claude-code opencode-ai'` (npm-installed into the user dir on container start)
-- **Persistence**: the `agent-home` named volume mounts at `/home/agent`, so installed CLIs and session history survive rebuilds. Its actual name depends on the Compose project; remove only that verified volume after detaching its containers if deliberately resetting history and installed tools.
-- **Linux**: compose includes `extra_hosts: host.docker.internal:host-gateway` (macOS/Windows Docker Desktop already provides it, no effect)
-
-### What isolation does and does not do
-
-When mounts, privileges and credentials are kept within these boundaries, the container has no direct path to host key storage or snapshot files. That does not stop it reading mounted project secrets, using its bridge token on PG/MySQL/Redis tunnels, querying business data or sending reachable data over the network. These are separate permissions, not encryption failures.
-
-**Docker itself is not absolute isolation**: reduced capabilities and `no-new-privileges` reduce attack surface, but daemon privileges and container escape remain concerns. Stronger threats require separately evaluated account/VM/sandbox and network controls; no configuration here establishes a measured prevention rate.
-
-### Windows users
-
-- Same compose/image; Windows Docker Desktop is WSL2 underneath, `host.docker.internal` works the same
-- Keys live in **Windows Credential Manager** (`vaulty-keeper apollo init` / `sensitive init` adapt automatically; no `security` command needed)
-- Plaintext CLI guards check stdin console status (`GetConsoleMode` on Windows), not human identity; there is no interactive menu. Non-TTY local reads mask unmarked values, while bridge snapshot reads always mask values.
-
-### Alternatives to Docker
-
-`serve` + `remote` are not tied to Docker; the isolation domain can be any environment that **cannot touch keys or ciphertext**:
-
-**① Run locally (no isolation, defends against "well-behaved" AI)**
-
-In terminal 1, run `vaulty-keeper serve --addr 127.0.0.1:8970` and leave it running. In terminal 2 on the same host, run:
-
-```sh
-export VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8970
-vaulty-keeper remote list   # uses the host's token file unless an env override is set
-```
-
-When the AI shares your account, defense rests on masking + TTY gating; no protection against an AI that actively reads keys.
-
-**② Separate macOS account (real isolation, Docker alternative)**
-
-Create a standard, non-admin `ai` account using macOS account settings and review filesystem access; do not put its real password in a shell command. With `codex` separately installed, a human host can explicitly delegate the bridge token:
-
-```sh
-sudo -u ai env VAULTY_KEEPER_BRIDGE_ADDR=http://127.0.0.1:8970 \
-  VAULTY_KEEPER_BRIDGE_TOKEN="$(cat ~/.vaulty/bridge-token)" codex
-```
-
-The separate account should have no host keys and no read access to the host's 0700 `~/.vaulty/`. Verify permissions and other shared files; the delegated token still grants PG/MySQL/Redis access. You must manage account credentials, agent installation and filesystem permissions.
-
-**③ Remote machine / WSL2**
-
-Put the agent on a separately controlled machine/VM and restrict bridge/tunnel reachability to a trusted network. WSL2 alone is not a guarantee of separation from Windows host files. Token-gated snapshot masking does not protect plaintext transport or redact database results.
-
+Snapshot reads are masked for non-TTY output unless a key is explicitly marked safe; plaintext exits require a stdin TTY (accident-prevention gate, not human identity). The next section is the database tunnel — the flagship feature; run `vaulty-keeper <cmd> -h` for exact flags.
 ## Database tunnel proxy (AI queries with tunnel credentials)
 
 > Full ASCII diagrams (what's in Docker / where credentials live / auth injection for three DBs / security boundary / sequence) live in **[`docs/db-proxy-architecture.md`](docs/db-proxy-architecture.md)** ([中文版](docs/db-proxy-architecture.zh-CN.md)).
@@ -404,30 +220,6 @@ This is a summary; the [security model](docs/security-model.md) owns the complet
 - Registration URLs are encrypted at rest. Mongo authentication/control replies and proxy errors/logs omit backend credentials/hosts, but business documents are untouched. Trusted DBA definition changes and upstream Mongo logs are outside the proxy guarantee; direct human `db shell` is not a sanitized tunnel session.
 - Dedicated tunnel tokens are 128-bit random and rotatable with `db regen`. Give them only to authorized agents/tools. Global bridge-token fallback applies to PG/MySQL/Redis, not MongoDB; possessing a tunnel token grants database access within backend roles and proxy policy.
 
-### Verification fixtures
-
-MongoDB fixture entry points are `bash scripts/mongotest.sh --mongosh` and `bash scripts/mongotest.sh --replica-set --mongosh`, using synthetic credentials and explicit temporary storage/test keys. The [verification matrix](docs/mongodb-tunnel-guide.md#verification-status) owns the dated MongoDB 8.0.13 standalone/fixed-replica-set and test/race/vet/build evidence from the 2026-09-07 implementation workspace; those historical results were not rerun for this documentation update and do not by themselves certify a release binary (MongoDB was shipped in v0.8.0). Actual MongoDB TLS, manual interactive `db shell` and final independent re-review remain unverified.
-
-**`scripts/dbtest.sh` is isolated and safe to run (C02 done).** The current script tracks its own serve PID and containers by label, uses a per-run temp dir and a fake HOME with synthetic keys, and `--clean` tears down only the resources it registered — it no longer broadly pkills serve processes, deletes fixed containers (`aipg`, `aimysql8`, `aimariadb`, `airedis`), or overwrites the real `~/.vaulty/bridge-token` as the historical version did. Read its header before use; keep it out of CI.
-
-Historical script interface, **not a quick-start recommendation**:
-
-```sh
-make build
-./scripts/dbtest.sh          # start and test; environment stays up, prints connection info
-./scripts/dbtest.sh --clean  # teardown: stop serve, remove containers
-```
-
-Its actual fixtures are PostgreSQL `postgres:17.6-alpine`, MySQL `dockerproxy.net/library/mysql:8.0` (the recorded local image was 8.0.46, not 8.4/MariaDB) and Redis `redis:7`. It requires Docker, Python 3 and a built binary. Backend, tunnel and bridge ports are allocated dynamically per run (overridable via `PGP`/`TUN_PG`/... environment variables), so inspect the printed connection info; the prepared data and queries are:
-
-| Registration | Prepared data / query |
-|---|---|
-| `pgdb` | `appdb.t`, `SELECT id,name FROM t ORDER BY id;` |
-| `mysqltest` / `mysqlnative` | `shop.customers`, `products`, `orders`; `SELECT COUNT(*) FROM shop.orders;` |
-| `cache` | Authenticated Redis; `PING`, synthetic `SET`/`GET` |
-
-The script uses a separate DB directory/key, not the host-default `db shell` context. Its commands/log output are fixture-specific historical examples, not proof that every client/configuration works. See the [DB examples guide](docs/db-proxy-examples.md) for native-client setup and positive/negative queries; review logs before sharing because upstream metadata and access tokens may be present.
-
 ## Safe usage guide for AI / scripts
 
 ### Security model overview
@@ -480,9 +272,4 @@ Other notes:
 
 ## Verification
 
-These are coverage pointers, not evidence of a run during this documentation update. Run relevant checks against the exact source revision after code changes; MongoDB's dated evidence and remaining gaps live in its guide.
-
-- `internal/aesx`: byte-for-byte aligned with vectors from `tools/javaref/CryptoUtil.java` (Java 8 reference implementation; GCM is deterministic), plus key-length validation, wrong key/iv, invalid base64.
-- `internal/apollo`: real pasted samples (incl. glued lines), comments, first `=`, URL params not split, encrypted snapshot on disk (no plaintext in file, 0600), diffs, sensitive detection.
-- `internal/cli`: mixed argument order, import auto-naming, reveal (sensitive plaintext / explicit `--key`/`--iv` external ciphertext / multi-key JSON), edit (fake editor script), list/compare JSON, gen-key usability, aes `--name` list, completion.
-- Regenerate Java vectors: `cd tools/javaref && javac CryptoUtil.java && java CryptoUtil encrypt <key> <iv> <plaintext>`
+Test-coverage pointers and the isolated DB fixture scripts (`scripts/dbtest.sh`, `scripts/mongotest.sh`) live in [CONTRIBUTING.md](CONTRIBUTING.md); MongoDB's dated verification matrix lives in the [MongoDB guide](docs/mongodb-tunnel-guide.md#verification-status). Run relevant checks against the exact source revision after code changes.

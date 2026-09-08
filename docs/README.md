@@ -18,11 +18,13 @@ Entry points and current-owner map for `vaulty-keeper` docs. Keep this index thi
 | Guide | Covers |
 |---|---|
 | [security-model](security-model.md) · [中文](security-model.zh-CN.md) | **Canonical security boundary**: trust layers, plaintext lifecycle, tokens, container limits, protocol limits, verification status. |
+| [cli-reference](cli-reference.md) · [中文](cli-reference.zh-CN.md) | Complete command reference: apollo snapshot tool, aes helpers, misc commands. |
 | [apollo-snapshot-guide](apollo-snapshot-guide.md) · [中文](apollo-snapshot-guide.zh-CN.md) | Snapshot implementation: encrypted file layout, dual-key design, sensitive detection, masking/fingerprints, explicit safe allowlist, tested examples. |
 | [ui-guide](ui-guide.md) · [中文](ui-guide.zh-CN.md) | Web UI: navigation, fields, confirmation flows, AES layers, database tunnels in the UI. |
 | [db-proxy-architecture](db-proxy-architecture.md) · [中文](db-proxy-architecture.zh-CN.md) | DB tunnel architecture for PG/MySQL/Redis: what runs where, credential injection, sequence. |
 | [db-proxy-examples](db-proxy-examples.md) · [中文](db-proxy-examples.zh-CN.md) | DB usage examples and synthetic fixtures (source-checked, not re-executed during doc work). |
 | [mongodb-tunnel-guide](mongodb-tunnel-guide.md) · [中文](mongodb-tunnel-guide.zh-CN.md) | MongoDB 8 tunnel: exact URL options, security limits, troubleshooting, dated verification matrix. |
+| [container-isolation](container-isolation.md) · [中文](container-isolation.zh-CN.md) | Docker/agent isolation from host keys and ciphertext, plus Docker-free alternatives. |
 
 ## Principles
 

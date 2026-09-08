@@ -54,6 +54,41 @@ node scripts/check-docs.mjs
 
 `git diff --check` must stay clean.
 
+## Test coverage and DB fixtures
+
+These are coverage pointers, not evidence of a run during this documentation
+update; run relevant checks against the exact source revision after code
+changes. MongoDB's dated evidence and remaining gaps live in the
+[MongoDB guide](docs/mongodb-tunnel-guide.md).
+
+- `internal/aesx`: byte-for-byte aligned with vectors from `tools/javaref/CryptoUtil.java` (Java 8 reference implementation; GCM is deterministic), plus key-length validation, wrong key/iv, invalid base64.
+- `internal/apollo`: real pasted samples (incl. glued lines), comments, first `=`, URL params not split, encrypted snapshot on disk (no plaintext in file, 0600), diffs, sensitive detection.
+- `internal/cli`: mixed argument order, import auto-naming, reveal (sensitive plaintext / explicit `--key`/`--iv` external ciphertext / multi-key JSON), edit (fake editor script), list/compare JSON, gen-key usability, aes `--name` list, completion.
+- Regenerate Java vectors: `cd tools/javaref && javac CryptoUtil.java && java CryptoUtil encrypt <key> <iv> <plaintext>`
+
+Isolated DB fixture scripts (Docker + Python 3 + a built binary; synthetic credentials and explicit temporary storage/test keys only, never a real `~/.vaulty` or keyring):
+
+- **MongoDB**: entry points `bash scripts/mongotest.sh --mongosh` and `bash scripts/mongotest.sh --replica-set --mongosh`.
+- **`scripts/dbtest.sh` is isolated and safe to run (C02 done).** The current script tracks its own serve PID and containers by label, uses a per-run temp dir and a fake HOME with synthetic keys, and `--clean` tears down only the resources it registered — it no longer broadly pkills serve processes, deletes fixed containers (`aipg`, `aimysql8`, `aimariadb`, `airedis`), or overwrites the real `~/.vaulty/bridge-token` as the historical version did. Read its header before use; keep it out of CI.
+
+Historical script interface, **not a quick-start recommendation**:
+
+```sh
+make build
+./scripts/dbtest.sh          # start and test; environment stays up, prints connection info
+./scripts/dbtest.sh --clean  # teardown: stop serve, remove containers
+```
+
+Its actual fixtures are PostgreSQL `postgres:17.6-alpine`, MySQL `dockerproxy.net/library/mysql:8.0` (the recorded local image was 8.0.46, not 8.4/MariaDB) and Redis `redis:7`. Backend, tunnel and bridge ports are allocated dynamically per run (overridable via `PGP`/`TUN_PG`/... environment variables), so inspect the printed connection info; the prepared data and queries are:
+
+| Registration | Prepared data / query |
+|---|---|
+| `pgdb` | `appdb.t`, `SELECT id,name FROM t ORDER BY id;` |
+| `mysqltest` / `mysqlnative` | `shop.customers`, `products`, `orders`; `SELECT COUNT(*) FROM shop.orders;` |
+| `cache` | Authenticated Redis; `PING`, synthetic `SET`/`GET` |
+
+The script uses a separate DB directory/key, not the host-default `db shell` context. Its commands/log output are fixture-specific historical examples, not proof that every client/configuration works. See the [DB examples guide](docs/db-proxy-examples.md) for native-client setup and positive/negative queries; review logs before sharing because upstream metadata and access tokens may be present.
+
 ## Code conventions
 
 - Follow the existing package layout and naming; keep changes minimal and

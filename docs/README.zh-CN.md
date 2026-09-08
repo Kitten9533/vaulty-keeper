@@ -18,11 +18,13 @@
 | 指南 | 覆盖 |
 |---|---|
 | [security-model](security-model.md) · [中文](security-model.zh-CN.md) | **统一安全边界**：信任层级、明文生命周期、token、容器限制、各协议限制、验证状态。 |
+| [cli-reference](cli-reference.md) · [中文](cli-reference.zh-CN.md) | 完整命令参考：apollo 快照工具、aes 辅助命令、其他命令。 |
 | [apollo-snapshot-guide](apollo-snapshot-guide.md) · [中文](apollo-snapshot-guide.zh-CN.md) | 快照实现：加密文件布局、双密钥设计、敏感检测、掩码/指纹、显式 safe 放行、已测示例。 |
 | [ui-guide](ui-guide.md) · [中文](ui-guide.zh-CN.md) | Web UI：导航、字段、确认流程、AES 分层、UI 内数据库隧道。 |
 | [db-proxy-architecture](db-proxy-architecture.md) · [中文](db-proxy-architecture.zh-CN.md) | PG/MySQL/Redis 隧道架构：什么在哪里运行、凭据注入、时序。 |
 | [db-proxy-examples](db-proxy-examples.md) · [中文](db-proxy-examples.zh-CN.md) | DB 用法示例与合成夹具（文档工作期间按源码核对，未重新执行）。 |
 | [mongodb-tunnel-guide](mongodb-tunnel-guide.md) · [中文](mongodb-tunnel-guide.zh-CN.md) | MongoDB 8 隧道：精确 URL 选项、安全限制、排错、带日期验证矩阵。 |
+| [container-isolation](container-isolation.md) · [中文](container-isolation.zh-CN.md) | Docker/agent 与宿主密钥、密文隔离，以及不用 Docker 的替代方案。 |
 
 ## 原则
 

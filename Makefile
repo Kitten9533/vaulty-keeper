@@ -34,11 +34,13 @@ install: build
 # under git tag docs-superpowers-archive and are not shipped, by design.
 DOCS := docs/README.md docs/README.zh-CN.md \
         docs/security-model.md docs/security-model.zh-CN.md \
+        docs/cli-reference.md docs/cli-reference.zh-CN.md \
         docs/apollo-snapshot-guide.md docs/apollo-snapshot-guide.zh-CN.md \
         docs/ui-guide.md docs/ui-guide.zh-CN.md \
         docs/db-proxy-architecture.md docs/db-proxy-architecture.zh-CN.md \
         docs/db-proxy-examples.md docs/db-proxy-examples.zh-CN.md \
-        docs/mongodb-tunnel-guide.md docs/mongodb-tunnel-guide.zh-CN.md
+        docs/mongodb-tunnel-guide.md docs/mongodb-tunnel-guide.zh-CN.md \
+        docs/container-isolation.md docs/container-isolation.zh-CN.md
 
 # Cross-compile release binaries into release/ (one tarball/zip per platform,
 # including the READMEs, LICENSE, AGENTS.md, CONTRIBUTING.md, SECURITY.md and
