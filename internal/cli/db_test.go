@@ -295,27 +295,14 @@ func TestDBTunnelOnOff(t *testing.T) {
 		t.Fatalf("db add failed: %d", code)
 	}
 
-	// default: on, no [off] marker
+	// default: off
 	out := captureStdout(t, func() {
 		if code := Run([]string{"db", "list", "--dir", db}); code != 0 {
 			t.Fatalf("db list failed: %d", code)
 		}
 	})
-	if !strings.Contains(out, "pgdb") || strings.Contains(out, "[off]") {
-		t.Fatalf("fresh connection should be on: %q", out)
-	}
-
-	// off: marker appears, connect warns
-	if code := Run([]string{"db", "off", "pgdb", "--dir", db}); code != 0 {
-		t.Fatalf("db off failed: %d", code)
-	}
-	out = captureStdout(t, func() {
-		if code := Run([]string{"db", "list", "--dir", db}); code != 0 {
-			t.Fatalf("db list failed: %d", code)
-		}
-	})
-	if !strings.Contains(out, "[off]") {
-		t.Fatalf("db off should mark the connection [off]: %q", out)
+	if !strings.Contains(out, "pgdb") || !strings.Contains(out, "[off]") {
+		t.Fatalf("fresh connection should be off: %q", out)
 	}
 	// db connect still works (prints links) but warns the tunnel is closed
 	cerr := captureStderr(t, func() {

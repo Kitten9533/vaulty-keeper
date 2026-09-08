@@ -363,6 +363,9 @@ func TestMySQLTunnelCachingSHA2(t *testing.T) {
 	if err := Add(path, key, "m", realURL, tunnelPort); err != nil {
 		t.Fatal(err)
 	}
+	if err := SetTunnel(path, key, "m", false); err != nil {
+		t.Fatal(err)
+	}
 	tun := &Tunnel{Path: path, Key: key, Host: "127.0.0.1", Token: "tok", Log: os.Stderr}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

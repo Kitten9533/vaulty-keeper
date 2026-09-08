@@ -1,6 +1,6 @@
 # MongoDB Tunnel Guide
 
-> English | [中文](mongodb-tunnel-guide.zh-CN.md)
+> [中文](mongodb-tunnel-guide.zh-CN.md) | English
 >
 > Current MongoDB 8 interface, source-checked on 2026-09-07. This guide owns the dated historical validation matrix below; documentation corrections do not constitute a new test/build run. The general security authority is the [security model](../security-model.md).
 
@@ -62,6 +62,7 @@ The following human workflow reserves tunnel port `15438` and assumes the author
 ```sh
 # Human host terminal: supply the backend URL through stdin, not argv.
 vaulty-keeper db add mongo-app --port 15438
+vaulty-keeper db on mongo-app
 vaulty-keeper db test mongo-app
 vaulty-keeper serve --addr 127.0.0.1:8970
 ```
@@ -147,7 +148,7 @@ Metadata is intentionally reduced. The relay records a cursor's original command
 - Upstream MongoDB logs are not redacted by the proxy. A human operator should inspect backend diagnostics privately, not copy secret-bearing logs into an AI session.
 - Host keys/store are not protected from a hostile process with the same user access. Run agents in a separate isolation domain without those resources.
 - `db regen mongo-app` rotates the token for new connections; existing authenticated sessions retain their established semantics. `db off mongo-app` closes listeners after the normal approximately two-second reconciliation, without promising to terminate existing sessions. `db on mongo-app` restores listening. These controls are not immediate session revocation.
-- Same-name `db add` preserves the stored port when omitted but replaces the URL, generates a new token and resets to enabled. Redistribute the new token and explicitly restore off state if needed. If changing the port of an active listener, turn it off and wait for closure before updating/re-enabling, or restart the owned serve process. Enabled is configuration, not health; automatic allocation excludes registered ports, not OS occupancy. Already accepted handshakes can retain previously resolved state.
+- Same-name `db add` preserves the stored port when omitted but replaces the URL, generates a new token and resets `enabled` to false. Redistribute the new token and turn the tunnel on again if it should listen. If changing the port of an active listener, turn it off and wait for closure before updating/re-enabling, or restart the owned serve process. Enabled is configuration, not health; automatic allocation excludes registered ports, not OS occupancy. Already accepted handshakes can retain previously resolved state.
 - Unlike MongoDB, PG/MySQL/Redis accept the global bridge token for both new and old registrations. Rotating a dedicated token does not remove that access. The container entrypoint prints only a `<set>`/`<unset>` marker for the bridge token, never the token itself; do not treat environment-delivered tokens or generated links as harmless logs.
 
 ## Safe Troubleshooting
@@ -193,4 +194,4 @@ go test -mod=readonly -tags=mongointegration ./internal/dbproxy -run '^TestMongo
 
 Running the tagged tests without fixture variables skips the live integration case and is not evidence of a native MongoDB pass. No complete GUI/introspection compatibility, actual MongoDB TLS or interactive shell validation is implied by the passing matrix.
 
-Source checks for this guide: [registered URL parser](../../internal/dbproxy/mongodb_config.go), [backend auth/TLS/deadline](../../internal/dbproxy/mongodb_auth.go), [persistent relay](../../internal/dbproxy/mongodb.go), [command/metadata policy](../../internal/dbproxy/mongodb_policy.go), [client links](../../internal/dbproxy/links.go), [CLI prompt/direct shell](../../internal/cli/db.go), [watcher startup](../../internal/cli/remote.go), [store lifecycle](../../internal/dbproxy/store.go) and [native fixture](../../scripts/mongotest.sh). MySQL TLS C01 is fixed (unit-tested; a one-off native TLS query passed but is not pinned by an integration test). The old `scripts/dbtest.sh` was refactored into an isolated script (C02 done) and is safe to run; neither C01 nor C02 was a new Mongo TLS defect.
+Source checks for this guide: [registered URL parser](../../internal/dbproxy/mongodb_config.go), [backend auth/TLS/deadline](../../internal/dbproxy/mongodb_auth.go), [persistent relay](../../internal/dbproxy/mongodb.go), [command/metadata policy](../../internal/dbproxy/mongodb_policy.go), [client links](../../internal/dbproxy/links.go), [CLI prompt/direct shell](../../internal/cli/db.go), [watcher startup](../../internal/cli/remote.go), [store lifecycle](../../internal/dbproxy/store.go) and [native fixture](../../scripts/mongotest.sh). MySQL TLS and `dbtest.sh` isolation status live in the [security model](../security-model.md#8--verification-status), not here.

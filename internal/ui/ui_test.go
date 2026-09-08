@@ -1155,11 +1155,11 @@ func TestDBTunnelOnOff(t *testing.T) {
 	}
 	add()
 
-	// list reports the connection as enabled by default
+	// list reports the connection as off by default
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
-	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"disabled":true`) {
-		t.Fatalf("fresh connection should be enabled: %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"enabled":false`) {
+		t.Fatalf("fresh connection should be enabled=false: %d %s", w.Code, w.Body.String())
 	}
 
 	// toggle requires the token
@@ -1181,7 +1181,7 @@ func TestDBTunnelOnOff(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
-	if !strings.Contains(w.Body.String(), `"disabled":true`) {
+	if !strings.Contains(w.Body.String(), `"enabled":false`) {
 		t.Fatalf("db list should report the tunnel off: %s", w.Body.String())
 	}
 	// connect info warns the tunnel is closed, still no real URL
@@ -1205,7 +1205,7 @@ func TestDBTunnelOnOff(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
-	if strings.Contains(w.Body.String(), `"disabled":true`) {
+	if !strings.Contains(w.Body.String(), `"enabled":true`) {
 		t.Fatalf("db list should report the tunnel on again: %s", w.Body.String())
 	}
 
@@ -1217,6 +1217,58 @@ func TestDBTunnelOnOff(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("tunnel toggle of unknown connection = %d, want 400", w.Code)
+	}
+
+	addSecond := func() {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/db/connections",
+			bytes.NewBufferString(`{"name":"rd","url":"redis://:pw@cache.internal:6379/0"}`))
+		r.Header.Set("X-Auth-Token", "ui-tok")
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("add second = %d: %s", w.Code, w.Body.String())
+		}
+	}
+	addSecond()
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/tunnel",
+		bytes.NewBufferString(`{"name":"rd","enabled":true}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("enable rd = %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/db/tunnel",
+		bytes.NewBufferString(`{"all":true,"enabled":false}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("off-all without token = %d, want 401", w.Code)
+	}
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/tunnel",
+		bytes.NewBufferString(`{"all":true,"name":"pg","enabled":false}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("off-all with name = %d, want 400", w.Code)
+	}
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/db/tunnel",
+		bytes.NewBufferString(`{"all":true,"enabled":false}`))
+	r.Header.Set("X-Auth-Token", "ui-tok")
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("off-all = %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"updated"`) {
+		t.Fatalf("off-all should list updated names: %s", w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/db/list", nil))
+	if strings.Count(w.Body.String(), `"enabled":true`) != 0 {
+		t.Fatalf("off-all should leave every tunnel off: %s", w.Body.String())
 	}
 }
 
@@ -1490,5 +1542,37 @@ func TestPrefsEndpoint(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("prefs PUT invalid = %d, want 400", w.Code)
+	}
+}
+
+func TestSidebarTunnelToggleRequiresConfirm(t *testing.T) {
+	js, err := staticFiles.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(js), "quick: true") {
+		t.Fatal("sidebar tunnel toggle must not skip uiConfirm via quick:true")
+	}
+}
+
+func TestLoadDBFailureNotShownAsEmpty(t *testing.T) {
+	js, err := staticFiles.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(js)
+	if !strings.Contains(src, "dbLoadError") {
+		t.Fatal("loadDB must distinguish /api/db/list failure from an empty store")
+	}
+	i := strings.Index(src, "function renderTunnelOverview()")
+	if i < 0 {
+		t.Fatal("renderTunnelOverview not found")
+	}
+	ov := src[i:]
+	if j := strings.Index(ov[1:], "\nasync function "); j > 0 {
+		ov = ov[:j]
+	}
+	if !strings.Contains(ov, "dbLoadError") {
+		t.Fatal("sidebar must not render an empty-store message when list failed")
 	}
 }

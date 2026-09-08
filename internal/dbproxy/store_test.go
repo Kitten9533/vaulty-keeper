@@ -342,44 +342,48 @@ func TestSetTunnelOnOff(t *testing.T) {
 	if err := Add(path, key, "m", "redis://h", 0); err != nil {
 		t.Fatal(err)
 	}
-	// new connections default to enabled
+	// new connections default to off
 	conns, err := List(path, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if conns[0].Disabled {
-		t.Fatal("fresh connection should default to enabled (tunnel on)")
+	if conns[0].Enabled {
+		t.Fatal("fresh connection should default to enabled=false (tunnel off)")
 	}
-
-	if err := SetTunnel(path, key, "m", true); err != nil {
-		t.Fatal(err)
-	}
-	conns, _ = List(path, key)
-	if !conns[0].Disabled {
-		t.Fatal("SetTunnel(disabled=true) not reflected in List")
-	}
-	// Resolve keeps reporting the state too
-	c, err := Resolve(path, key, "m")
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.Disabled {
-		t.Fatal("Resolve should report Disabled")
-	}
-	// URL stays intact (only the flag changed)
-	if c.URL != "redis://h" {
-		t.Fatalf("SetTunnel must not touch the URL: %q", c.URL)
+	if !strings.Contains(string(raw), `"enabled": false`) {
+		t.Fatalf("db.json must persist enabled=false, got:\n%s", raw)
 	}
 
 	if err := SetTunnel(path, key, "m", false); err != nil {
 		t.Fatal(err)
 	}
 	conns, _ = List(path, key)
-	if conns[0].Disabled {
+	if !conns[0].Enabled {
 		t.Fatal("SetTunnel(disabled=false) not reflected in List")
 	}
+	c, err := Resolve(path, key, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Enabled {
+		t.Fatal("Resolve should report Enabled")
+	}
+	if c.URL != "redis://h" {
+		t.Fatalf("SetTunnel must not touch the URL: %q", c.URL)
+	}
 
-	// unknown name
+	if err := SetTunnel(path, key, "m", true); err != nil {
+		t.Fatal(err)
+	}
+	conns, _ = List(path, key)
+	if conns[0].Enabled {
+		t.Fatal("SetTunnel(disabled=true) not reflected in List")
+	}
+
 	if err := SetTunnel(path, key, "zzz", true); err == nil {
 		t.Fatal("SetTunnel of unknown connection should fail")
 	}
@@ -394,25 +398,106 @@ func TestSetTunnelAll(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// add already leaves them off
 	names, err := SetTunnelAll(path, key, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(names) != 0 {
+		t.Fatalf("idempotent SetTunnelAll(off) should change nothing, got %v", names)
+	}
+	names, err = SetTunnelAll(path, key, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(names) != 3 {
-		t.Fatalf("SetTunnelAll should update 3 connections, got %v", names)
+		t.Fatalf("SetTunnelAll(on) should update 3 connections, got %v", names)
 	}
 	conns, _ := List(path, key)
 	for _, c := range conns {
-		if !c.Disabled {
-			t.Fatalf("connection %s should be disabled after SetTunnelAll", c.Name)
+		if !c.Enabled {
+			t.Fatalf("connection %s should be enabled after SetTunnelAll(on)", c.Name)
 		}
 	}
-	// second run: nothing to change
-	names, err = SetTunnelAll(path, key, true)
+	names, err = SetTunnelAll(path, key, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(names) != 0 {
-		t.Fatalf("idempotent SetTunnelAll should change nothing, got %v", names)
+		t.Fatalf("idempotent SetTunnelAll(on) should change nothing, got %v", names)
+	}
+}
+
+func TestLegacyDisabledFieldMapping(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	if err := Add(path, key, "seed", "redis://h", 0); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		json    string
+		enabled bool
+	}{
+		// Old files used disabled,omitempty: an enabled tunnel omitted the field.
+		{"neither", `{"url_cipher":%q,"nonce":%q,"type":"redis","port":15440}`, true},
+		{"disabled-true", `{"url_cipher":%q,"nonce":%q,"type":"redis","port":15441,"disabled":true}`, false},
+		{"disabled-false", `{"url_cipher":%q,"nonce":%q,"type":"redis","port":15442,"disabled":false}`, true},
+		{"enabled-true", `{"url_cipher":%q,"nonce":%q,"type":"redis","port":15443,"enabled":true}`, true},
+		{"enabled-false", `{"url_cipher":%q,"nonce":%q,"type":"redis","port":15444,"enabled":false}`, false},
+	}
+	s, err := load(path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := s.Conns["seed"]
+	var b strings.Builder
+	b.WriteString(`{"connections":{`)
+	for i, tc := range cases {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `%q:`, tc.name)
+		fmt.Fprintf(&b, tc.json, seed.URLEnc, seed.Nonce)
+	}
+	b.WriteString(`}}`)
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	conns, err := List(path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, c := range conns {
+		got[c.Name] = c.Enabled
+	}
+	for _, tc := range cases {
+		if got[tc.name] != tc.enabled {
+			t.Errorf("%s: enabled=%v, want %v", tc.name, got[tc.name], tc.enabled)
+		}
+	}
+}
+
+func TestAddOverwriteResetsEnabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	if err := Add(path, key, "m", "redis://h1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetTunnel(path, key, "m", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Add(path, key, "m", "redis://h2", 0); err != nil {
+		t.Fatal(err)
+	}
+	conns, err := List(path, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conns[0].Enabled {
+		t.Fatal("same-name db add must reset enabled to false")
 	}
 }

@@ -15,6 +15,8 @@ const I18N = {
     'nav.import': 'Import snapshot',
     'rail.snapshots': 'Snapshots',
     'rail.tools': 'Tools',
+    'rail.tunnels': 'Database tunnels',
+    'rail.tunnels-empty': 'No tunnels configured',
     'nav.aes': 'AES encrypt/decrypt',
     'nav.db': 'Database tunnels',
     'nav.settings': 'Settings',
@@ -65,6 +67,8 @@ const I18N = {
     'db.list-card': 'Connections',
     'db.regen-all': 'Regenerate all',
     'db.regen-all-title': 'Regenerate the tunnel token of every connection; old links stop working immediately',
+    'db.off-all': 'Turn off all tunnels',
+    'db.off-all-title': 'Turn off every tunnel; ports stop listening',
     'db.th.name': 'Name',
     'db.th.type': 'Type',
     'db.th.state': 'State',
@@ -162,7 +166,7 @@ const I18N = {
     'aes.copied': 'Copied to clipboard.',
     'aes.copy-failed': 'Copy failed.',
     'db.count': '{n} connections',
-    'db.empty': 'No connections yet. Fill in the name and URL on the left to register one; the vaulty-keeper serve on the host automatically opens a local tunnel for it.',
+    'db.empty': 'No connections yet. Fill in the name and URL on the left to register one; the tunnel stays off until you turn it on.',
     'db.broken': 'Key mismatch',
     'db.broken-title': 'Cannot decrypt with the current key',
     'db.state.on': 'On',
@@ -200,6 +204,9 @@ const I18N = {
     'db.off-confirm': 'Turn off the tunnel of {name}? The port stops listening and existing connections drop (can be turned back on anytime).',
     'db.off-title': 'Turn off tunnel',
     'db.off-ok': 'Turn off',
+    'db.off-all-confirm': 'Turn off every tunnel? Ports stop listening and existing connections drop (can be turned back on anytime).',
+    'db.off-all-dialog-title': 'Turn off all tunnels',
+    'db.off-all-none': 'All tunnels are already off',
     'settings.snap-ok': 'Snapshot key available (Keychain or env var).',
     'settings.snap-missing': 'Snapshot key unavailable. Generate one below.',
     'settings.sensitive-ok': 'Sensitive-value key available (Keychain or env var). Sensitive values use it to encrypt and decrypt.',
@@ -260,6 +267,8 @@ const I18N = {
     'nav.import': '导入配置快照',
     'rail.snapshots': '快照',
     'rail.tools': '工具',
+    'rail.tunnels': '数据库隧道',
+    'rail.tunnels-empty': '暂无隧道配置',
     'nav.aes': 'AES 加解密',
     'nav.db': '数据库隧道',
     'nav.settings': '设置',
@@ -310,6 +319,8 @@ const I18N = {
     'db.list-card': '连接',
     'db.regen-all': '全部重新生成',
     'db.regen-all-title': '所有连接的隧道 token 重新生成，旧链接立即失效',
+    'db.off-all': '关闭全部隧道',
+    'db.off-all-title': '关闭全部隧道，端口停止监听',
     'db.th.name': '名称',
     'db.th.type': '类型',
     'db.th.state': '状态',
@@ -407,7 +418,7 @@ const I18N = {
     'aes.copied': '已复制到剪贴板。',
     'aes.copy-failed': '复制失败。',
     'db.count': '{n} 条',
-    'db.empty': '暂无连接，在左侧填写名称与数据库 URL 并注册；注册后 host 上的 vaulty-keeper serve 会自动为它开启一条本地隧道',
+    'db.empty': '暂无连接，在左侧填写名称与数据库 URL 并注册；隧道默认关闭，需再点「开启隧道」才会监听',
     'db.broken': '密钥不匹配',
     'db.broken-title': '无法用当前密钥解密',
     'db.state.on': '开',
@@ -445,6 +456,9 @@ const I18N = {
     'db.off-confirm': '确定关闭 {name} 的隧道吗？端口将停止监听，现有连接会断开（可随时重新开启）。',
     'db.off-title': '关闭隧道',
     'db.off-ok': '关闭',
+    'db.off-all-confirm': '确定关闭全部隧道吗？端口将停止监听，现有连接会断开（可随时重新开启）。',
+    'db.off-all-dialog-title': '关闭全部隧道',
+    'db.off-all-none': '全部隧道已关闭',
     'settings.snap-ok': '快照密钥可用（Keychain 或环境变量）。',
     'settings.snap-missing': '快照密钥不可用。点击下方按钮生成本机密钥。',
     'settings.sensitive-ok': '敏感值密钥可用（Keychain 或环境变量）。敏感值用它加密，显示时用它解密。',
@@ -563,6 +577,7 @@ function setLang(lang) {
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   applyI18n();
   renderRail();
+  renderTunnelOverview();
   if (state.view === 'snapshots') { renderContext(); renderTable(); }
   if (state.view === 'db') loadDB();
   if (state.view === 'settings') loadSettings();
@@ -750,6 +765,7 @@ function copyAESOutput() {
 // ---- database tunnels ----
 
 let dbConns = [];
+let dbLoadError = '';
 
 function showDBError(msg) {
   const el = $('db-error');
@@ -768,10 +784,13 @@ async function loadDB() {
   try {
     const res = await api('/api/db/list');
     dbConns = res.connections || [];
-    renderDBTable();
+    dbLoadError = '';
+    showDBError('');
   } catch (e) {
-    showDBError(e.message);
+    dbLoadError = e.message;
+    if (state.view === 'db') showDBError(e.message);
   }
+  renderDBTable();
 }
 
 function renderDBTable() {
@@ -781,7 +800,7 @@ function renderDBTable() {
   const empty = $('db-empty');
   if (!dbConns.length) {
     empty.hidden = false;
-    empty.textContent = t('db.empty');
+    empty.textContent = dbLoadError || t('db.empty');
   } else {
     empty.hidden = true;
   }
@@ -793,18 +812,18 @@ function renderDBTable() {
       : `<td>${escapeHtml(c.type)}</td>`;
     const stateCell = c.broken
       ? `<td></td>`
-      : c.disabled
-        ? `<td><span class="db-state off">${escapeHtml(t('db.state.off'))}</span></td>`
-        : `<td><span class="db-state on">${escapeHtml(t('db.state.on'))}</span></td>`;
+      : c.enabled
+        ? `<td><span class="db-state on">${escapeHtml(t('db.state.on'))}</span></td>`
+        : `<td><span class="db-state off">${escapeHtml(t('db.state.off'))}</span></td>`;
     const actions = c.broken
       ? `<td class="row-actions"><button class="row-del" type="button" data-db-action="rm" data-name="${escapeHtml(c.name)}">${escapeHtml(t('db.rm'))}</button></td>`
       : `<td class="row-actions">
           <button class="ghost" type="button" data-db-action="test" data-name="${escapeHtml(c.name)}" title="${escapeHtml(t('db.test-title'))}">${escapeHtml(t('db.test'))}</button>
           <button class="ghost" type="button" data-db-action="connect" data-name="${escapeHtml(c.name)}">${escapeHtml(t('db.connect'))}</button>
           <button class="ghost" type="button" data-db-action="regen" data-name="${escapeHtml(c.name)}" title="${escapeHtml(t('db.regen-title'))}">${escapeHtml(t('db.regen'))}</button>
-          ${c.disabled
-            ? `<button class="ghost" type="button" data-db-action="on" data-name="${escapeHtml(c.name)}" title="${escapeHtml(t('db.tunnel-on-title'))}">${escapeHtml(t('db.tunnel-on'))}</button>`
-            : `<button class="ghost" type="button" data-db-action="off" data-name="${escapeHtml(c.name)}" title="${escapeHtml(t('db.tunnel-off-title'))}">${escapeHtml(t('db.tunnel-off'))}</button>`}
+          ${c.enabled
+            ? `<button class="ghost" type="button" data-db-action="off" data-name="${escapeHtml(c.name)}" title="${escapeHtml(t('db.tunnel-off-title'))}">${escapeHtml(t('db.tunnel-off'))}</button>`
+            : `<button class="ghost" type="button" data-db-action="on" data-name="${escapeHtml(c.name)}" title="${escapeHtml(t('db.tunnel-on-title'))}">${escapeHtml(t('db.tunnel-on'))}</button>`}
           <button class="ghost" type="button" data-db-action="show" data-name="${escapeHtml(c.name)}" hidden>${escapeHtml(t('db.show-url'))}</button>
           <button class="row-del" type="button" data-db-action="rm" data-name="${escapeHtml(c.name)}">${escapeHtml(t('db.rm'))}</button>
         </td>`;
@@ -817,6 +836,11 @@ function renderDBTable() {
       body.querySelectorAll('[data-db-action="show"]').forEach((b) => (b.hidden = false));
     }
   }).catch(() => {});
+  renderTunnelOverview();
+  const offAll = $('db-off-all-btn');
+  const anyOn = dbConns.some((c) => !c.broken && c.enabled);
+  offAll.hidden = !dbConns.length;
+  offAll.disabled = !anyOn;
 }
 
 // URL encryption: the browser derives a fresh AES-GCM key from the UI's
@@ -1116,6 +1140,54 @@ async function dbSetTunnel(name, enabled) {
   }
   try {
     await api('/api/db/tunnel', jsonOptions('POST', { name, enabled }));
+    loadDB();
+  } catch (e) {
+    renderTunnelOverview();
+    if (state.view !== 'db') switchView('db');
+    showDBError(e.message);
+  }
+}
+
+function renderTunnelOverview() {
+  const el = $('tunnel-overview');
+  if (!el) return;
+  if (dbLoadError && !dbConns.length) {
+    el.innerHTML = `<div class="tunnel-ov-empty">${escapeHtml(dbLoadError)}</div>`;
+    return;
+  }
+  if (!dbConns.length) {
+    el.innerHTML = `<div class="tunnel-ov-empty">${escapeHtml(t('rail.tunnels-empty'))}</div>`;
+    return;
+  }
+  el.innerHTML = dbConns.map((c) => {
+    if (c.broken) {
+      return `<div class="tunnel-ov-item is-broken" data-name="${escapeHtml(c.name)}">` +
+        `<button type="button" class="tunnel-ov-name" data-tunnel-open="${escapeHtml(c.name)}">${escapeHtml(c.name)}</button>` +
+        `<span class="tunnel-ov-broken">${escapeHtml(t('db.broken'))}</span></div>`;
+    }
+    const on = !!c.enabled;
+    const cls = on ? 'on' : 'off';
+    const label = on ? t('db.state.on') : t('db.state.off');
+    const title = on ? t('db.tunnel-off-title') : t('db.tunnel-on-title');
+    return `<div class="tunnel-ov-item is-${cls}" data-name="${escapeHtml(c.name)}">` +
+      `<button type="button" class="tunnel-ov-name" data-tunnel-open="${escapeHtml(c.name)}">${escapeHtml(c.name)}</button>` +
+      `<button type="button" class="tunnel-ov-switch ${cls}" data-tunnel-toggle="${escapeHtml(c.name)}" data-enabled="${on ? '1' : '0'}" title="${escapeHtml(title)}" aria-pressed="${on ? 'true' : 'false'}">` +
+      `<span class="knob" aria-hidden="true"></span>${escapeHtml(label)}</button></div>`;
+  }).join('');
+}
+
+async function dbOffAll() {
+  if (!dbConns.some((c) => !c.broken && c.enabled)) {
+    showDBError(t('db.off-all-none'));
+    return;
+  }
+  const ok = await uiConfirm(
+    t('db.off-all-confirm'),
+    { title: t('db.off-all-dialog-title'), okText: t('db.off-ok'), danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/db/tunnel', jsonOptions('POST', { all: true, enabled: false }));
+    showDBError('');
     loadDB();
   } catch (e) {
     showDBError(e.message);
@@ -2262,6 +2334,19 @@ function wire() {
   $('db-add-btn').addEventListener('click', dbAdd);
   $('db-test-btn').addEventListener('click', dbTestURL);
   $('db-regen-all-btn').addEventListener('click', dbRegenAll);
+  $('db-off-all-btn').addEventListener('click', dbOffAll);
+  $('tunnel-overview').addEventListener('click', (e) => {
+    const toggle = e.target.closest('[data-tunnel-toggle]');
+    if (toggle) {
+      if (toggle.disabled) return;
+      const name = toggle.getAttribute('data-tunnel-toggle');
+      const enabled = toggle.getAttribute('data-enabled') !== '1';
+      toggle.disabled = true;
+      dbSetTunnel(name, enabled).finally(() => { toggle.disabled = false; });
+      return;
+    }
+    if (e.target.closest('[data-tunnel-open]')) switchView('db');
+  });
   $('db-body').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-db-action]');
     if (!btn) return;
@@ -2353,6 +2438,7 @@ async function init() {
     }
   } catch (_) { /* prefs read is best-effort */ }
   switchView('snapshots');
+  loadDB();
   if (!TOKEN) {
     showError(t('common.no-token'));
   }

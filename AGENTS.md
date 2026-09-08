@@ -24,7 +24,7 @@ make build     # 产物 bin/vaulty-keeper
 - **AI 写**：`set`/`unset`/`import` 安全，无需 `--yes`（AI 写的就是它已知的明文，写入即加密）。
 - **Web UI**：仅监听 127.0.0.1，随机 token 门控写操作与明文出口；GET 返回显式 safe 值，也会返回可用的 DB 连接 token/链接（不经 UI token）——这些是访问能力，不只是掩码元数据；**明文接口（reveal/export/明文编辑/AES 解密）默认禁用**，需 `--allow-plaintext` 显式开启（否则带 token 也 403）；token 失败限速为有上限的线性延迟（非指数退避）。
 - **掩码代理（serve/remote）**：`vaulty-keeper serve --addr 0.0.0.0:8970` 在 host 起掩码代理，`vaulty-keeper remote list/get/compare` 在隔离域（Docker 容器/独立账号/VM）内读配置。代理**无条件掩码**——即使 `set --plain` 标记安全的 key 也不回明文；全部 /api 端点要 token（0600 写 `~/.vaulty/bridge-token`）+ 失败限速。对"故意对抗的同用户 AI"，这是唯一真正能防住的方式：把 AI 放进摸不到密钥/密文的隔离域（见 README「容器隔离部署」，docker-compose 已内置不挂载密钥目录/cap_drop/no-new-privileges）。
-- **DB 隧道（db/serve）**：`vaulty-keeper db add` 只加密数据库 URL（独立 DB 密钥 `VAULTY_KEEPER_DB_KEY` + `~/.vaulty/db.json`，0600），并为每条连接生成**专属隧道 token**；`serve` 为每条连接起 TCP 隧道，在握手阶段把真实凭据注入（PG trust 风格 / MySQL 认证应答替换 / Redis 代发 AUTH），之后纯字节转发。客户端只需隧道 token（`db connect <name>` 打印；PG/MySQL/Redis **新旧连接都接受**全局 `VAULTY_KEEPER_BRIDGE_TOKEN` 或专属 token，PG/MySQL 放 username 字段 / Redis 放 AUTH 首命令），**不需要真实账号密码**；`db regen <name>|--all` 轮换专属 token（旧 token 对新连接立即失效，**不终止已有会话**，全局 token 不受影响）；DSN 永不离开 host、不进日志/回包。隧道**默认开启**，`db on/off <name>|--all` 按连接开关（serve 约 2 秒内生效，端口停止/恢复监听），UI 里每行有「开启隧道/关闭隧道」按钮。隧道监听地址跟随 `--addr`，`0.0.0.0` 时靠 token 门控兜底。只读靠注册只读账号实现，代理不强制。同名 `db add` 保留原端口但生成新 token 并重置为开启，需重新分发链接。
+- **DB 隧道（db/serve）**：`vaulty-keeper db add` 只加密数据库 URL（独立 DB 密钥 `VAULTY_KEEPER_DB_KEY` + `~/.vaulty/db.json`，0600），并为每条连接生成**专属隧道 token**；`serve` 为每条连接起 TCP 隧道，在握手阶段把真实凭据注入（PG trust 风格 / MySQL 认证应答替换 / Redis 代发 AUTH），之后纯字节转发。客户端只需隧道 token（`db connect <name>` 打印；PG/MySQL/Redis **新旧连接都接受**全局 `VAULTY_KEEPER_BRIDGE_TOKEN` 或专属 token，PG/MySQL 放 username 字段 / Redis 放 AUTH 首命令），**不需要真实账号密码**；`db regen <name>|--all` 轮换专属 token（旧 token 对新连接立即失效，**不终止已有会话**，全局 token 不受影响）；DSN 永不离开 host、不进日志/回包。隧道**默认关闭**（`db add` 写入 `enabled: false`；旧文件无 `enabled`/`disabled` 字段视为开启），需 `db on <name>` 或 UI「开启隧道」后才监听；`db on/off <name>|--all` 按连接开关（serve 约 2 秒内生效，端口停止/恢复监听）。隧道监听地址跟随 `--addr`，`0.0.0.0` 时靠 token 门控兜底。只读靠注册只读账号实现，代理不强制。同名 `db add` 保留原端口但生成新 token 并重置为关闭，需重新分发链接并再次显式开启。
 - **防破解**：掩码指纹是 HMAC-SHA256（密钥=快照密钥），密钥不泄露时无法离线枚举弱值匹配指纹；token 为 128 位随机，AES-256-GCM 暴力不可行。
 - **判断一致性**：用 `compare`（掩码 + 长度 + 指纹即可判断），不要 `get` 明文。
 
@@ -45,15 +45,15 @@ bin/vaulty-keeper db connect <name>            # 打印带 token 的完整客户
 bin/vaulty-keeper db on/off <name>|--all       # 开启/关闭连接的隧道（AI 安全，不碰明文；serve 约 2 秒内生效）
 bin/vaulty-keeper db test <name>                 # 验证注册的连接可用（AI 安全，不打印 URL）；失败提示 db add 同名修复（端口不变）
 bin/vaulty-keeper db show <name>                 # 打印解密后的真实 URL（TTY-only，与 reveal 同门禁）
-bin/vaulty-keeper db add <name>                   # 注册连接（URL 从 stdin 读，加密落盘）
+bin/vaulty-keeper db add <name>                   # 注册连接（URL 从 stdin 读，加密落盘；隧道默认关闭，需 db on）
 bin/vaulty-keeper lang [en|zh]                    # 查看/设置共享语言（UI 与 CLI 互通，默认英文）
 ```
 
 DB 隧道用法（AI 侧）：`db list`（或 `remote dblist`）拿到连接名 + 隧道端口后，用原生客户端连代理端口，token 用 `db connect <name>` 打印的连接专属 token（PG/MySQL/Redis **新旧连接也接受**全局 `VAULTY_KEEPER_BRIDGE_TOKEN`，Mongo 无全局回退）：
-  psql "postgresql://$TOKEN:x@host.docker.internal:15432/appdb"   # token 放 user 字段，数据库名/账号密码一律用注册 URL 里的
-  mysql -h host.docker.internal -P 15435 -u "$TOKEN" -px
-  redis-cli -a "$TOKEN" -p 15434
-AI 不需要真实 URL/凭据；不要从 db.json、serve 日志或回包中寻找 DSN。MongoDB 8 固定单端点已接入：虚拟用户 `vaulty`，专属 token 放密码字段，客户端使用 SCRAM-SHA-256、`authSource=admin`、`directConnection=true`、`retryWrites=false`；无全局 token 回退。Mongo 使用双端认证和持续命令白名单检查，不是认证后裸转发；管理命令、系统集合、视图和部分聚合不开放。注册 URL、查询限制及安全边界见 `docs/mongodb-tunnel-guide.zh-CN.md`，修改 Mongo 协议/认证/连接配置时先读该文档。业务文档保持原样，不承诺清除数据本身含有的秘密。serve 热加载：db add/rm/regen/on/off 后隧道自动开/关（每 2 秒同步 db.json），不用重启；Mongo token 轮换影响新连接，不强制中断已有会话。**watcher 前提**：serve 只在启动时 DB 存储已存在且密钥可用的情况下启动隧道 watcher；bridge-only 启动后首次注册 DB 需重启 serve。
+  psql "postgresql://$TOKEN:x@host.docker.internal:15432/appdb?sslmode=disable"   # token 放 user 字段，数据库名用注册 URL 里的
+  mysql -h host.docker.internal -P 15435 -u "$TOKEN" -px --ssl-mode=DISABLED
+  redis-cli -h host.docker.internal -p 15434 -a "$TOKEN" --no-auth-warning
+AI 不需要真实 URL/凭据；不要从 db.json、serve 日志或回包中寻找 DSN。MongoDB 8 固定单端点已接入：虚拟用户 `vaulty`，专属 token 放密码字段，客户端使用 SCRAM-SHA-256、`authSource=admin`、`directConnection=true`、`retryWrites=false`；无全局 token 回退。Mongo 使用双端认证和持续命令白名单检查，不是认证后裸转发；管理命令、系统集合、视图和部分聚合不开放。注册 URL、查询限制及安全边界见 `docs/tunnel/mongodb-tunnel-guide.zh-CN.md`，修改 Mongo 协议/认证/连接配置时先读该文档。PG/MySQL/Redis 操作见同目录 postgres/mysql/redis 指南。业务文档保持原样，不承诺清除数据本身含有的秘密。serve 热加载：db add/rm/regen/on/off 后按 `enabled` 同步监听（每 2 秒读 db.json），`db add` 不会自动开隧道；不用重启；Mongo token 轮换影响新连接，不强制中断已有会话。**watcher 前提**：serve 只在启动时 DB 存储已存在且密钥可用的情况下启动隧道 watcher；bridge-only 启动后首次注册 DB 需重启 serve。
 本地人工验证：`./scripts/dbtest.sh`（Docker 起 pg/mysql/redis + 起 serve + 全量正/负向测试；`--clean` 收尾）。当前脚本已隔离重构（C02 完成）：每次运行用唯一临时目录/容器名、PID 与容器标签跟踪、假 HOME 与合成密钥，只清理自身，不碰真实 `~/.vaulty`/keyring。历史版本曾宽泛 pkill 并覆盖真实 bridge-token，现已不适用。
 Mongo 隔离验收：`bash scripts/mongotest.sh --mongosh`；固定副本集端点加 `--replica-set`。脚本仅创建和清理自身夹具，测试使用临时存储及合成凭据，不读取用户配置或 Keychain。
 图解：`docs/db-proxy-architecture.zh-CN.md`（Docker 里是什么/凭据存哪/三库认证注入/安全边界/时序）。

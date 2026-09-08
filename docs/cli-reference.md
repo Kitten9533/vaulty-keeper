@@ -2,7 +2,7 @@
 
 > [中文](cli-reference.zh-CN.md) | English
 
-Complete command reference for `vaulty-keeper`: the Apollo snapshot tool, AES encrypt/decrypt helpers and miscellaneous commands. Install and quick start live in the [README](../README.md); usage walkthroughs live in the [documentation index](README.md). This file is a **reference, not a script**: `<...>`, `[...]` and `a|b` denote placeholders/choices, never literal shell input. Substitute filenames, names, AppIDs and keys.
+Complete command reference for `vaulty-keeper`: the Apollo snapshot tool, AES encrypt/decrypt helpers, database tunnels and miscellaneous commands. Install and quick start live in the [README](../README.md); usage walkthroughs live in the [documentation index](README.md). This file is a **reference, not a script**: `<...>`, `[...]` and `a|b` denote placeholders/choices, never literal shell input. Substitute filenames, names, AppIDs and keys.
 
 ## vaulty-keeper apollo — Apollo snapshot tool
 
@@ -108,13 +108,31 @@ vaulty-keeper apollo reveal prod app.fs.oss.secret-key --appid xx --key <k> --iv
 
 Input can come from `--file`, an argument, or stdin. `decrypt` prints plaintext and requires stdin TTY, so piping ciphertext does not bypass its guard; use a file/argument in a human terminal when appropriate. Input files and outputs have their own plaintext lifecycle.
 
+## Database tunnels
+
+Encrypted connection store and TCP tunnels. Exact flags: `vaulty-keeper db -h` and `vaulty-keeper db <cmd> -h`. Per-protocol setup: [PostgreSQL](tunnel/postgres-tunnel-guide.md) / [MySQL](tunnel/mysql-tunnel-guide.md) / [Redis](tunnel/redis-tunnel-guide.md) / [MongoDB](tunnel/mongodb-tunnel-guide.md). Architecture and fixtures: [db-proxy-architecture](db-proxy-architecture.md), [db-proxy-examples](db-proxy-examples.md). Security boundary: [security-model](security-model.md).
+
+```sh
+vaulty-keeper db init
+vaulty-keeper db add <name> [--port <port>] [--test]   # URL on stdin; tunnel stays off until db on
+vaulty-keeper db list [--json]
+vaulty-keeper db test <name>
+vaulty-keeper db connect <name> [--container] [--cmd] [--host <host>]
+vaulty-keeper db regen <name>|--all
+vaulty-keeper db on|off <name>|--all
+vaulty-keeper db show <name>     # TTY only: decrypted URL
+vaulty-keeper db shell <name>    # TTY only: direct backend client
+vaulty-keeper db rm <name> [--yes]
+```
+
+`db show` / `db shell` are plaintext exits (stdin TTY). Agents use `list` / `test` / `connect` / `on` / `off` / `regen`.
+
 ## Misc
 
 ```sh
 vaulty-keeper ui                              # start local web UI (default 127.0.0.1:8080, auto-increments if busy)
 vaulty-keeper serve --addr 0.0.0.0:8970       # masking proxy (for containers/isolated domains when the host holds keys)
 vaulty-keeper remote list|get|compare ...     # read through the masking proxy (same shape as apollo subcommands)
-vaulty-keeper db <init|add|list|test|connect|show|rm|shell|regen|on|off> ... # encrypted DB connections + tunnels
 vaulty-keeper completion zsh | source /dev/stdin   # or bash / fish; add to your shell config
 vaulty-keeper lang [en|zh]    # show or set the shared UI/CLI language
 vaulty-keeper version

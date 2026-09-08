@@ -35,6 +35,10 @@
           <span data-i18n="nav.settings">Settings</span>
         </div>
       </section>
+      <section class="rail-card" id="tunnel-overview-card">
+        <div class="rail-card-head" data-i18n="rail.tunnels">Database tunnels</div>
+        <div id="tunnel-overview"></div>
+      </section>
     </div>
     <div class="foot"><div><b data-i18n="foot.local">Local workspace</b><span data-i18n="foot.local-sub">This device only</span></div></div>
   </aside>
@@ -159,7 +163,7 @@
             <div id="db-form-result" class="db-form-result" hidden></div>
           </section>
           <section class="db-card">
-            <div class="sec-head"><h2 data-i18n="db.list-card">Connections</h2><span class="sec-actions"><button class="ghost" type="button" id="db-regen-all-btn" data-i18n-title="db.regen-all-title" data-i18n="db.regen-all">Regenerate all</button><span id="db-count" class="count"></span></span></div>
+            <div class="sec-head"><h2 data-i18n="db.list-card">Connections</h2><span class="sec-actions"><button class="ghost" type="button" id="db-off-all-btn" data-i18n-title="db.off-all-title" data-i18n="db.off-all">Turn off all tunnels</button><button class="ghost" type="button" id="db-regen-all-btn" data-i18n-title="db.regen-all-title" data-i18n="db.regen-all">Regenerate all</button><span id="db-count" class="count"></span></span></div>
             <table class="aes-table" id="db-table">
               <thead><tr><th data-i18n="db.th.name">Name</th><th data-i18n="db.th.type">Type</th><th data-i18n="db.th.state">State</th><th data-i18n="db.th.port">Port</th><th data-i18n="db.th.actions">Actions</th></tr></thead>
               <tbody id="db-body"></tbody>

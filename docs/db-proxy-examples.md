@@ -4,11 +4,11 @@ English | [中文](db-proxy-examples.zh-CN.md)
 
 PG/MySQL/Redis examples for the current working tree. The complete synthetic recipe below was source-checked, **not executed** during the 2026-09-07 documentation correction. Expected results are not captured test output. See [architecture](db-proxy-architecture.md) and the canonical [security model](security-model.md); per-protocol operation guides cover URL options, client setup and troubleshooting ([PostgreSQL](tunnel/postgres-tunnel-guide.md) / [MySQL](tunnel/mysql-tunnel-guide.md) / [Redis](tunnel/redis-tunnel-guide.md)). MongoDB 8 has a separate [guide and historical validation matrix](tunnel/mongodb-tunnel-guide.md): one fixed endpoint, `vaulty` plus dedicated password token, no global fallback, persistent command/metadata checks, and no promise of complete GUI support or immediate session revocation.
 
-**`scripts/dbtest.sh` is isolated and safe to run (C02 done):** it tracks its own serve PID and containers by label, uses unique per-run temp dirs and a fake HOME with synthetic keys, and `--clean` removes only its registered runs. The historical version broadly killed matching serve processes, removed fixed containers `aipg`/`aimysql8`/`aimariadb`/`airedis` and fixed `/tmp/vaulty-keeper-dbtest*` dirs/logs, and could overwrite the real HOME bridge-token — none of that applies to the current script. Its images are PostgreSQL `17.6-alpine`, MySQL `8.0` (historically 8.0.46, not 8.4/MariaDB) and Redis `7`.
+**`scripts/dbtest.sh` is isolated and safe to run.** Isolation details: [CONTRIBUTING](../CONTRIBUTING.md) and [security model verification status](security-model.md#8--verification-status). Its images are PostgreSQL `17.6-alpine`, MySQL `8.0` (historically 8.0.46, not 8.4/MariaDB) and Redis `7`.
 
 ## Synthetic Fixture
 
-Run only in a disposable local development environment, from the repository root, with a current `bin/vaulty-keeper` already built. Prerequisites: Bash, Node, Docker with permission to pull/run images, and host `psql`, MySQL 8 `mysql`, and `redis-cli` on PATH. A database image or the repository agent image does not install these host clients. Building from source needs Go; `make test` also needs Node. The latest release **v0.8.0** includes the current DB tunnel and MongoDB behavior and bundles the `docs/` guides; its prebuilt archives are the matching reference for the recipes here. The older 0.6.0 archives lack linked `docs/` files and do not establish current working-tree feature availability.
+Run only in a disposable local development environment, from the repository root, with a current `bin/vaulty-keeper` already built. Prerequisites: Bash, Node, Docker with permission to pull/run images, and host `psql`, MySQL 8 `mysql`, and `redis-cli` on PATH. A database image or the repository agent image does not install these host clients. Building from source needs Go; `make test` also needs Node. The latest release **v0.9.0** includes the current DB tunnel behavior and bundles the `docs/` guides; its prebuilt archives are the matching reference for the recipes here. The older 0.6.0 archives lack linked `docs/` files and do not establish current working-tree feature availability.
 
 All passwords/data here are public synthetic fixtures, never production input. The recipe creates disposable database containers without host bind mounts, a unique temporary HOME/store/log, explicit synthetic keys, and its own serve PID. It cleans only those resources, including the containers' anonymous volumes, on exit. It does not run `db init`, use the real vault or call Keychain. Do not replace its credentials/keys with real ones. Docker image pulls/cache remain; Docker itself and unrelated containers are not stopped. Image tags are not immutable digests; record resolved digests for byte-identical future reproductions.
 
@@ -22,7 +22,7 @@ All passwords/data here are public synthetic fixtures, never production input. T
 | `mysql-native` | 59919 | `shop` / `nativeuser` | 15436 | Same `orders`; SELECT only |
 | `cache` | 59920 | Redis database `0` | 15434 | `demo=ready`; fixture password account is writable |
 
-HTTP bridge: `127.0.0.1:8972`. All ports must be unused. The preflight only checks current occupancy, not a reservation; a race or later bind failure must be investigated, never resolved by killing unrelated processes. This fixture intentionally uses plaintext loopback transport, so it is not a TLS demonstration. **MySQL `?tls=true` is fixed** (was C01: `CLIENT_SSL` capability + TLS-upgraded forwarding; a one-off native TLS query passed, but that evidence is not pinned by an integration test in this repo — re-verify before relying on it; add `tlsCAFile=<path>` for a private/self-signed CA). Do not disable required TLS on a real service.
+HTTP bridge: `127.0.0.1:8972`. All ports must be unused. The preflight only checks current occupancy, not a reservation; a race or later bind failure must be investigated, never resolved by killing unrelated processes. This fixture intentionally uses plaintext loopback transport, so it is not a TLS demonstration. MySQL `?tls=true` and remaining TLS evidence: [security model](security-model.md#8--verification-status) and the [MySQL guide](tunnel/mysql-tunnel-guide.md). Do not disable required TLS on a real service.
 
 ```sh
 bash <<'BASH'
@@ -122,6 +122,7 @@ printf '%s' 'mysql://sha2user:sha2pass@127.0.0.1:59919/shop_billing' | "${VK[@]}
 printf '%s' 'mysql://sha2user:sha2pass@127.0.0.1:59919/shop_reporting' | "${VK[@]}" db add mysql-reporting --port 15443
 printf '%s' 'mysql://nativeuser:nativepass@127.0.0.1:59919/shop' | "${VK[@]}" db add mysql-native --port 15436
 printf '%s' 'redis://:redispass@127.0.0.1:59920/0' | "${VK[@]}" db add cache --port 15434
+"${VK[@]}" db on --all
 "${VK[@]}" db list
 "${VK[@]}" serve --addr 127.0.0.1:8972 --dir "$LAB/snapshots" >"$LAB/serve.log" 2>&1 &
 SERVE_PID=$!
@@ -163,7 +164,7 @@ redis-cli -h 127.0.0.1 -p 15434 -a "$TOKEN" --no-auth-warning SET last_sync fixt
 BASH
 ```
 
-The shared deterministic storage key is strictly a fixture shortcut, not the production three-key model. The script uses its disposable global token to demonstrate current PG/MySQL/Redis acceptance on **new** registrations. Normally obtain and distribute each connection's dedicated token. This recipe is not a tested replacement for C02, a complete security suite, a TLS test or a container-client test. A nonzero negative case alone does not prove permission enforcement unless successful queries on the same connection and the actual denial are also checked.
+The shared deterministic storage key is strictly a fixture shortcut, not the production three-key model. The script uses its disposable global token to demonstrate current PG/MySQL/Redis acceptance on **new** registrations. Normally obtain and distribute each connection's dedicated token. This recipe is not a tested replacement for `scripts/dbtest.sh`, a complete security suite, a TLS test or a container-client test. A nonzero negative case alone does not prove permission enforcement unless successful queries on the same connection and the actual denial are also checked.
 
 ## Human Host Workflow
 
@@ -211,7 +212,7 @@ vaulty-keeper db off pg-readonly
 vaulty-keeper db on pg-readonly
 ```
 
-These are separate controls, not a sequence that revokes all sessions. Rotation changes dedicated-token authentication for subsequent connections; already accepted handshakes/sessions may retain old state. The global token still works for PG/MySQL/Redis. Off/rm closes listeners on the watcher's approximately two-second sync, without actively ending established sessions. Redistribute new tokens after regen or same-name add. Same-name add retains the port if omitted, **creates a new token and resets enabled to true**, even if previously off. If changing the port, stop the listener before updating and re-enable it afterward; an active listener is not automatically rebound to the new stored port.
+These are separate controls, not a sequence that revokes all sessions. Rotation changes dedicated-token authentication for subsequent connections; already accepted handshakes/sessions may retain old state. The global token still works for PG/MySQL/Redis. Off/rm closes listeners on the watcher's approximately two-second sync, without actively ending established sessions. Redistribute new tokens after regen or same-name add. Same-name add retains the port if omitted, **creates a new token and resets `enabled` to false**, even if previously on. If changing the port, stop the listener before updating and re-enable it afterward; an active listener is not automatically rebound to the new stored port.
 
 | Symptom | Safe next check |
 |---|---|

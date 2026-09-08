@@ -113,7 +113,10 @@ The script uses a separate DB directory/key, not the host-default `db shell` con
   only).
 - Keep one current home per subject: the security model lives only in
   `docs/security-model.md`; guides link it instead of duplicating it. Update
-  `docs/README.md` when you add, move or retire a guide.
+  `docs/README.md` when you add, move or retire a guide. `make test` runs
+  `scripts/check-docs.mjs`, which also requires every `docs/**/*.md` guide in
+  that index, `cp -R docs` in the Makefile (so `docs/tunnel/` is not flattened),
+  and that backtick `docs/` / `scripts/` paths exist.
 - Historical implementation records (plans/designs) are archived under a git
   tag (e.g. `docs-superpowers-archive`), not committed to the tree; do not
   rewrite archived records as current instructions and do not replay their

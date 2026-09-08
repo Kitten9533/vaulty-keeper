@@ -58,9 +58,9 @@ safe 值是**获得授权的明文输出**，不只是"非敏感"分类。因此
 | UI token（每次 `ui` 启动新生成 128 位） | UI 非 GET 操作 | 仅本机 UI | 进程结束即失效，无共享状态。明文路由还需 `--allow-plaintext`，否则带 token 也 403。 |
 | Bridge token（`~/.vaulty/bridge-token`，0600） | `serve` 全部 `/api` 端点 | 快照掩码读取**以及** PG/MySQL/Redis 新旧连接的隧道访问（`postgres.go`/`mysql.go`/`redis.go` 的 `tokenOKAny(user, globalToken, connToken)`） | 每次 `serve` 启动重新生成。失败检查每次递增 50 ms，上限 2 秒（线性，非指数退避）。 |
 | 数据库专属隧道 token（每连接 128 位） | 对应一条注册连接 | PG/MySQL/Redis 接受专属或全局 token；MongoDB **只接受**专属 token（无全局兜底） | `db regen` 轮换；旧 token 对**新**连接失效。已有会话不终止。全局 token 不受影响。 |
-| 同名 `db add` | — | 省略端口时保留原隧道端口，但生成新 token 并把连接重置为开启（`internal/dbproxy/store.go`） | 重新注册后需重新分发客户端链接并复查暴露面。 |
+| 同名 `db add` | — | 省略端口时保留原隧道端口，但生成新 token 并把 `enabled` 重置为 false（`internal/dbproxy/store.go`） | 重新注册后需重新分发客户端链接；若要监听须再次显式开启。 |
 
-`db on/off` 切换持久化的监听状态（watcher 约 2 秒同步），不承诺终止已有会话。因此 `db regen` 和 `db off` 都不是即时会话撤销。
+`db add`（含同名覆盖）写入 `enabled: false`。既无 `enabled` 也无 `disabled` 的旧文件视为开启（旧 omitempty 默认）。`db on/off` 切换持久化的监听状态（watcher 约 2 秒同步），不承诺终止已有会话。因此 `db regen` 和 `db off` 都不是即时会话撤销。
 
 ## 6 · 容器与网络边界
 
@@ -72,14 +72,14 @@ safe 值是**获得授权的明文输出**，不只是"非敏感"分类。因此
 
 ## 7 · 各协议限制
 
-- **PG**：`sslmode` 交给客户端库处理。**Redis**：TLS 用 `rediss://`。
-- **MySQL `?tls=true` 已修复**（原 C01）：代理会声明 `CLIENT_SSL`，用 TLS 升级后的连接完成认证与转发，并支持 `tlsCAFile` 信任私有/自签 CA。曾对 `require_secure_transport=ON`、使用自签 CA 的 MySQL 8 做过一次原生 TLS 查询验证（`Ssl_cipher` 非空、TLSv1.3、业务查询经隧道通过），但该证据**在仓库不可复现**——没有集成测试固化（只有假后端单测）。按"已修复且有单测"看待该能力，依赖它之前请先对真实 TLS 后端复测。不要关闭真实后端要求的 TLS。
-- **MongoDB 8**：固定单端点、用户 `vaulty` + 专属 token 作 SCRAM 密码、`authSource=admin`、`directConnection=true&retryWrites=false`、无全局兜底；双端认证 + 持续命令白名单（不是认证后裸转发）。视图、时序、事务、可重试写入、`comment`/`collation`/`create`/`createIndexes` 不开放。仅错误码 13 无法区分代理策略与后端角色拒绝。完整细节与限制：[mongodb-tunnel-guide.md](tunnel/mongodb-tunnel-guide.md)。
+- **PG**：注册 URL 的 `sslmode` 由代理自身处理（`require`/`verify-ca`/`verify-full` 强制 TLS；`prefer`/`allow` 先试 TLS 再回退明文；`disable`/缺省为明文）。这不是 libpq：上述三档强制 TLS 共用一条 Go TLS 拨号（校验主机名；直接 TLS，不是 PostgreSQL SSLRequest）。前端对 SSLRequest 回答拒绝，隧道 URI 上 `sslmode=require` 会失败。细节：[postgres-tunnel-guide.zh-CN.md](tunnel/postgres-tunnel-guide.zh-CN.md)。**Redis**：后端 TLS 用 `rediss://`。
+- **MySQL**：`?tls=true` 会声明 `CLIENT_SSL`，将宿主到后端连接升级为 TLS 再认证与转发，并支持 `tlsCAFile` 信任私有/自签 CA。不要关闭真实后端要求的 TLS。证据状态见[验证状态](#验证状态)。细节：[mysql-tunnel-guide.zh-CN.md](tunnel/mysql-tunnel-guide.zh-CN.md)。
+- **MongoDB 8**：固定单端点、用户 `vaulty` + 专属 token 作 SCRAM 密码、`authSource=admin`、`directConnection=true&retryWrites=false`、无全局兜底；双端认证 + 持续命令白名单（不是认证后裸转发）。视图、时序、事务、可重试写入、`comment`/`collation`/`create`/`createIndexes` 不开放。仅错误码 13 无法区分代理策略与后端角色拒绝。完整细节与限制：[mongodb-tunnel-guide.zh-CN.md](tunnel/mongodb-tunnel-guide.zh-CN.md)。
 - 客户端到代理的传输是明文；使用本机或受控隔离的可信网络。
 
 ## 8 · 验证状态
 
-此处只记录、不重跑：带日期的 MongoDB 8.0.13 standalone/固定副本集矩阵（单测/race/vet/build、原生 Go 驱动、容器内 `mongosh`）见 [mongodb-tunnel-guide.md](tunnel/mongodb-tunnel-guide.md#验证状态)，是历史结果——不是本次文档工作期间的新运行。
+此处只记录、不重跑：带日期的 MongoDB 8.0.13 standalone/固定副本集矩阵（单测/race/vet/build、原生 Go 驱动、容器内 `mongosh`）见 [mongodb-tunnel-guide.zh-CN.md](tunnel/mongodb-tunnel-guide.zh-CN.md#验证状态)，是历史结果——不是本次文档工作期间的新运行。
 
 仍然**未验证**：真实 MongoDB TLS（只测过假后端证书/主机名）、人工交互 `db shell`、自动化独立复审。MySQL TLS **已修复**（C01：`CLIENT_SSL` 能力位 + TLS 升级连接贯穿认证与转发），但原生 TLS 证据**在仓库不可复现**（只有假后端单测；一次性真实 TLS 查询未固化为集成测试）。`scripts/dbtest.sh` **现已隔离**（C02 完成）：每次运行独立临时目录/容器、PID 与标签跟踪、假 HOME 与合成密钥，`--clean` 只清理自身登记资源；历史版本的宽泛 pkill 与真实 HOME token 覆盖已不适用。
 

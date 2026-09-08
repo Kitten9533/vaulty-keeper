@@ -23,7 +23,7 @@ vaulty-keeper ui --allow-plaintext  # 额外开启明文接口（导出 / 解密
 
 ### Windows 启动方式
 
-Windows 发布包名包含版本，例如 `vaulty-keeper-0.8.0-windows-x86_64.zip`；解压后得到 `vaulty-keeper.exe`，命令使用 `.exe` 后缀：
+Windows 发布包名包含版本，例如 `vaulty-keeper-0.9.0-windows-x86_64.zip`；解压后得到 `vaulty-keeper.exe`，命令使用 `.exe` 后缀：
 
 ```powershell
 # PowerShell / CMD，进入解压目录后：
@@ -35,7 +35,7 @@ Windows 发布包名包含版本，例如 `vaulty-keeper-0.8.0-windows-x86_64.zi
 - 启动同样打印 `http://127.0.0.1:<port>/?t=<token>`，并自动用默认浏览器打开。
 - **PowerShell 里运行当前目录下的程序要加 `.\` 前缀**（直接敲 `vaulty-keeper.exe ui` 会提示找不到命令）；CMD 不需要。
 - 快照、敏感值和 DB 密钥使用 **Windows 凭据管理器**，但非空环境变量覆盖优先；数据位于 `%USERPROFILE%\.vaulty\`（快照在 `.vaulty\apollo\`，DB 连接在 `.vaulty\db.json`）。独立的 AES key/IV 列表是明文 JSON，不是凭据管理器条目。
-- 各平台共用 API 门禁（§8），浏览器启动和凭据库实现不同。最新发布 **v0.8.0** 已包含 Mongo 增补并打包当前 `docs/` 指南；更早的发布二进制（如 0.6.0/0.7.x）先于它们。
+- 各平台共用 API 门禁（§8），浏览器启动和凭据库实现不同。最新发布 **v0.9.0** 已包含默认关闭隧道并打包当前 `docs/` 指南；更早的发布二进制（如 0.6.0/0.7.x/0.8.0）先于默认关闭行为。
 
 ## 2 · 界面总览
 
@@ -134,8 +134,8 @@ MongoDB 8 接受单固定端点和普通用户名/密码认证。遵循[注册 U
 **注册和测试输入 URL 时，在 POST 前加密 URL**：浏览器先从 `/api/db/pubkey` 获取服务端 ECDH 公钥，派生 AES-GCM 密钥并加密 URL；私钥只在 UI 进程内存中，每次启动重生。此范围不包括通过 loopback HTTP 返回解密明文的 **View URL**，也不覆盖全部后续数据库流量，不能当作通用 TLS 保证。
 
 - **Test connection**：先用填的 URL 试连一下（不落库）。
-- **Register connection**：加密落盘到 `~/.vaulty/db.json`（0600），并为该连接生成专属隧道 token。
-- 同名注册会替换连接、生成新 token 并恢复默认开启。端口留空时保留原端口。需重新分发连接信息，必要时再次关闭隧道。
+- **Register connection**：加密落盘到 `~/.vaulty/db.json`（0600），并为该连接生成专属隧道 token。隧道默认关闭，需再点 **开启隧道**。
+- 同名注册会替换连接、生成新 token 并把 `enabled` 重置为 false。端口留空时保留原端口。需重新分发连接信息；若要监听须再次点「开启隧道」。
 
 MySQL 隧道 `?tls=true` 会与后端协商 TLS，并用升级后的连接完成认证与转发（私有/自签 CA 加 `tlsCAFile=<路径>`）；该修复已有单测，一次性原生 TLS 查询通过但未被集成测试固化。直连 **Test connection** 会执行同样的后端 TLS 升级，但不是完整隧道测试。各协议限制见 [DB 示例](db-proxy-examples.zh-CN.md)。
 
@@ -144,6 +144,8 @@ MySQL 隧道 `?tls=true` 会与后端协商 TLS，并用升级后的连接完成
 注册后，能访问相同 DB 存储/密钥的宿主终端需要持续运行 `vaulty-keeper serve --addr 127.0.0.1:8970`。只有 **serve 启动时** DB 存储已存在且密钥可解析，才会启动 watcher。若首次注册前 serve 仅启动了 bridge，注册后需重启。已运行的 watcher 约每两秒同步新增/删除/开关。UI enabled/disabled 是持久化配置，不是监听健康或客户端可连接的证明。
 
 需单独安装所选原生客户端。UI 的 **Connect info** 使用 `127.0.0.1`，没有容器地址切换控件。容器使用时，在宿主 CLI 执行 `vaulty-keeper db connect <name> --container` 生成链接，仅交付获准的隧道凭据。`--container` 只将打印的地址改为 `host.docker.internal`，不改变监听地址；serve 需使用容器可达的绑定及适当防火墙限制。容器内 `remote dblist` 仅返回元数据；本地 `db connect` 仍需本地 DB 存储/密钥。不要为打通流程而挂载宿主密钥。见 [DB 示例](db-proxy-examples.zh-CN.md)。
+
+左侧栏 **数据库隧道** 卡片列出每条已注册连接。开是绿色「开」开关，关是红色「关」开关。点开关即可切换，不弹确认（表格里的「关闭隧道」仍会确认）。点名称打开本页。尚未注册时显示 **暂无隧道配置**。开关表示已保存的 `enabled` 配置，不是监听健康。
 
 ### 5.4 连接列表与操作
 
@@ -154,6 +156,7 @@ MySQL 隧道 `?tls=true` 会与后端协商 TLS，并用升级后的连接完成
 | **Test** | 用解密后的真实 URL **直连**数据库测试（不走隧道），验证注册连接可用 |
 | **Connect info** | 按协议提供原始隧道链接及客户端选项：psql/libpq、DBeaver/DataGrip JDBC、pgAdmin4 字段、Redis Insight、redis-cli 或 mongosh；隧道 token 已填好 |
 | **Regenerate** | 为新连接轮换此连接的专属 token（需确认），需重新分发链接；不撤销既有会话或全局 token；「Regenerate all」轮换全部专属 token |
+| **关闭全部隧道** | 在「全部重新生成」旁边；需确认；把每条连接写成 `enabled=false`。已运行的 watcher 下次同步时关闭监听，不强制终止已有会话 |
 | **开启隧道 / 关闭隧道** | 将目标状态存入 db.json；已运行的 serve watcher 在下次同步（通常约 2 秒）关闭/恢复监听，不强制终止已有会话 |
 | **View URL** | 直接请求并显示解密的后端 URL，无二次确认弹窗；仅在 `--allow-plaintext` 时显示，且需要 UI token |
 | **删除** | 删除连接（需确认）；已运行的 watcher 移除监听，不承诺终止既有会话 |

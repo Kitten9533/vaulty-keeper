@@ -31,9 +31,9 @@ The client sends the tunnel token as the username with any placeholder password.
 
 ## Registered URL
 
-`postgres://` and `postgresql://` are both accepted. The URL carries the backend username, password, host, port and database; `sslmode` and other query options are delegated to the PostgreSQL client library on the host-to-backend connection. Client-side `sslmode=disable` on the tunnel URI is a separate, frontend-only setting.
+`postgres://` and `postgresql://` are both accepted. The URL carries the backend username, password, host, port and database. The registered URL's `sslmode` is honored by the proxy itself on the host-to-backend connection: `require`/`verify-ca`/`verify-full` force TLS, `prefer`/`allow` try TLS first and fall back to plaintext, `disable`/absent use plaintext. Those three force-TLS names share one path (Go `crypto/tls` with hostname verification; a direct TLS dial, not PostgreSQL SSLRequest). Client-side `sslmode=disable` on the tunnel URI is a separate, frontend-only setting: the proxy answers frontend SSLRequest with no.
 
-The tunnel port is chosen at `db add` (`--port`) or auto-allocated starting at 15432; automatic allocation checks registered ports only, not OS occupancy. Same-name `db add` retains the stored port when `--port` is omitted but replaces the URL, creates a fresh token and resets the connection to enabled.
+The tunnel port is chosen at `db add` (`--port`) or auto-allocated starting at 15432; automatic allocation checks registered ports only, not OS occupancy. Same-name `db add` retains the stored port when `--port` is omitted but replaces the URL, creates a fresh token and resets `enabled` to false.
 
 ## Client Setup
 
@@ -44,6 +44,7 @@ The following human workflow reserves tunnel port `15432` and assumes a backend 
 ```sh
 # Human host terminal: supply the backend URL through stdin, not argv.
 vaulty-keeper db add pgdb --port 15432
+vaulty-keeper db on pgdb
 vaulty-keeper db test pgdb
 vaulty-keeper serve --addr 127.0.0.1:8970
 ```
@@ -66,7 +67,7 @@ The client URI shape is:
 postgresql://<DEDICATED_TOKEN>:x@127.0.0.1:<TUNNEL_PORT>/<DATABASE>?sslmode=disable&connect_timeout=5
 ```
 
-`<...>` values are placeholders, not tested credentials. The tunnel password is ignored by the proxy, so any placeholder works. Bounded reads look like:
+`<...>` values are placeholders, not tested credentials. The tunnel password is ignored by the proxy, so any placeholder works. The base link printed by `db connect` carries no query options; `sslmode=disable&connect_timeout=5` are added here for a deterministic demo. Bounded reads look like:
 
 ```sh
 psql 'postgresql://<TOKEN>:x@127.0.0.1:15432/appdb?sslmode=disable' \
@@ -90,7 +91,8 @@ Whatever psql/JDBC/psycopg etc. can do against a backend account, the tunnel for
 
 - Raw byte forwarding starts only after successful token validation and backend authentication; there is no command-aware framing like the MongoDB relay.
 - No query allowlist, no read-only enforcement, no result redaction. Registering a read-only account makes the connection naturally read-only.
-- Backend TLS is delegated to the client library (`sslmode` in the registered URL). The frontend proxy leg is plaintext; use localhost or an isolated trusted network.
+- Backend TLS is handled by the proxy itself from the registered URL's `sslmode` (see Registered URL); the proxy is not a libpq client. The frontend proxy leg is plaintext; use localhost or an isolated trusted network. A tunnel URI with `sslmode=require` fails because the proxy refuses SSLRequest.
+- The client's requested database name is ignored; the backend database is always the registered URL's. Handshake ParameterStatus advertises `server_version=16.0` regardless of the real backend.
 - Real passwords can travel on the host-to-backend leg (e.g. cleartext/SCRAM exchange); the generated client link deliberately contains only the proxy token, never the backend password. That does not make query results secret-free.
 - Established sessions are not terminated by `db regen`/`db off`; rotation affects new connections, listener shutdown happens on the watcher's roughly two-second reconciliation.
 

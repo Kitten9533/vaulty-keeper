@@ -124,6 +124,10 @@ func readRESPBulk(t *testing.T, conn net.Conn) string {
 
 func startTunnel(t *testing.T, path string, key []byte, port int, token string) {
 	t.Helper()
+	// Add leaves the tunnel off; tests that bind a listener must opt in.
+	if _, err := SetTunnelAll(path, key, false); err != nil {
+		t.Fatal(err)
+	}
 	tun := &Tunnel{Path: path, Key: key, Host: "127.0.0.1", Token: token, Log: io.Discard}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -302,9 +306,13 @@ func TestTunnelHotReload(t *testing.T) {
 	// no connections yet -> port must be closed
 	waitPortGone(t, tunnelPort)
 
-	// add a connection while running -> tunnel appears
+	// add a connection while running -> still off until db on
 	realURL := fmt.Sprintf("redis://:realpass@127.0.0.1:%d/0", fake.port())
 	if err := Add(path, key, "cache", realURL, tunnelPort); err != nil {
+		t.Fatal(err)
+	}
+	waitPortGone(t, tunnelPort)
+	if err := SetTunnel(path, key, "cache", false); err != nil {
 		t.Fatal(err)
 	}
 	waitPort(t, tunnelPort)
@@ -327,6 +335,60 @@ func TestTunnelHotReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitPortGone(t, tunnelPort)
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+func startAndReadLog(t *testing.T, path string, key []byte) string {
+	t.Helper()
+	ch := make(chan string, 16)
+	tun := &Tunnel{
+		Path: path, Key: key, Host: "127.0.0.1", Token: "t",
+		Log: writerFunc(func(p []byte) (int, error) {
+			ch <- string(p)
+			return len(p), nil
+		}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go tun.Start(ctx)
+	select {
+	case s := <-ch:
+		return s
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected startup log")
+		return ""
+	}
+}
+
+func TestStartLogDoesNotClaimAutoStart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	got := startAndReadLog(t, path, testKey(t))
+	if strings.Contains(got, "auto-start") {
+		t.Fatalf("startup log still claims auto-start: %q", got)
+	}
+	if !strings.Contains(got, "db add") {
+		t.Fatalf("empty-store log should mention db add, got %q", got)
+	}
+}
+
+func TestStartLogWhenConnectionsExistButOff(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	key := testKey(t)
+	if err := Add(path, key, "cache", "redis://h", 0); err != nil {
+		t.Fatal(err)
+	}
+	got := startAndReadLog(t, path, key)
+	if strings.Contains(got, "auto-start") {
+		t.Fatalf("startup log still claims auto-start: %q", got)
+	}
+	if strings.Contains(got, "no database connections yet") {
+		t.Fatalf("all-off store is not empty: %q", got)
+	}
 }
 
 // waitPortGone waits until the port stops accepting connections.

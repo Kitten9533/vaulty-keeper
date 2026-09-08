@@ -31,7 +31,8 @@
 
 ## 原则
 
-- 每项主题只有一个现行位置。安全模型只存在于 `security-model.md`；指南链接它而不是复制它。
+- 每项主题只有一个现行位置。安全模型只存在于 `security-model.md`；指南链接它而不是复制它。TLS 证据与 `dbtest.sh` 隔离状态放在其验证状态一节。
 - 所有面向用户的内容默认英文，配 `.zh-CN.md`，顶部有语言切换链接。
 - README 负责安装/入门，AGENTS 负责 agent 约束/检查，指南维护现行用法。
 - 工作被取代后文档即成为历史；用 git tag 归档，而不是留在树内像现行一样。
+- `scripts/check-docs.mjs`（经 `make test`）还要求本索引提到每份 `docs/**/*.md` 指南，且 Makefile 使用 `cp -R docs`，以免压扁 `docs/tunnel/`。

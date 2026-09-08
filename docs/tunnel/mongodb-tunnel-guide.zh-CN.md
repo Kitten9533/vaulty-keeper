@@ -1,6 +1,6 @@
 # MongoDB 隧道指南
 
-> [English](mongodb-tunnel-guide.md) | 中文
+> 中文 | [English](mongodb-tunnel-guide.md)
 >
 > 当前 MongoDB 8 接口，2026-09-07 按源码核对。本指南维护下方带日期的历史验证矩阵；文档更正不构成新的测试/构建证据。通用安全依据见[安全模型](../security-model.zh-CN.md)。
 
@@ -62,6 +62,7 @@ MongoDB 使用现有 DB 流程。由人工检查宿主 DB 密钥，确实缺失�
 ```sh
 # 人工宿主终端：后端 URL 通过 stdin 提供，不放入 argv。
 vaulty-keeper db add mongo-app --port 15438
+vaulty-keeper db on mongo-app
 vaulty-keeper db test mongo-app
 vaulty-keeper serve --addr 127.0.0.1:8970
 ```
@@ -147,7 +148,7 @@ db.getSiblingDB('businessdb').runCommand({
 - 上游 MongoDB 日志不由代理脱敏。人工运维应私下检查后端诊断，不把含秘密的日志贴进 AI 会话。
 - 宿主密钥/存储不能防同用户权限的恶意进程。agent 应运行在不能接触这些资源的独立隔离域。
 - `db regen mongo-app` 为新连接轮换 token；已认证会话保留既有语义。`db off mongo-app` 在通常约两秒的同步后关闭监听，不承诺终止既有会话。`db on mongo-app` 恢复监听。这些控制不是即时会话撤销。
-- 同名 `db add` 未指定端口时保留原端口，但替换 URL、生成新 token 并重置为开启。需重新分发 token，必要时显式恢复关闭状态。修改活跃监听端口时，先关闭并等待端口停止，再更新/开启，或重启自己管理的 serve。enabled 是配置，不是健康；自动分配排除注册端口，不探测 OS 占用。已接受的握手可能保留先前 Resolve 状态。
+- 同名 `db add` 未指定端口时保留原端口，但替换 URL、生成新 token 并把 `enabled` 重置为 false。需重新分发 token；若要监听须再次显式开启。修改活跃监听端口时，先关闭并等待端口停止，再更新/开启，或重启自己管理的 serve。enabled 是配置，不是健康；自动分配排除注册端口，不探测 OS 占用。已接受的握手可能保留先前 Resolve 状态。
 - 与 MongoDB 不同，PG/MySQL/Redis 对新旧注册连接均接受全局 bridge token，轮换专属 token 不撤销该访问权。容器 entrypoint 对 bridge token 只打印 `<set>`/`<unset>` 占位标记，从不输出 token 本身；经环境变量交付的 token 或生成链接仍不得当成无害日志。
 
 ## 安全排错
@@ -193,4 +194,4 @@ go test -mod=readonly -tags=mongointegration ./internal/dbproxy -run '^TestMongo
 
 不提供夹具变量就运行 tagged tests 会跳过真实集成用例，不能作为原生 MongoDB 已通过的证据。上述通过矩阵不代表完整 GUI/自省兼容、实际 MongoDB TLS 或交互 shell 已验证。
 
-本指南源码核对：[注册 URL 解析器](../../internal/dbproxy/mongodb_config.go)、[后端认证/TLS/截止时间](../../internal/dbproxy/mongodb_auth.go)、[持续转发](../../internal/dbproxy/mongodb.go)、[命令/元数据策略](../../internal/dbproxy/mongodb_policy.go)、[客户端链接](../../internal/dbproxy/links.go)、[CLI 提示/直连 shell](../../internal/cli/db.go)、[watcher 启动](../../internal/cli/remote.go)、[存储生命周期](../../internal/dbproxy/store.go)及[原生夹具](../../scripts/mongotest.sh)。MySQL TLS C01 已修复（有单测；一次性原生 TLS 查询通过但未被集成测试固化）。旧 `scripts/dbtest.sh` 已重构为隔离脚本（C02 完成），可安全运行；C01 与 C02 都不是新发现的 Mongo TLS 缺陷。
+本指南源码核对：[注册 URL 解析器](../../internal/dbproxy/mongodb_config.go)、[后端认证/TLS/截止时间](../../internal/dbproxy/mongodb_auth.go)、[持续转发](../../internal/dbproxy/mongodb.go)、[命令/元数据策略](../../internal/dbproxy/mongodb_policy.go)、[客户端链接](../../internal/dbproxy/links.go)、[CLI 提示/直连 shell](../../internal/cli/db.go)、[watcher 启动](../../internal/cli/remote.go)、[存储生命周期](../../internal/dbproxy/store.go)及[原生夹具](../../scripts/mongotest.sh)。MySQL TLS 与 `dbtest.sh` 隔离状态见[安全模型](../security-model.zh-CN.md#8--验证状态)，不在本指南。

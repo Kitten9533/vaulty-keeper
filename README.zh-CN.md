@@ -8,7 +8,7 @@
 
 ## 文档导航
 
-每份面向用户的文档都是英文默认 + 顶部链接的 `.zh-CN.md` 配对版。数据库隧道是主打功能，其实现与用法见下方三篇 `db-*` 指南。
+每份面向用户的文档都是英文默认 + 顶部链接的 `.zh-CN.md` 配对版。数据库隧道是主打功能：架构与夹具见 `db-proxy-*` 指南，逐协议操作见 `docs/tunnel/`。
 
 | 想做什么 | 看这里 |
 |---|---|
@@ -45,7 +45,7 @@ npm 渠道通过包管理器下载预编译二进制，而不是浏览器，因�
 
 通过 npm 安装或源码构建不会触发这些提示，因为文件不会带有浏览器下载标记。
 
-本 README 描述当前源码工作区。最新发布是 **v0.8.0**（2026-09-07）：包含 MongoDB 8 隧道支持，压缩包内含两版 README、LICENSE、AGENTS.md 和当前 `docs/` 指南（索引、安全模型与五份指南，中英双语）。由当前工作区构建的压缩包还会额外打包 CONTRIBUTING.md、SECURITY.md 及较新的 `cli-reference`、`container-isolation` 和逐协议隧道（`postgres` / `mysql` / `redis`）指南，该打包尚未随发布发布。历史实现记录归档在 git tag `docs-superpowers-archive`，不在本树或压缩包内。更早的归档如 **0.6.0** 不含 `docs/`；如需离线阅读，请在[源码仓库](https://github.com/Kitten9533/vaulty-keeper)选择对应 tag 的 `docs/`。本工作区指南不是早于 v0.8.0 的二进制的能力证据。
+本 README 描述当前源码工作区。最新发布是 **v0.9.0**（2026-09-08）：新 `db add` 注册保持关闭，直到 `db on` / UI「开启隧道」；既无 `enabled` 也无 `disabled` 的旧 `db.json` 条目保持开启。压缩包内含两版 README、LICENSE、AGENTS.md、CONTRIBUTING.md、SECURITY.md 和当前 `docs/` 指南（索引、安全模型、cli-reference、container-isolation、ui-guide 与逐协议隧道指南，中英双语）。历史实现记录归档在 git tag `docs-superpowers-archive`，不在本树或压缩包内。更早的归档如 **0.6.0** 不含 `docs/`；如需离线阅读，请在[源码仓库](https://github.com/Kitten9533/vaulty-keeper)选择对应 tag 的 `docs/`。本工作区指南不是早于 v0.9.0 的二进制的能力证据。
 
 以下初始化由人工在宿主执行，会创建本地密钥/状态；不是隔离测试，也不是让 agent 访问真实秘密的指令：
 
@@ -174,6 +174,7 @@ docker exec vaulty-readme-pg pg_isready -U app -d appdb
 ```sh
 printf '%s\n' 'postgres://app:synthetic-demo-pass@127.0.0.1:25432/appdb?sslmode=disable' \
   | vaulty-keeper db add readme-orders --port 15432
+vaulty-keeper db on readme-orders
 vaulty-keeper db list
 vaulty-keeper serve --addr 127.0.0.1:8970   # 长驻，等待监听成功输出
 ```
@@ -205,12 +206,12 @@ docker stop vaulty-readme-pg   # --rm 删除这个演示容器
 - **同类可配多个**：每个连接独立名称和隧道端口，受可用端口/资源限制。`db add` 可显式指定或自动分配端口，在宿主逐个获取客户端命令。
 - **宿主与容器**：`db connect <name> --container` 必须在持有本地 DB store/key 的宿主执行，仅向获授权客户端交付生成的命令/token。无密钥容器通过 `remote dblist`（或 `db list` 回退）取元数据，不能用 `db connect` 生成专属 token。不要为此挂载宿主密钥。`--container` 只改变打印地址，不改变监听；容器访问需要可达且受限的宿主接口。
 - **Watcher 前提**：`serve` 仅在启动时 DB store 已存在且密钥可用才启动监听同步。bridge-only 启动后首次注册数据库，需要重启 `serve` 并重新分发新的全局 token。已启动的 watcher 每 2 秒同步增删/on/off，新连接读取 token 变化。修改已有端口可能需要重启监听（`off`，等关闭后再 `on`）。
-- **隧道默认开启**；`db off <name>` 关闭单个监听，`db off --all` 关闭全部，在 watcher 下次同步时生效。`db on` 重新启用；列表显示关闭状态，UI 提供逐行开启/关闭按钮。
+- **`db add` 后隧道保持关闭**（`db.json` 的 `enabled` 默认为 false）；`db on <name>`（或 UI「开启隧道」）在 watcher 下次同步时开始监听。`db off <name>` / `db off --all` 关闭。列表显示关闭状态。
 - `vaulty-keeper db connect <name>` 打印**可直接运行的带 token 命令**（psql/mysql/redis-cli/mongosh）；`--container` 使用 `host.docker.internal`，`--host` 选择主机，`--cmd` 仅输出一行。PG/MySQL 以 token 为用户、密码占位 `x`；Redis 以 token 为密码、用户占位 `x`；MongoDB 使用**用户 `vaulty`、专属 token 作为 SCRAM-SHA-256 密码、`authSource=admin`**，并带 `directConnection=true&retryWrites=false`。生成的 mongosh 命令只把隧道 URI/token 放入 argv，不含后端 URI；token 是供获授权 agent 使用的访问凭据，不是无害公开数据。
 - `vaulty-keeper db regen <name>`（或 `db regen --all`）轮换 128 位专属 token，随后重新分发生成的链接；既有会话保留，全局 token 不受影响。**新旧 PG/MySQL/Redis 连接都接受全局或专属 token**；CLI 优先打印专属 token 不代表禁用了全局访问。MongoDB 仅接受专属 token。
-- 同名 `db add` 未指定端口时保留原端口，但生成新 token 并恢复 enabled。之后须重新分发链接并检查暴露范围。UI enabled/off 是保存的配置，不是监听/后端健康状态；`Broken` 表示注册 URL 解密失败，token 解密可在 Resolve 时单独失败。
+- 同名 `db add` 未指定端口时保留原端口，但生成新 token 并把 `enabled` 重置为 false。之后须重新分发链接；若要监听须再次显式开启。UI 开/关是保存的配置，不是监听/后端健康状态；`Broken` 表示注册 URL 解密失败，token 解密可在 Resolve 时单独失败。
 - **凭据注入**：PG 使用 trust 风格前端认证；MySQL 替换认证应答（`mysql_native_password` / `caching_sha2_password`）；Redis 代发后端 `AUTH`；MongoDB 使用注册的后端 SHA-256/SHA-1 凭据/认证库独立认证。隧道客户端不需要真实密码。
-- **后端 TLS**：PG 由客户端库处理 `sslmode`，Redis 使用 `rediss://`。**MySQL `?tls=true` 会与后端协商 TLS**（C01 修复：已有单测；曾对 `require_secure_transport=ON` 的 MySQL 8 做过一次性原生 TLS 查询，经隧道可见 `Ssl_cipher` 非空、TLSv1.3，但该证据未被集成测试固化——依赖前请对真实 TLS 后端复测）；如需信任私有/自签 CA，加 `tlsCAFile=<路径>`。MongoDB 实现了 `tls=true`/`ssl=true` 和可选 `tlsCAFile` 的证书/主机名验证，但真实 MongoDB TLS 仍未验证。客户端到代理为明文，仅用于 localhost 或隔离可信网络。
+- **后端 TLS**：PG 的 `sslmode` 由代理自身处理，不是 libpq（三档强制 TLS 共用一条校验主机名的 TLS 拨号；前端拒绝 SSLRequest——隧道 URI 请用 `sslmode=disable`）。见 [PostgreSQL 指南](docs/tunnel/postgres-tunnel-guide.zh-CN.md)。Redis 使用 `rediss://`。**MySQL `?tls=true` 会与后端协商 TLS**；如需信任私有/自签 CA，加 `tlsCAFile=<路径>`。MongoDB 实现了 `tls=true`/`ssl=true` 和可选 `tlsCAFile` 的证书/主机名验证，但真实 MongoDB TLS 仍未验证。证据与缺口见[安全模型](docs/security-model.zh-CN.md#8--验证状态)。客户端到代理为明文，仅用于 localhost 或隔离可信网络。
 - **只读控制**：代理层不强制只读，用只读账号的 URL 注册即天然只读
 - `vaulty-keeper db shell <name>` 在宿主直接打开已安装的原生客户端（stdin-TTY 门禁）。密码使用子进程环境变量；MySQL/Redis 主机和 MySQL 用户仍可能进入 argv。MongoDB 通过临时子进程环境变量传入后端 URI，再由启动脚本移除。此流程不是脱敏隧道访问。
 - **MongoDB 8** 支持单固定端点上的常见读取、要求服务端写入确认的 CRUD（不是人工审批）、已审查只读聚合及游标。后端账号需要 `listCollections` 权限以检查普通集合；不支持视图/时序、事务、可重试写入、SRV/故障转移、压缩或完整管理/GUI 兼容。常见不支持的选项/命令包括 `comment`、`collation`、`create` 和 `createIndexes`。对允许的集合使用有界读取，例如 `db.getCollection('orders').find({}).limit(5)`。[指南](docs/tunnel/mongodb-tunnel-guide.zh-CN.md)维护完整密码提示命令、注册后端 URL 与客户端 URI 的区别及排错；仅错误码 13 不能区分代理策略和后端角色拒绝。
@@ -251,7 +252,7 @@ docker stop vaulty-readme-pg   # --rm 删除这个演示容器
 - `apollo set/unset/mark`、`init`、`rm --yes` — 改变状态，先核对范围、值及覆盖/删除影响
 - `remote list|get|compare` — 经掩码代理读，**永远只有掩码**（即使 key 标记为安全）
 - `db list` / `remote dblist` — 只列连接名/类型/端口，**不返回 URL**
-- `db add` — 写入加密 URL 和新 token；stdin 不清除上游历史或终端回显。同名注册重置 token/enabled 状态。真实 URL 应由可信人工提供，agent 不得自行读取。
+- `db add` — 写入加密 URL 和新 token，`enabled=false`；stdin 不清除上游历史或终端回显。同名注册重置 token 并把隧道关掉。真实 URL 应由可信人工提供，agent 不得自行读取。
 
 **需要放行给 AI 的 key**：先显式标记为安全，AI 才看得到明文（例如 `APP_NAME`、`LOG_LEVEL` 这类确定无敏感内容的值）：
 - `apollo set <env> <key> <value> --appid xx --plain`（改值时同时标记）

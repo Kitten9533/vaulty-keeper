@@ -171,7 +171,8 @@ type dbAddRequest struct {
 	Port   int     `json:"port"`
 }
 
-// dbAdd registers a new connection (the URL is encrypted at rest).
+// dbAdd registers a new connection (the URL is encrypted at rest). The
+// tunnel stays off until POST /api/db/tunnel with enabled:true.
 func (h *handler) dbAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -383,7 +384,7 @@ func buildConnectInfo(conn dbproxy.Conn, token, host string) (dbConnectInfo, err
 	if token == "" {
 		info.Note = "serve is not running or no bridge token is available; cannot build token-based commands"
 	}
-	if conn.Disabled {
+	if !conn.Enabled {
 		note := "the tunnel for this connection is off, links below are currently unavailable (turn it on in the UI or via 'vaulty-keeper db on " + conn.Name + "')"
 		if info.Note != "" {
 			note = info.Note + "; " + note
@@ -481,11 +482,13 @@ func uiBridgeToken() string {
 type dbTunnelRequest struct {
 	Name    string `json:"name"`
 	Enabled bool   `json:"enabled"`
+	All     bool   `json:"all"`
 }
 
 // dbTunnel turns a connection's tunnel on (enabled:true) or off
-// (enabled:false). Only the flag changes, never any plaintext; the host's
-// serve picks the change up within ~2s (it syncs db.json). Token-gated.
+// (enabled:false). all:true applies to every connection. Only the flag
+// changes, never any plaintext; the host's serve picks the change up
+// within ~2s (it syncs db.json). Token-gated.
 func (h *handler) dbTunnel(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -501,13 +504,26 @@ func (h *handler) dbTunnel(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request body")
 		return
 	}
-	if req.Name == "" {
+	if req.All && req.Name != "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_db_tunnel", "no name allowed with all:true")
+		return
+	}
+	if !req.All && req.Name == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_db_tunnel", "missing name")
 		return
 	}
 	key, err := h.dbKey()
 	if err != nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "db_key_unavailable", "database key unavailable")
+		return
+	}
+	if req.All {
+		names, err := dbproxy.SetTunnelAll(store, key, !req.Enabled)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "db_tunnel_failed", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": req.Enabled, "updated": names})
 		return
 	}
 	if err := dbproxy.SetTunnel(store, key, req.Name, !req.Enabled); err != nil {

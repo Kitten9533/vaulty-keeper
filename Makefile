@@ -17,7 +17,8 @@ check-ui: require-node
 	node scripts/check-ui.mjs
 
 # docs-check runs static checks over the Markdown tree (bilingual pairing,
-# language-switch links, code-fence parity, relative link targets). It keeps
+# language-switch links, code-fence parity, relative link targets, index
+# coverage, Makefile packaging, backtick docs/scripts paths). It keeps
 # the docs/ guides and root READMEs internally consistent.
 docs-check: require-node
 	node scripts/check-docs.mjs
@@ -29,29 +30,18 @@ install: build
 	mkdir -p $(HOME)/.local/bin
 	ln -sf $(CURDIR)/$(BIN) $(HOME)/.local/bin/vaulty-keeper
 
-# Current guides bundled into every archive so the packaged README's docs/*.md
-# relative links resolve offline. Historical implementation records are archived
-# under git tag docs-superpowers-archive and are not shipped, by design.
-DOCS := docs/README.md docs/README.zh-CN.md \
-        docs/security-model.md docs/security-model.zh-CN.md \
-        docs/cli-reference.md docs/cli-reference.zh-CN.md \
-        docs/apollo-snapshot-guide.md docs/apollo-snapshot-guide.zh-CN.md \
-        docs/ui-guide.md docs/ui-guide.zh-CN.md \
-        docs/db-proxy-architecture.md docs/db-proxy-architecture.zh-CN.md \
-        docs/db-proxy-examples.md docs/db-proxy-examples.zh-CN.md \
-        docs/tunnel/postgres-tunnel-guide.md docs/postgres-tunnel-guide.zh-CN.md \
-        docs/tunnel/mysql-tunnel-guide.md docs/mysql-tunnel-guide.zh-CN.md \
-        docs/tunnel/redis-tunnel-guide.md docs/redis-tunnel-guide.zh-CN.md \
-        docs/tunnel/mongodb-tunnel-guide.md docs/mongodb-tunnel-guide.zh-CN.md \
-        docs/container-isolation.md docs/container-isolation.zh-CN.md
+# Current guides bundled into every archive so the packaged README's
+# docs/... relative links resolve offline. Copy the docs/ tree (including
+# docs/tunnel/) rather than flattening. Historical implementation records
+# are archived under git tag docs-superpowers-archive and are not shipped.
 
 # Cross-compile release binaries into release/ (one tarball/zip per platform,
 # including the READMEs, LICENSE, AGENTS.md, CONTRIBUTING.md, SECURITY.md and
 # the current docs/ guides), ready to attach to a GitHub release.
 release:
-	rm -rf release && mkdir -p release/docs
+	rm -rf release && mkdir -p release
 	cp README.md README.zh-CN.md LICENSE AGENTS.md CONTRIBUTING.md CONTRIBUTING.zh-CN.md SECURITY.md SECURITY.zh-CN.md release/
-	cp $(DOCS) release/docs/
+	cp -R docs release/
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
 		ext=""; \

@@ -4,11 +4,11 @@
 
 适用于当前工作区的 PG/MySQL/Redis。下方完整合成步骤已按源码核对，2026-09-07 文档更正期间**没有执行**；预期结果不是测试输出。配套见[架构](db-proxy-architecture.zh-CN.md)及统一[安全模型](security-model.zh-CN.md)；URL 选项、客户端设置与排错见逐协议操作指南（[PostgreSQL](tunnel/postgres-tunnel-guide.zh-CN.md) / [MySQL](tunnel/mysql-tunnel-guide.zh-CN.md) / [Redis](tunnel/redis-tunnel-guide.zh-CN.md)）。MongoDB 8 有独立[指南和历史验证矩阵](tunnel/mongodb-tunnel-guide.zh-CN.md)：固定单端点、`vaulty` 加专属密码 token、无全局兜底、持续命令/元数据检查，不承诺完整 GUI 支持或即时撤销会话。
 
-**`scripts/dbtest.sh` 已隔离重构，可以安全运行（C02 完成）：** 它按 PID 与容器标签跟踪自己启动的 serve 和容器，使用每次运行独立的临时目录和假 HOME、合成密钥，`--clean` 只清理登记的运行。历史版本会宽泛终止匹配的 serve 进程、删除固定容器 `aipg`/`aimysql8`/`aimariadb`/`airedis` 及固定 `/tmp/vaulty-keeper-dbtest*` 目录/日志，并可能覆盖真实 HOME 的 bridge-token——当前脚本均不再适用。其镜像是 PostgreSQL `17.6-alpine`、MySQL `8.0`（历史为 8.0.46，不是 8.4/MariaDB）和 Redis `7`。
+**`scripts/dbtest.sh` 已隔离，可以安全运行。** 隔离细节见 [CONTRIBUTING](../CONTRIBUTING.zh-CN.md) 和[安全模型验证状态](security-model.zh-CN.md#8--验证状态)。其镜像是 PostgreSQL `17.6-alpine`、MySQL `8.0`（历史为 8.0.46，不是 8.4/MariaDB）和 Redis `7`。
 
 ## 合成夹具
 
-只在可丢弃的本地开发环境、仓库根目录执行，预先备好当前构建的 `bin/vaulty-keeper`。前提：Bash、Node、有权拉取/运行镜像的 Docker，以及 PATH 中的宿主 `psql`、MySQL 8 `mysql`、`redis-cli`。数据库镜像和仓库 agent 镜像不会安装这些宿主客户端。源码构建需要 Go，`make test` 还需要 Node。最新发布 **v0.8.0** 已包含当前 DB 隧道与 MongoDB 行为并打包 `docs/` 指南，其预编译归档是这里配方对应的参考版本；更早的 0.6.0 归档缺少链接的 `docs/`，也不代表当前工作区功能。
+只在可丢弃的本地开发环境、仓库根目录执行，预先备好当前构建的 `bin/vaulty-keeper`。前提：Bash、Node、有权拉取/运行镜像的 Docker，以及 PATH 中的宿主 `psql`、MySQL 8 `mysql`、`redis-cli`。数据库镜像和仓库 agent 镜像不会安装这些宿主客户端。源码构建需要 Go，`make test` 还需要 Node。最新发布 **v0.9.0** 已包含当前 DB 隧道行为并打包 `docs/` 指南，其预编译归档是这里配方对应的参考版本；更早的 0.6.0 归档缺少链接的 `docs/`，也不代表当前工作区功能。
 
 下方密码/数据全是公开合成夹具，不是生产输入。步骤创建不绑定宿主目录的临时数据库容器、唯一临时 HOME/存储/日志、显式合成密钥及自己管理的 serve PID；退出只清理这些资源，包括容器匿名卷。不运行 `db init`，不使用真实 vault，不调用 Keychain。不要用真实凭据/密钥替换。Docker 镜像拉取/缓存会保留，不停止 Docker 或无关容器。镜像 tag 不是不可变 digest，需逐字节复现时应记录解析后的 digest。
 
@@ -22,7 +22,7 @@
 | `mysql-native` | 59919 | `shop` / `nativeuser` | 15436 | 同一 `orders`；仅 SELECT |
 | `cache` | 59920 | Redis 库 `0` | 15434 | `demo=ready`；夹具密码账号可写 |
 
-HTTP 桥为 `127.0.0.1:8972`，所有端口必须空闲。预检查只检查当时占用，不预留端口；发生竞争或后续绑定失败时应排查，不得终止无关进程。本夹具有意使用明文 loopback，因此不是 TLS 演示。**MySQL `?tls=true` 已修复**（原 C01：`CLIENT_SSL` 能力位 + TLS 升级转发；一次性原生 TLS 查询通过，但该证据未被本仓库集成测试固化——依赖前请复测；私有/自签 CA 加 `tlsCAFile=<路径>`）。不得关闭真实服务必需的 TLS。
+HTTP 桥为 `127.0.0.1:8972`，所有端口必须空闲。预检查只检查当时占用，不预留端口；发生竞争或后续绑定失败时应排查，不得终止无关进程。本夹具有意使用明文 loopback，因此不是 TLS 演示。MySQL `?tls=true` 与剩余 TLS 证据见[安全模型](security-model.zh-CN.md#8--验证状态)和 [MySQL 指南](tunnel/mysql-tunnel-guide.zh-CN.md)。不得关闭真实服务必需的 TLS。
 
 ```sh
 bash <<'BASH'
@@ -122,6 +122,7 @@ printf '%s' 'mysql://sha2user:sha2pass@127.0.0.1:59919/shop_billing' | "${VK[@]}
 printf '%s' 'mysql://sha2user:sha2pass@127.0.0.1:59919/shop_reporting' | "${VK[@]}" db add mysql-reporting --port 15443
 printf '%s' 'mysql://nativeuser:nativepass@127.0.0.1:59919/shop' | "${VK[@]}" db add mysql-native --port 15436
 printf '%s' 'redis://:redispass@127.0.0.1:59920/0' | "${VK[@]}" db add cache --port 15434
+"${VK[@]}" db on --all
 "${VK[@]}" db list
 "${VK[@]}" serve --addr 127.0.0.1:8972 --dir "$LAB/snapshots" >"$LAB/serve.log" 2>&1 &
 SERVE_PID=$!
@@ -163,7 +164,7 @@ redis-cli -h 127.0.0.1 -p 15434 -a "$TOKEN" --no-auth-warning SET last_sync fixt
 BASH
 ```
 
-复用固定存储密钥仅是夹具简化，不是生产三密钥模型。脚本使用临时全局 token，展示 PG/MySQL/Redis 对**新**注册连接的实际接受行为。正常使用应获取并分发连接专属 token。步骤不是经过测试的 C02 替代脚本、完整安全套件、TLS 测试或容器客户端测试。负向用例非零退出本身不能证明权限限制成立，还需核对同连接成功查询和具体拒绝原因。
+复用固定存储密钥仅是夹具简化，不是生产三密钥模型。脚本使用临时全局 token，展示 PG/MySQL/Redis 对**新**注册连接的实际接受行为。正常使用应获取并分发连接专属 token。步骤不是经过测试的 `scripts/dbtest.sh` 替代脚本、完整安全套件、TLS 测试或容器客户端测试。负向用例非零退出本身不能证明权限限制成立，还需核对同连接成功查询和具体拒绝原因。
 
 ## 人工宿主流程
 
@@ -211,7 +212,7 @@ vaulty-keeper db off pg-readonly
 vaulty-keeper db on pg-readonly
 ```
 
-这是三个独立控制，不是撤销全部会话的操作序列。轮换改变后续连接的专属 token 认证；已接受的握手/会话可能保留旧状态。全局 token 对 PG/MySQL/Redis 仍有效。off/rm 在 watcher 约两秒同步时关闭监听，不主动结束已建立会话。regen 或同名 add 后需重新分发 token。同名 add 未指定端口时保留原端口，但**生成新 token 并重置为开启**，即使原先已关闭。修改端口前需停止监听，更新后再开启；活跃监听不会自动重绑到新存储端口。
+这是三个独立控制，不是撤销全部会话的操作序列。轮换改变后续连接的专属 token 认证；已接受的握手/会话可能保留旧状态。全局 token 对 PG/MySQL/Redis 仍有效。off/rm 在 watcher 约两秒同步时关闭监听，不主动结束已建立会话。regen 或同名 add 后需重新分发 token。同名 add 未指定端口时保留原端口，但**生成新 token 并把 `enabled` 重置为 false**，即使原先已开启。修改端口前需停止监听，更新后再开启；活跃监听不会自动重绑到新存储端口。
 
 | 症状 | 安全检查 |
 |---|---|

@@ -413,17 +413,17 @@ func remoteDBListCmd(args []string) int {
 	}
 	var res struct {
 		Connections []struct {
-			Name     string `json:"name"`
-			Type     string `json:"type"`
-			Port     int    `json:"port"`
-			Disabled bool   `json:"disabled"`
+			Name    string `json:"name"`
+			Type    string `json:"type"`
+			Port    int    `json:"port"`
+			Enabled bool   `json:"enabled"`
 		} `json:"connections"`
 	}
 	if err := json.Unmarshal(body, &res); err != nil {
 		return fail("remote dblist: %v", err)
 	}
 	for _, c := range res.Connections {
-		if c.Disabled {
+		if !c.Enabled {
 			fmt.Printf("%s (%s) :%d [%s]\n", c.Name, c.Type, c.Port, i18n.T("db.off-mark"))
 		} else {
 			fmt.Printf("%s (%s) :%d\n", c.Name, c.Type, c.Port)

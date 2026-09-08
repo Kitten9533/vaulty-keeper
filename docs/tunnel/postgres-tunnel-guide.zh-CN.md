@@ -31,9 +31,9 @@ PostgreSQL 对**新旧注册**都接受专属 token **或当前 serve 的全局 
 
 ## 注册 URL
 
-`postgres://` 和 `postgresql://` 都接受。URL 携带后端用户名、密码、主机、端口和数据库；`sslmode` 等查询选项委托给宿主到后端连接上的 PostgreSQL 客户端库。隧道 URI 上的客户端 `sslmode=disable` 是另一回事，只影响前端这一侧。
+`postgres://` 和 `postgresql://` 都接受。URL 携带后端用户名、密码、主机、端口和数据库。注册 URL 的 `sslmode` 由代理自身在宿主到后端连接上处理：`require`/`verify-ca`/`verify-full` 强制 TLS，`prefer`/`allow` 先试 TLS、失败回退明文，`disable`/缺省为明文。上述三档强制 TLS 共用一条路径（Go `crypto/tls` 校验主机名；直接 TLS 拨号，不是 PostgreSQL SSLRequest）。隧道 URI 上的客户端 `sslmode=disable` 是另一回事，只影响前端：代理对前端 SSLRequest 回答拒绝。
 
-隧道端口在 `db add`（`--port`）时指定，或从 15432 起自动分配；自动分配只检查已注册端口，不探测 OS 端口占用。同名 `db add` 省略 `--port` 时保留原端口，但替换 URL、生成新 token 并把连接重置为启用。
+隧道端口在 `db add`（`--port`）时指定，或从 15432 起自动分配；自动分配只检查已注册端口，不探测 OS 端口占用。同名 `db add` 省略 `--port` 时保留原端口，但替换 URL、生成新 token 并把 `enabled` 重置为 false。
 
 ## 客户端设置
 
@@ -44,6 +44,7 @@ PostgreSQL 对**新旧注册**都接受专属 token **或当前 serve 的全局 
 ```sh
 # 人工宿主终端：通过 stdin 提供后端 URL，不要放进 argv。
 vaulty-keeper db add pgdb --port 15432
+vaulty-keeper db on pgdb
 vaulty-keeper db test pgdb
 vaulty-keeper serve --addr 127.0.0.1:8970
 ```
@@ -66,7 +67,7 @@ vaulty-keeper db connect pgdb --cmd
 postgresql://<专属TOKEN>:x@127.0.0.1:<隧道端口>/<数据库>?sslmode=disable&connect_timeout=5
 ```
 
-`<...>` 是占位符，不是测试凭据。代理忽略隧道密码，任意占位均可。有界读示例：
+`<...>` 是占位符，不是测试凭据。代理忽略隧道密码，任意占位均可。`db connect` 打印的基础链接不带查询参数，`sslmode=disable&connect_timeout=5` 是本示例自行追加的。有界读示例：
 
 ```sh
 psql 'postgresql://<TOKEN>:x@127.0.0.1:15432/appdb?sslmode=disable' \
@@ -90,7 +91,8 @@ psql/JDBC/psycopg 等对后端账号能做的事，隧道都转发，无逐命�
 
 - 只有在 token 验证与后端认证成功后才开始原始字节转发；没有 MongoDB relay 那样的命令感知分帧。
 - 无查询白名单、无只读强制、无结果脱敏。注册只读账号连接自然只读。
-- 后端 TLS 委托给客户端库（注册 URL 里的 `sslmode`）。前端代理这一段是明文；请用 localhost 或隔离可信网络。
+- 后端 TLS 由代理自身按注册 URL 的 `sslmode` 处理（见注册 URL），代理不是 libpq 客户端。前端代理这一段是明文；请用 localhost 或隔离可信网络。隧道 URI 上 `sslmode=require` 会失败，因为代理拒绝 SSLRequest。
+- 客户端请求的数据库名会被忽略；后端数据库始终是注册 URL 里的。握手 ParameterStatus 固定宣告 `server_version=16.0`，与真实后端无关。
 - 真实密码可能出现在宿主到后端这一段（如明文/SCRAM 交换）；生成的客户端链接只含代理 token、不含后端密码，但查询结果仍可能带回秘密。
 - `db regen`/`db off` 不会终止已建立会话；轮换只影响新连接，监听关闭发生在 watcher 约两秒一次的同步时。
 

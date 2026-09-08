@@ -89,7 +89,7 @@ make build
 ## 文档约定
 
 - 面向用户的文档**英文默认 + `.zh-CN.md` 配对**，每份文件顶部有语言切换链接，两种语言内容一致。`AGENTS.md` 是唯一例外（agent 操作约束，仅中文）。
-- 每个主题只有一个现行位置：安全模型只放 `docs/security-model.md`；指南链接它而不是复制。新增、移动或归档指南时更新 `docs/README.md`。
+- 每个主题只有一个现行位置：安全模型只放 `docs/security-model.md`；指南链接它而不是复制。新增、移动或归档指南时更新 `docs/README.md`。`make test` 会跑 `scripts/check-docs.mjs`，还要求索引列出每份 `docs/**/*.md` 指南、Makefile 使用 `cp -R docs`（不压扁 `docs/tunnel/`），以及反引号中的 `docs/` / `scripts/` 路径真实存在。
 - 历史实现记录（计划/设计）用 git tag 归档（如 `docs-superpowers-archive`），不提交进树；不要把归档记录改写成现行指令，也不要对其中的命令按真实数据重放。
 - 行为变化要在同一次改动中同步更新对应文档，让文档描述当前源码而不是旧承诺。
 

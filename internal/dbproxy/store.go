@@ -44,18 +44,19 @@ var connNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 // serialized, logged, or returned to a tunnel client (json:"-" is a hard
 // guarantee it never appears in any JSON output). Token is the connection's
 // dedicated tunnel token (empty for legacy entries, which then use the global
-// bridge token). Disabled marks a connection whose tunnel is turned off with
-// `db off`; its port is not listened on until `db on`. Broken marks an entry
-// whose ciphertext cannot be decrypted with the current key (stale key); it is
-// still listed so it can be removed, but has no usable URL.
+// bridge token). Enabled is the persisted listener intent (`db on` / UI
+// "turn on tunnel"); Add() writes false, while a missing field in db.json
+// is treated as on (see storedConn.UnmarshalJSON). Broken marks an entry
+// whose ciphertext cannot be decrypted with the current key (stale key);
+// it is still listed so it can be removed, but has no usable URL.
 type Conn struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	URL      string `json:"-"`
-	Port     int    `json:"port"`
-	Token    string `json:"-"`
-	Disabled bool   `json:"disabled,omitempty"`
-	Broken   bool   `json:"broken,omitempty"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	URL     string `json:"-"`
+	Port    int    `json:"port"`
+	Token   string `json:"-"`
+	Enabled bool   `json:"enabled"`
+	Broken  bool   `json:"broken,omitempty"`
 }
 
 // storedConn is the on-disk representation: ciphertext plus the allocated
@@ -64,9 +65,12 @@ type Conn struct {
 // precisely instead of surfacing as a cryptic "message authentication failed".
 // Type is stored in plaintext so listing needs no decryption (a stale-key
 // entry cannot block the whole list). TokenEnc/TokenNonce hold the
-// connection's dedicated tunnel token, sealed with the same DB key. Disabled
-// persists the `db off` state; the zero value (absent in old files) means the
-// tunnel is on, so legacy connections keep working after an upgrade.
+// connection's dedicated tunnel token, sealed with the same DB key. Enabled
+// persists `db on`/`db off`; it is always written (including false) so a
+// later load cannot treat a new Add() as on. Legacy files that still have
+// `disabled` are mapped on load: disabled=true → enabled=false,
+// disabled=false → enabled=true; a file with neither field is on (old
+// omitempty default).
 type storedConn struct {
 	URLEnc     string `json:"url_cipher"`
 	Nonce      string `json:"nonce"`
@@ -75,11 +79,48 @@ type storedConn struct {
 	Port       int    `json:"port,omitempty"`
 	TokenEnc   string `json:"token_cipher,omitempty"`
 	TokenNonce string `json:"token_nonce,omitempty"`
-	Disabled   bool   `json:"disabled,omitempty"`
+	Enabled    bool   `json:"enabled"`
 }
 
 type store struct {
 	Conns map[string]storedConn `json:"connections"`
+}
+
+// UnmarshalJSON maps the current `enabled` field and the legacy `disabled`
+// field onto Enabled. Neither key present means on (pre-enabled-field files
+// omitted disabled when the tunnel was listening).
+func (sc *storedConn) UnmarshalJSON(data []byte) error {
+	type wire struct {
+		URLEnc     string `json:"url_cipher"`
+		Nonce      string `json:"nonce"`
+		KeyID      string `json:"key_id,omitempty"`
+		Type       string `json:"type,omitempty"`
+		Port       int    `json:"port,omitempty"`
+		TokenEnc   string `json:"token_cipher,omitempty"`
+		TokenNonce string `json:"token_nonce,omitempty"`
+		Enabled    *bool  `json:"enabled"`
+		Disabled   *bool  `json:"disabled"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	sc.URLEnc = w.URLEnc
+	sc.Nonce = w.Nonce
+	sc.KeyID = w.KeyID
+	sc.Type = w.Type
+	sc.Port = w.Port
+	sc.TokenEnc = w.TokenEnc
+	sc.TokenNonce = w.TokenNonce
+	switch {
+	case w.Enabled != nil:
+		sc.Enabled = *w.Enabled
+	case w.Disabled != nil:
+		sc.Enabled = !*w.Disabled
+	default:
+		sc.Enabled = true
+	}
+	return nil
 }
 
 // DefaultPath returns the store file under <home>/.vaulty.
@@ -263,7 +304,8 @@ func allocPort(s *store, requested, base int) (int, error) {
 // Add creates or updates a named connection, encrypting rawURL with key.
 // port==0 keeps the connection's existing tunnel port when re-adding the same
 // name (so a URL fix does not silently change the port), and auto-allocates a
-// fresh stable port for a new connection.
+// fresh stable port for a new connection. The tunnel is always left off
+// (enabled=false); opening it requires an explicit db on / UI action.
 func Add(path string, key []byte, name, rawURL string, port int) error {
 	if err := ValidateConnName(name); err != nil {
 		return err
@@ -300,6 +342,7 @@ func Add(path string, key []byte, name, rawURL string, port int) error {
 	}
 	sc.Type = typ
 	sc.Port = allocated
+	sc.Enabled = false // register never opens a listener; db on / UI must
 	s.Conns[name] = sc
 	return s.save(path)
 }
@@ -379,8 +422,8 @@ func Remove(path string, key []byte, name string) error {
 }
 
 // SetTunnel turns a connection's tunnel on (disabled=false) or off
-// (disabled=true). It only touches the Disabled flag — it never needs to
-// decrypt the URL, so even a broken (stale-key) entry can be disabled. The
+// (disabled=true). It only touches the Enabled flag — it never needs to
+// decrypt the URL, so even a broken (stale-key) entry can be toggled. The
 // running serve picks the change up on its next db.json sync (≤2s).
 func SetTunnel(path string, key []byte, name string, disabled bool) error {
 	if err := ValidateConnName(name); err != nil {
@@ -394,7 +437,7 @@ func SetTunnel(path string, key []byte, name string, disabled bool) error {
 	if !ok {
 		return fmt.Errorf("connection %q does not exist", name)
 	}
-	sc.Disabled = disabled
+	sc.Enabled = !disabled
 	s.Conns[name] = sc
 	return s.save(path)
 }
@@ -406,12 +449,13 @@ func SetTunnelAll(path string, key []byte, disabled bool) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	want := !disabled
 	names := make([]string, 0, len(s.Conns))
 	for n, sc := range s.Conns {
-		if sc.Disabled == disabled {
+		if sc.Enabled == want {
 			continue
 		}
-		sc.Disabled = disabled
+		sc.Enabled = want
 		s.Conns[n] = sc
 		names = append(names, n)
 	}
@@ -442,7 +486,7 @@ func List(path string, key []byte) ([]Conn, error) {
 	out := make([]Conn, 0, len(names))
 	for _, n := range names {
 		sc := s.Conns[n]
-		c := Conn{Name: n, Type: sc.Type, Port: sc.Port, Disabled: sc.Disabled}
+		c := Conn{Name: n, Type: sc.Type, Port: sc.Port, Enabled: sc.Enabled}
 		raw, derr := sc.decryptConn(key)
 		if derr != nil {
 			c.Broken = true // stale key / corrupt entry: still listed so it can be removed
@@ -486,7 +530,7 @@ func Resolve(path string, key []byte, name string) (Conn, error) {
 			return Conn{}, fmt.Errorf("cannot decrypt the tunnel token of connection %q (%v); regenerate it with 'vaulty-keeper db regen %s'", name, err, name)
 		}
 	}
-	return Conn{Name: name, Type: typ, URL: raw, Port: sc.Port, Token: tok, Disabled: sc.Disabled}, nil
+	return Conn{Name: name, Type: typ, URL: raw, Port: sc.Port, Token: tok, Enabled: sc.Enabled}, nil
 }
 
 // keyMismatchErr rewrites a decrypt failure into a precise diagnosis when the

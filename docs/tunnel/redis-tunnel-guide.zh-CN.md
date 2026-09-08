@@ -33,7 +33,7 @@ Redis 对**新旧注册**都接受专属 token **或当前 serve 的全局 bridg
 
 明文用 `redis://`，后端 TLS 用 `rediss://`。URL 携带后端 AUTH 密码与数据库索引；标准形式为 `redis://:PASSWORD@HOST:PORT/INDEX`（用户名留空，密码放 password 字段）。客户端侧 token 走独立的前端 URI，不是注册 URL。
 
-隧道端口在 `db add`（`--port`）时指定，或从 15432 起自动分配；自动分配只检查已注册端口，不探测 OS 端口占用。同名 `db add` 省略 `--port` 时保留原端口，但替换 URL、生成新 token 并把连接重置为启用。
+隧道端口在 `db add`（`--port`）时指定，或从 15432 起自动分配；自动分配只检查已注册端口，不探测 OS 端口占用。同名 `db add` 省略 `--port` 时保留原端口，但替换 URL、生成新 token 并把 `enabled` 重置为 false。
 
 ## 客户端设置
 
@@ -44,6 +44,7 @@ Redis 对**新旧注册**都接受专属 token **或当前 serve 的全局 bridg
 ```sh
 # 人工宿主终端：通过 stdin 提供后端 URL，不要放进 argv。
 vaulty-keeper db add cache --port 15434
+vaulty-keeper db on cache
 vaulty-keeper db test cache
 vaulty-keeper serve --addr 127.0.0.1:8970
 ```
@@ -63,7 +64,7 @@ vaulty-keeper db connect cache --cmd
 客户端调用形态（token 作为 AUTH 密码）：
 
 ```sh
-redis-cli -h 127.0.0.1 -p 15434 -a <TOKEN>
+redis-cli -h 127.0.0.1 -p 15434 -a <TOKEN> --no-auth-warning
 ```
 
 生成链接使用占位用户 `x`；redis-cli 把 token 作为第一条 AUTH 发送。有界读示例：
@@ -86,7 +87,7 @@ redis-cli/GUI 对后端能做的事，初始 AUTH 后隧道都转发：
 
 ## 协议限制
 
-- 客户端第一条命令必须是带有效 token 的 `AUTH`；认证后代理 SELECT 注册的数据库。
+- 客户端第一条命令必须是带有效 token 的 `AUTH`。`AUTH <token>` 和 `AUTH <user> <token>` 都接受，最后一项是 token。随后代理 SELECT 注册 URL 的数据库下标（为 `0` 时跳过）；客户端 URI 路径不会被采用。
 - 无命令白名单、无只读强制、无结果脱敏。
 - 前端传输明文；`rediss://` 只配置后端 TLS。请用 localhost 或隔离可信网络。
 - `db regen`/`db off` 不会终止已建立会话；轮换只影响新连接，监听关闭发生在 watcher 约两秒一次的同步时。

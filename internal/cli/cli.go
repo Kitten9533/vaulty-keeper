@@ -20,7 +20,7 @@ import (
 	"vaulty-keeper/internal/ui"
 )
 
-const Version = "0.8.0"
+const Version = "0.9.0"
 
 // bothKeys resolves both the snapshot key and the sensitive-value key.
 func bothKeys() ([]byte, []byte, error) {

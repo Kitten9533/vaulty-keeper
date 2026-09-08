@@ -33,7 +33,7 @@ The client's **first command must be `AUTH` with the tunnel token**. serve valid
 
 `redis://` is accepted for plaintext and `rediss://` for backend TLS. The URL carries the backend AUTH password and database index; the standard form is `redis://:PASSWORD@HOST:PORT/INDEX` (empty username, password in the password field). Client-side tokens use a separate frontend URI, not the registered URL.
 
-The tunnel port is chosen at `db add` (`--port`) or auto-allocated starting at 15432; automatic allocation checks registered ports only, not OS occupancy. Same-name `db add` retains the stored port when `--port` is omitted but replaces the URL, creates a fresh token and resets the connection to enabled.
+The tunnel port is chosen at `db add` (`--port`) or auto-allocated starting at 15432; automatic allocation checks registered ports only, not OS occupancy. Same-name `db add` retains the stored port when `--port` is omitted but replaces the URL, creates a fresh token and resets `enabled` to false.
 
 ## Client Setup
 
@@ -44,6 +44,7 @@ The following human workflow reserves tunnel port `15434` and assumes backend da
 ```sh
 # Human host terminal: supply the backend URL through stdin, not argv.
 vaulty-keeper db add cache --port 15434
+vaulty-keeper db on cache
 vaulty-keeper db test cache
 vaulty-keeper serve --addr 127.0.0.1:8970
 ```
@@ -63,7 +64,7 @@ Do not put real backend URLs/passwords into AI messages, shell history or comman
 The client invocation shape is (token as the AUTH password):
 
 ```sh
-redis-cli -h 127.0.0.1 -p 15434 -a <TOKEN>
+redis-cli -h 127.0.0.1 -p 15434 -a <TOKEN> --no-auth-warning
 ```
 
 The generated link uses placeholder user `x`; redis-cli sends the token as its first AUTH. Bounded reads look like:
@@ -86,7 +87,7 @@ Whatever redis-cli/GUI can do against the backend, the tunnel forwards after the
 
 ## Protocol Limits
 
-- The first command from the client must be `AUTH` with a valid token; the proxy selects the registered database after authentication.
+- The first command from the client must be `AUTH` with a valid token. Both `AUTH <token>` and `AUTH <user> <token>` are accepted; the last argument is the token. The proxy then SELECTs the registered URL's database index (skipped when it is `0`); the client URI path is not applied.
 - No command allowlist, no read-only enforcement, no result redaction.
 - Frontend transport is plaintext; `rediss://` configures backend TLS only. Use localhost or an isolated trusted network.
 - Established sessions are not terminated by `db regen`/`db off`; rotation affects new connections, listener shutdown happens on the watcher's roughly two-second reconciliation.

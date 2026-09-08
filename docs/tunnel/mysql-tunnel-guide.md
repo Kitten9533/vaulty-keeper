@@ -34,13 +34,13 @@ The client sends the tunnel token as the username with any placeholder password.
 
 `mysql://` is the accepted scheme. The URL carries the backend username, password, host, port and database. Optional backend TLS is configured with `?tls=true` (and optionally `tlsCAFile=<path>`); see below.
 
-The tunnel port is chosen at `db add` (`--port`) or auto-allocated starting at 15432; automatic allocation checks registered ports only, not OS occupancy. Same-name `db add` retains the stored port when `--port` is omitted but replaces the URL, creates a fresh token and resets the connection to enabled.
+The tunnel port is chosen at `db add` (`--port`) or auto-allocated starting at 15432; automatic allocation checks registered ports only, not OS occupancy. Same-name `db add` retains the stored port when `--port` is omitted but replaces the URL, creates a fresh token and resets `enabled` to false.
 
 ## Backend TLS
 
-**`?tls=true` (was C01):** with this flag the proxy advertises the `CLIENT_SSL` capability bit, upgrades the host-to-backend connection with TLS and uses the upgraded connection for authentication and raw forwarding. Add `tlsCAFile=<path>` (a PEM CA file, regular file ≤1 MiB) to trust a private or self-signed CA; without it the backend certificate is verified against system roots. Verification failures terminate the connection; there is no insecure downgrade.
+**`?tls=true`:** with this flag the proxy advertises the `CLIENT_SSL` capability bit, upgrades the host-to-backend connection with TLS and uses the upgraded connection for authentication and raw forwarding. Add `tlsCAFile=<path>` (a PEM CA file, regular file ≤1 MiB) to trust a private or self-signed CA; without it the backend certificate is verified against system roots. Verification failures terminate the connection; there is no insecure downgrade.
 
-Evidence status: the fix is unit-tested, and a one-off native TLS query (MySQL 8, `require_secure_transport=ON`, self-signed CA) reported a non-empty `Ssl_cipher` (TLSv1.3) and passed business queries — but that evidence is **not pinned by an integration test in this repo**. Re-verify against a real TLS backend before relying on it. The frontend proxy leg is always plaintext regardless; use localhost or an isolated trusted network.
+Evidence status: unit tests cover the capability; native-TLS evidence lives in the [security model](../security-model.md#8--verification-status). Re-verify against a real TLS backend before relying on it. The frontend proxy leg is always plaintext regardless; use localhost or an isolated trusted network.
 
 ## Client Setup
 
@@ -51,6 +51,7 @@ The following human workflow reserves tunnel port `15441` and assumes a backend 
 ```sh
 # Human host terminal: supply the backend URL through stdin, not argv.
 vaulty-keeper db add mysql-orders --port 15441
+vaulty-keeper db on mysql-orders
 vaulty-keeper db test mysql-orders
 vaulty-keeper serve --addr 127.0.0.1:8970
 ```
@@ -67,16 +68,16 @@ vaulty-keeper db connect mysql-orders --cmd
 
 Do not put real backend URLs/passwords into AI messages, shell history or command-line arguments. An AI should use the tunnel connection information, not `db show`, the encrypted store, host keys or a direct backend shell.
 
-The client invocation shape is (token as user, placeholder password `x`):
+The client invocation shape is (token as user, placeholder password `x`, database last — matching what `db connect --cmd` prints):
 
 ```sh
-mysql --no-defaults -h127.0.0.1 -P 15441 -u <TOKEN> -px --ssl-mode=DISABLED
+mysql -h 127.0.0.1 -P 15441 -u <TOKEN> -px --ssl-mode=DISABLED shop
 ```
 
 `--ssl-mode=DISABLED` only applies to the plaintext frontend leg; it does not disable backend `?tls=true`. Bounded reads look like:
 
 ```sh
-mysql --no-defaults -h127.0.0.1 -P 15441 -u <TOKEN> -px --ssl-mode=DISABLED \
+mysql -h 127.0.0.1 -P 15441 -u <TOKEN> -px --ssl-mode=DISABLED shop \
   -e 'SELECT COUNT(*) FROM shop.orders WHERE qty >= 2;'
 ```
 
@@ -98,6 +99,8 @@ Whatever the MySQL client/GUI can do against a backend account, the tunnel forwa
 - Raw byte forwarding starts only after successful token validation and backend authentication.
 - No query allowlist, no read-only enforcement, no result redaction.
 - Frontend transport is plaintext (no frontend SSL); backend TLS via `?tls=true` does not protect the frontend leg.
+- The client's handshake database is ignored; the session database is the registered URL's until the client issues `USE`.
+- The fake handshake advertises server version `5.7.0-proxy` and `mysql_native_password`; after authentication, traffic is the real backend.
 - MySQL native auth methods include `caching_sha2_password` RSA full authentication on the host-to-backend leg.
 - Established sessions are not terminated by `db regen`/`db off`; rotation affects new connections, listener shutdown happens on the watcher's roughly two-second reconciliation.
 
@@ -122,4 +125,4 @@ Whatever the MySQL client/GUI can do against a backend account, the tunnel forwa
 
 `db show` prints the decrypted real URL; `db shell` launches a direct backend client. Their stdin-TTY checks do not establish human identity. Use `db test`, metadata and authorized bounded queries without seeking secrets.
 
-Source checks: [MySQL handler/TLS](../../internal/dbproxy/mysql.go), [tunnel dispatch](../../internal/dbproxy/tunnel.go), [store/Resolve](../../internal/dbproxy/store.go), [CLI/db links](../../internal/cli/db.go), [watcher startup](../../internal/cli/remote.go). The C01 TLS fix is unit-tested; its one-off native TLS query evidence is not pinned by an integration test — re-verify against a real TLS backend before relying on it. No runtime tests or real-data operations were run for this guide.
+Source checks: [MySQL handler/TLS](../../internal/dbproxy/mysql.go), [tunnel dispatch](../../internal/dbproxy/tunnel.go), [store/Resolve](../../internal/dbproxy/store.go), [CLI/db links](../../internal/cli/db.go), [watcher startup](../../internal/cli/remote.go). TLS evidence status: [security model](../security-model.md#8--verification-status). No runtime tests or real-data operations were run for this guide.

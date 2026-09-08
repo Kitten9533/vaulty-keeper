@@ -325,6 +325,7 @@ func TestMongoIntegration(t *testing.T) {
 			mongoIntegrationOK(t, "negotiate backend mechanism", TestConn(Conn{Type: "mongodb", URL: automatic.String()}))
 			path, key, port := filepath.Join(t.TempDir(), FileName), testKey(t), freePort(t)
 			mongoIntegrationOK(t, "add encrypted synthetic connection", Add(path, key, "mongo-fixture", backend.String(), port))
+			mongoIntegrationOK(t, "enable tunnel", SetTunnel(path, key, "mongo-fixture", false))
 			conn, err := Resolve(path, key, "mongo-fixture")
 			mongoIntegrationOK(t, "resolve dedicated token", err)
 			if conn.Token == "" {

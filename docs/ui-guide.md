@@ -23,7 +23,7 @@ vaulty-keeper ui --allow-plaintext  # additionally enable plaintext endpoints (e
 
 ### Windows
 
-The Windows release name includes its version, for example `vaulty-keeper-0.8.0-windows-x86_64.zip`; unzip it to get `vaulty-keeper.exe`. Use the `.exe` suffix:
+The Windows release name includes its version, for example `vaulty-keeper-0.9.0-windows-x86_64.zip`; unzip it to get `vaulty-keeper.exe`. Use the `.exe` suffix:
 
 ```powershell
 # PowerShell / CMD, in the extraction directory:
@@ -35,7 +35,7 @@ The Windows release name includes its version, for example `vaulty-keeper-0.8.0-
 - It prints `http://127.0.0.1:<port>/?t=<token>` and opens your default browser automatically (via `rundll32`).
 - **In PowerShell you need the `.\` prefix to run a program in the current directory** (bare `vaulty-keeper.exe ui` is not found); CMD does not require it.
 - Snapshot, sensitive-value and DB keys use **Windows Credential Manager** unless a nonempty environment override takes precedence; data lives under `%USERPROFILE%\.vaulty\` (snapshots in `.vaulty\apollo\`, DB connections in `.vaulty\db.json`). The separate AES key/IV list is plaintext JSON, not a Credential Manager entry.
-- API gates are shared across platforms (§8); browser launch and credential-store implementations differ. The latest release **v0.8.0** includes the Mongo additions and bundles the current `docs/` guides; earlier release binaries (e.g. 0.6.0/0.7.x) predate them.
+- API gates are shared across platforms (§8); browser launch and credential-store implementations differ. The latest release **v0.9.0** includes default-off tunnels and bundles the current `docs/` guides; earlier release binaries (e.g. 0.6.0/0.7.x/0.8.0) predate the default-off behavior.
 
 ## 2 · Interface overview
 
@@ -134,8 +134,8 @@ MongoDB 8 accepts one fixed endpoint with normal username/password authenticatio
 **Registration and entered-URL tests encrypt the URL before POST**: the browser fetches the server's ECDH public key from `/api/db/pubkey`, derives an AES-GCM key, and encrypts the URL; the private key lives in UI process memory and is regenerated at startup. This scope does not include **View URL**, which returns decrypted plaintext over loopback HTTP, or all subsequent database traffic. Do not treat it as a general TLS guarantee.
 
 - **Test connection**: try connecting with the entered URL first (nothing is stored).
-- **Register connection**: encrypts it to `~/.vaulty/db.json` (0600) and generates a dedicated tunnel token for the connection.
-- Registering the same name replaces the connection, generates a new token and resets it to enabled. Leaving the port blank retains its previous port. Re-distribute new connection info and re-disable it if needed.
+- **Register connection**: encrypts it to `~/.vaulty/db.json` (0600) and generates a dedicated tunnel token for the connection. The tunnel stays off until **Turn on tunnel**.
+- Registering the same name replaces the connection, generates a new token and resets `enabled` to false. Leaving the port blank retains its previous port. Re-distribute new connection info and turn the tunnel on again if it should listen.
 
 MySQL tunnel `?tls=true` negotiates TLS with the backend and uses the upgraded connection for authentication and forwarding (add `tlsCAFile=<path>` to trust a private/self-signed CA); the fix is unit-tested, and a one-off native TLS query passed though that evidence is not pinned by an integration test. A direct **Test connection** performs the same backend TLS upgrade but is not a full tunnel test. See the [DB examples](db-proxy-examples.md) for protocol-specific limits.
 
@@ -144,6 +144,8 @@ MySQL tunnel `?tls=true` negotiates TLS with the backend and uses the upgraded c
 After registration, a host terminal with access to the same DB store/key must run `vaulty-keeper serve --addr 127.0.0.1:8970` and stay running. A watcher starts only if the DB store exists and its key resolves **when serve starts**. If serve was started bridge-only before the first registration, restart it after registration. An active watcher picks up add/delete/on/off changes about every two seconds. UI enabled/disabled is stored configuration, not listener health or proof that a client can connect.
 
 Install the chosen native client separately. The UI's **Connect info** uses `127.0.0.1` and has no container-address toggle. For containers, generate links using host CLI `vaulty-keeper db connect <name> --container` and deliver only approved tunnel credentials. `--container` changes the printed host to `host.docker.internal`, not the listening address; serve needs a container-reachable bind and appropriate firewall restrictions. Container-side `remote dblist` returns metadata only; local `db connect` still requires the local DB store/key. Do not mount host keys to make it work. See the [DB examples](db-proxy-examples.md).
+
+The left sidebar **Database tunnels** card lists every registered connection. On is a green switch labeled On; off is a red switch labeled Off. Click the switch to toggle without a confirmation dialog (the table's Turn off button still confirms). Click the name to open this view. With none registered it shows **No tunnels configured**. The switch reflects saved `enabled` state, not listener health.
 
 ### 5.4 Connection table & actions
 
@@ -154,6 +156,7 @@ The table lists Name / Type / State / Port / Actions:
 | **Test** | connect to the database **directly** with the decrypted real URL (not through the tunnel) to verify the registered connection |
 | **Connect info** | protocol-specific raw tunnel link and client choices: psql/libpq, DBeaver/DataGrip JDBC, pgAdmin4 fields, Redis Insight, redis-cli or mongosh; tunnel token already filled in |
 | **Regenerate** | rotate this connection's dedicated token for new connections (confirmation required); re-distribute new links; does not revoke established sessions or the global token; "Regenerate all" rotates every dedicated token |
+| **Turn off all tunnels** | next to "Regenerate all"; confirmation required; sets every connection to `enabled=false`. An active watcher closes listeners on the next sync; established sessions are not forcibly closed |
 | **Enable / Disable tunnel** | persist the desired state in db.json; an active serve watcher closes/reopens the listener on its next sync, normally ~2 s; established sessions are not forcibly closed |
 | **View URL** | directly requests and displays the decrypted backend URL, with no second confirmation dialog; only shown with `--allow-plaintext`, and requires the UI token |
 | **Delete** | remove the connection (confirmation required); an active watcher removes its listener, without a promise to terminate established sessions |

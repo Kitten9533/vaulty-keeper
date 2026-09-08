@@ -31,7 +31,8 @@ Entry points and current-owner map for `vaulty-keeper` docs. Keep this index thi
 
 ## Principles
 
-- One current home per subject. The security model lives only in `security-model.md`; guides link it instead of duplicating it.
+- One current home per subject. The security model lives only in `security-model.md`; guides link it instead of duplicating it. TLS evidence and `dbtest.sh` isolation status live in its verification section.
 - Everything user-facing is English-default with a `.zh-CN.md` pair and a language-switch link at the top.
 - README owns install/getting-started, AGENTS owns agent constraints/checks, guides own current usage.
 - A document is historical when its work is superseded; archive it under a git tag instead of keeping it in the tree as if current.
+- `scripts/check-docs.mjs` (via `make test`) also requires this index to mention every `docs/**/*.md` guide, and the Makefile to `cp -R docs` so `docs/tunnel/` survives packaging.

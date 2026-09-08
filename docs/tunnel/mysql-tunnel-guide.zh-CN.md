@@ -34,13 +34,13 @@ MySQL 对**新旧注册**都接受专属 token **或当前 serve 的全局 bridg
 
 接受 `mysql://`。URL 携带后端用户名、密码、主机、端口和数据库。可选后端 TLS 用 `?tls=true`（可选 `tlsCAFile=<path>`）配置，见下。
 
-隧道端口在 `db add`（`--port`）时指定，或从 15432 起自动分配；自动分配只检查已注册端口，不探测 OS 端口占用。同名 `db add` 省略 `--port` 时保留原端口，但替换 URL、生成新 token 并把连接重置为启用。
+隧道端口在 `db add`（`--port`）时指定，或从 15432 起自动分配；自动分配只检查已注册端口，不探测 OS 端口占用。同名 `db add` 省略 `--port` 时保留原端口，但替换 URL、生成新 token 并把 `enabled` 重置为 false。
 
 ## 后端 TLS
 
-**`?tls=true`（原 C01）：**设置后代理通告 `CLIENT_SSL` capability 位，将宿主到后端连接升级为 TLS，并用升级后的连接做认证与原始转发。加 `tlsCAFile=<path>`（PEM CA 文件，普通文件 ≤1 MiB）以信任私有/自签 CA；不加则按系统根验证后端证书。验证失败即终止连接，不会不安全降级。
+**`?tls=true`：**设置后代理通告 `CLIENT_SSL` capability 位，将宿主到后端连接升级为 TLS，并用升级后的连接做认证与原始转发。加 `tlsCAFile=<path>`（PEM CA 文件，普通文件 ≤1 MiB）以信任私有/自签 CA；不加则按系统根验证后端证书。验证失败即终止连接，不会不安全降级。
 
-证据状态：该修复有单元测试，另有一次一次性原生 TLS 查询（MySQL 8、`require_secure_transport=ON`、自签 CA）报告非空 `Ssl_cipher`（TLSv1.3）且业务查询通过——但该证据**未被本仓库的集成测试固化**。依赖前请对真实 TLS 后端重新验证。前端代理这一段无论是否启用后端 TLS 都是明文；请用 localhost 或隔离可信网络。
+证据状态：单元测试覆盖该能力；原生 TLS 证据见[安全模型](../security-model.zh-CN.md#8--验证状态)。依赖前请对真实 TLS 后端重新验证。前端代理这一段无论是否启用后端 TLS 都是明文；请用 localhost 或隔离可信网络。
 
 ## 客户端设置
 
@@ -51,6 +51,7 @@ MySQL 对**新旧注册**都接受专属 token **或当前 serve 的全局 bridg
 ```sh
 # 人工宿主终端：通过 stdin 提供后端 URL，不要放进 argv。
 vaulty-keeper db add mysql-orders --port 15441
+vaulty-keeper db on mysql-orders
 vaulty-keeper db test mysql-orders
 vaulty-keeper serve --addr 127.0.0.1:8970
 ```
@@ -67,16 +68,16 @@ vaulty-keeper db connect mysql-orders --cmd
 
 不要把真实后端 URL/密码放进 AI 消息、shell history 或命令行参数。AI 应使用隧道连接信息，而不是 `db show`、加密 store、宿主密钥或直接后端 shell。
 
-客户端调用形态（token 作用户名，占位密码 `x`）：
+客户端调用形态（token 作用户名，占位密码 `x`，数据库放最后——与 `db connect --cmd` 输出一致）：
 
 ```sh
-mysql --no-defaults -h127.0.0.1 -P 15441 -u <TOKEN> -px --ssl-mode=DISABLED
+mysql -h 127.0.0.1 -P 15441 -u <TOKEN> -px --ssl-mode=DISABLED shop
 ```
 
 `--ssl-mode=DISABLED` 只作用于明文前端这一段，不会关闭后端 `?tls=true`。有界读示例：
 
 ```sh
-mysql --no-defaults -h127.0.0.1 -P 15441 -u <TOKEN> -px --ssl-mode=DISABLED \
+mysql -h 127.0.0.1 -P 15441 -u <TOKEN> -px --ssl-mode=DISABLED shop \
   -e 'SELECT COUNT(*) FROM shop.orders WHERE qty >= 2;'
 ```
 
@@ -98,6 +99,8 @@ MySQL 客户端/GUI 对后端账号能做的事，隧道都转发，无逐命令
 - 只有在 token 验证与后端认证成功后才开始原始字节转发。
 - 无查询白名单、无只读强制、无结果脱敏。
 - 前端传输明文（无前端 SSL）；`?tls=true` 只保护后端段。
+- 客户端握手里的数据库名会被忽略；会话数据库是注册 URL 里的，直到客户端再发 `USE`。
+- 假握手宣告服务器版本 `5.7.0-proxy` 和 `mysql_native_password`；认证之后流量才是真实后端。
 - MySQL 原生认证包含 `caching_sha2_password` RSA full authentication，发生在宿主到后端这一段。
 - `db regen`/`db off` 不会终止已建立会话；轮换只影响新连接，监听关闭发生在 watcher 约两秒一次的同步时。
 
@@ -122,4 +125,4 @@ MySQL 客户端/GUI 对后端账号能做的事，隧道都转发，无逐命令
 
 `db show` 打印解密后的真实 URL；`db shell` 启动直接后端客户端。它们的 stdin-TTY 检查不确立人工身份。请使用 `db test`、元数据与授权有界查询，不要寻找秘密。
 
-源码核对：[MySQL handler/TLS](../../internal/dbproxy/mysql.go)、[隧道分发](../../internal/dbproxy/tunnel.go)、[store/Resolve](../../internal/dbproxy/store.go)、[CLI/db 链接](../../internal/cli/db.go)、[watcher 启动](../../internal/cli/remote.go)。C01 TLS 修复有单元测试；其一次性原生 TLS 查询证据未被集成测试固化——依赖前请对真实 TLS 后端重新验证。本指南未运行任何运行时测试或真实数据操作。
+源码核对：[MySQL handler/TLS](../../internal/dbproxy/mysql.go)、[隧道分发](../../internal/dbproxy/tunnel.go)、[store/Resolve](../../internal/dbproxy/store.go)、[CLI/db 链接](../../internal/cli/db.go)、[watcher 启动](../../internal/cli/remote.go)。TLS 证据状态见[安全模型](../security-model.zh-CN.md#8--验证状态)。本指南未运行任何运行时测试或真实数据操作。

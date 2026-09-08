@@ -34,8 +34,9 @@ type Tunnel struct {
 }
 
 // Start runs the per-connection listeners until ctx is done. It watches
-// db.json and auto-starts/stops tunnels as connections are added or removed,
-// so 'vaulty-keeper db add'/'db rm' take effect without restarting serve. It
+// db.json and starts/stops tunnels as enabled connections are added or
+// removed, so 'vaulty-keeper db on'/'db off'/'db rm' take effect without
+// restarting serve. Newly added connections stay off until enabled. It
 // returns only when ctx is cancelled.
 func (t *Tunnel) Start(ctx context.Context) error {
 	type running struct {
@@ -44,6 +45,7 @@ func (t *Tunnel) Start(ctx context.Context) error {
 	var (
 		mu     sync.Mutex
 		active = map[string]*running{}
+		nConns int
 	)
 	defer func() {
 		mu.Lock()
@@ -60,6 +62,7 @@ func (t *Tunnel) Start(ctx context.Context) error {
 			fmt.Fprintf(t.Log, "dbproxy: reload failed: %v\n", err)
 			return
 		}
+		nConns = len(conns)
 		desired := make(map[string]Conn, len(conns))
 		for _, c := range conns {
 			desired[c.Name] = c
@@ -67,8 +70,9 @@ func (t *Tunnel) Start(ctx context.Context) error {
 		mu.Lock()
 		defer mu.Unlock()
 		for name, c := range desired {
-			if c.Disabled {
-				// Tunnel turned off (db off): stop the listener if one is up.
+			if !c.Enabled {
+				// Tunnel turned off (db off / default after add): stop the
+				// listener if one is up.
 				if r, ok := active[name]; ok {
 					r.ln.Close()
 					delete(active, name)
@@ -101,7 +105,11 @@ func (t *Tunnel) Start(ctx context.Context) error {
 
 	sync()
 	if len(active) == 0 {
-		fmt.Fprintln(t.Log, "dbproxy: no database connections yet (use 'vaulty-keeper db add <name>', tunnels auto-start)")
+		if nConns == 0 {
+			fmt.Fprintln(t.Log, "dbproxy: no database connections yet (use 'vaulty-keeper db add <name>' then 'db on <name>')")
+		} else {
+			fmt.Fprintln(t.Log, "dbproxy: no tunnels enabled (use 'vaulty-keeper db on <name>')")
+		}
 	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()

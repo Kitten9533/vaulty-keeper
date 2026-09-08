@@ -2,8 +2,10 @@
 // Static checks over the Markdown documentation tree (root READMEs, AGENTS.md
 // and everything under docs/). Catches documentation regressions that Go tests
 // can't: a doc that lost its bilingual sibling, a language-switch link pointing
-// at the wrong file, an unclosed Markdown code fence, or a relative link to a
-// file that no longer exists.
+// at the wrong file, an unclosed Markdown code fence, a relative link to a
+// file that no longer exists, a guide missing from the docs index, Makefile
+// packaging that flattens docs/tunnel/, or a backtick docs/scripts path that
+// does not exist.
 //
 // Scope: README.md, README.zh-CN.md, AGENTS.md, CONTRIBUTING.md,
 // CONTRIBUTING.zh-CN.md, SECURITY.md, SECURITY.zh-CN.md and docs/**/*.md.
@@ -143,6 +145,62 @@ console.log('check-docs: relative link targets');
     }
   }
   ok(`${checked} relative link target(s) resolve`);
+}
+
+// ---- 5. docs/README.md indexes every current guide ----
+console.log('check-docs: documentation index');
+{
+  const indexEn = readFileSync(join(root, 'docs/README.md'), 'utf8');
+  const indexZh = readFileSync(join(root, 'docs/README.zh-CN.md'), 'utf8');
+  let checked = 0;
+  for (const f of scope.sort()) {
+    if (!f.startsWith('docs/') || f === 'docs/README.md' || f === 'docs/README.zh-CN.md') continue;
+    const rel = f.slice('docs/'.length);
+    if (!indexEn.includes(rel)) fail(`docs/README.md does not mention ${rel}`);
+    else checked++;
+    if (!indexZh.includes(rel)) fail(`docs/README.zh-CN.md does not mention ${rel}`);
+    else checked++;
+  }
+  if (checked) ok(`${checked} index mention(s) for current guides`);
+}
+
+// ---- 6. Makefile ships docs/ including docs/tunnel/ ----
+console.log('check-docs: Makefile docs packaging');
+{
+  const mk = readFileSync(join(root, 'Makefile'), 'utf8');
+  // Flattening cp $(DOCS) release/docs/ drops docs/tunnel/ and breaks README links.
+  if (!/cp\s+-R\s+docs\b/.test(mk)) {
+    fail('Makefile must copy the docs/ tree with cp -R docs (keep docs/tunnel/)');
+  } else {
+    ok('Makefile copies docs/ with cp -R');
+  }
+  const pathRe = /(?<![.\w/-])docs\/[A-Za-z0-9_./-]+\.md/g;
+  let n = 0;
+  for (const m of mk.matchAll(pathRe)) {
+    if (!existsSync(join(root, m[0]))) fail(`Makefile references missing ${m[0]}`);
+    else n++;
+  }
+  if (n) ok(`${n} Makefile docs path(s) exist`);
+}
+
+// ---- 7. backtick docs/ and scripts/ paths exist ----
+console.log('check-docs: backtick repo paths');
+{
+  let checked = 0;
+  const bareRe = /`((?:docs|scripts)\/[^`]+)`/g;
+  for (const f of scope.sort()) {
+    const text = readFileSync(join(root, f), 'utf8');
+    for (const m of text.matchAll(bareRe)) {
+      const raw = m[1].trim().split(/\s+/)[0].split('#')[0].replace(/\\+$/, '');
+      if (!raw || /[*?[]/.test(raw)) continue;
+      if (!existsSync(join(root, raw))) {
+        fail(`${f}: backtick path does not exist: ${raw}`);
+      } else {
+        checked++;
+      }
+    }
+  }
+  if (checked) ok(`${checked} backtick docs/scripts path(s) resolve`);
 }
 
 console.log(failures ? `\ncheck-docs: ${failures} problem(s)` : '\ncheck-docs: all checks passed');

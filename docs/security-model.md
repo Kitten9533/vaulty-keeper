@@ -58,9 +58,9 @@ A safe value is *authorized plaintext output*, not merely a non-secret classific
 | UI token (fresh 128-bit per `ui` start) | Non-GET UI operations | Loopback UI only | Ends with the process; no shared state. Explicit plaintext routes additionally need `--allow-plaintext`, else 403 even with the token. |
 | Bridge token (`~/.vaulty/bridge-token`, 0600) | All `/api` endpoints of `serve` | Snapshot mask reads **and** PG/MySQL/Redis tunnel access, for new and legacy connections (`tokenOKAny(user, globalToken, connToken)` in `postgres.go`/`mysql.go`/`redis.go`) | Regenerated on each `serve` start. Failed checks add 50 ms per failure, capped at 2 s (linear, not exponential backoff). |
 | Dedicated DB tunnel token (128-bit per connection) | The one registered connection | PG/MySQL/Redis accept either dedicated or global token; MongoDB accepts **only** its dedicated token (no global fallback) | `db regen` rotates it; the old token stops working for **new** connections. Established sessions are not terminated. The global token is unaffected. |
-| Same-name `db add` | — | Keeps the existing tunnel port if omitted, but creates a fresh token and resets the connection to enabled (`internal/dbproxy/store.go`) | Redistribute client links and review exposure after re-registration. |
+| Same-name `db add` | — | Keeps the existing tunnel port if omitted, but creates a fresh token and resets `enabled` to false (`internal/dbproxy/store.go`) | Redistribute client links and turn the tunnel on again if it should listen. |
 
-`db on/off` toggles persisted listener state (watcher sync ~2 s); it does not promise to terminate established sessions. `db regen` and `db off` therefore are not immediate session revocation.
+`db add` (including same-name overwrite) writes `enabled: false`. A file with neither `enabled` nor `disabled` stays on (legacy omitempty default). `db on/off` toggles persisted listener state (watcher sync ~2 s); it does not promise to terminate established sessions. `db regen` and `db off` therefore are not immediate session revocation.
 
 ## 6 · Container and network boundary
 
@@ -72,8 +72,8 @@ A safe value is *authorized plaintext output*, not merely a non-secret classific
 
 ## 7 · Protocol-specific limits
 
-- **PG**: delegates `sslmode` to the client library. **Redis**: `rediss://` for TLS.
-- **MySQL `?tls=true` is fixed** (was C01): the proxy advertises `CLIENT_SSL`, uses the TLS-upgraded connection for authentication and forwarding, and accepts `tlsCAFile` for a private/self-signed CA. It was verified in one native TLS query against MySQL 8 with `require_secure_transport=ON` and a self-signed CA (non-empty `Ssl_cipher`, TLSv1.3, business queries through the tunnel), but that evidence is **not reproducible from the repo** — no integration test pins it (only fake-backend unit tests). Treat the capability as fixed and unit-tested; re-verify against a real TLS backend before relying on it. Do not disable required TLS on a real backend.
+- **PG**: the proxy itself honors the registered URL's `sslmode` (`require`/`verify-ca`/`verify-full` force TLS; `prefer`/`allow` try TLS then fall back to plaintext; `disable`/absent use plaintext). This is not libpq: those three force-TLS names share one Go TLS dial with hostname verification (direct TLS, not PostgreSQL SSLRequest). The frontend answers SSLRequest with no, so a tunnel URI with `sslmode=require` fails. Details: [postgres-tunnel-guide.md](tunnel/postgres-tunnel-guide.md). **Redis**: `rediss://` for backend TLS.
+- **MySQL**: `?tls=true` advertises `CLIENT_SSL`, upgrades the host-to-backend connection for authentication and forwarding, and accepts `tlsCAFile` for a private/self-signed CA. Do not disable required TLS on a real backend. Evidence status: [Verification status](#verification-status). Details: [mysql-tunnel-guide.md](tunnel/mysql-tunnel-guide.md).
 - **MongoDB 8**: fixed single endpoint, user `vaulty` + dedicated token as SCRAM password, `authSource=admin`, `directConnection=true&retryWrites=false`, no global fallback; dual-side auth plus a persistent command allowlist (not post-auth byte forwarding). Views, time-series, transactions, retryable writes, `comment`/`collation`/`create`/`createIndexes` are not open. Error code 13 alone cannot distinguish proxy policy from backend role denial. Full detail and limits: [mongodb-tunnel-guide.md](tunnel/mongodb-tunnel-guide.md).
 - Client-to-proxy transport is plaintext; use localhost or an isolated trusted network.
 

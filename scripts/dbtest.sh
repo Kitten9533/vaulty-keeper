@@ -179,6 +179,7 @@ printf 'postgres://app:pgpass@127.0.0.1:%s/appdb' "$PGP" | "$BIN" db add pgdb --
 printf 'redis://:redispass@127.0.0.1:%s/0' "$RDP"    | "$BIN" db add cache --dir "$tmp/db" --port "$TUN_RD"
 printf 'mysql://sha2user:sha2pass@127.0.0.1:%s/shop' "$MYP"   | "$BIN" db add mysqltest   --dir "$tmp/db" --port "$TUN_MY"
 printf 'mysql://nativeuser:nativepass@127.0.0.1:%s/shop' "$MYP" | "$BIN" db add mysqlnative --dir "$tmp/db" --port "$TUN_NATIVE"
+"$BIN" db on --all --dir "$tmp/db"
 echo "连接已注册："; "$BIN" db list --dir "$tmp/db"
 
 # ---- 起 serve（假 HOME：token 写临时目录，不碰真实 ~/.vaulty）----

@@ -2,7 +2,7 @@
 
 > 中文 | [English](cli-reference.md)
 
-`vaulty-keeper` 的完整命令参考：Apollo 快照工具、AES 加解密辅助命令与杂项命令。安装与快速开始见 [README](../README.zh-CN.md)；用法讲解见[文档索引](README.zh-CN.md)。本文是**参考，不是脚本**：`<...>`、`[...]`、`a|b` 表示占位/可选项，不能原样当 shell 输入。请替换文件名、环境名、AppID 和 key。
+`vaulty-keeper` 的完整命令参考：Apollo 快照工具、AES 加解密辅助命令、数据库隧道与杂项命令。安装与快速开始见 [README](../README.zh-CN.md)；用法讲解见[文档索引](README.zh-CN.md)。本文是**参考，不是脚本**：`<...>`、`[...]`、`a|b` 表示占位/可选项，不能原样当 shell 输入。请替换文件名、环境名、AppID 和 key。
 
 ## vaulty-keeper apollo — Apollo 快照工具
 
@@ -108,13 +108,31 @@ vaulty-keeper apollo reveal prod app.fs.oss.secret-key --appid xx --key <k> --iv
 
 输入可走 `--file`、参数或 stdin。`decrypt` 输出明文且要求 stdin TTY，管道传密文不会绕过门禁；确有需要时由人工在终端使用文件/参数。输入文件与输出各有自己的明文生命周期。
 
+## 数据库隧道
+
+加密连接存储与 TCP 隧道。精确 flag 见 `vaulty-keeper db -h` 和 `vaulty-keeper db <cmd> -h`。逐协议操作：[PostgreSQL](tunnel/postgres-tunnel-guide.zh-CN.md) / [MySQL](tunnel/mysql-tunnel-guide.zh-CN.md) / [Redis](tunnel/redis-tunnel-guide.zh-CN.md) / [MongoDB](tunnel/mongodb-tunnel-guide.zh-CN.md)。架构与夹具：[db-proxy-architecture](db-proxy-architecture.zh-CN.md)、[db-proxy-examples](db-proxy-examples.zh-CN.md)。安全边界：[security-model](security-model.zh-CN.md)。
+
+```sh
+vaulty-keeper db init
+vaulty-keeper db add <name> [--port <port>] [--test]   # URL 从 stdin 读；隧道默认关闭，需 db on
+vaulty-keeper db list [--json]
+vaulty-keeper db test <name>
+vaulty-keeper db connect <name> [--container] [--cmd] [--host <host>]
+vaulty-keeper db regen <name>|--all
+vaulty-keeper db on|off <name>|--all
+vaulty-keeper db show <name>     # 仅 TTY：解密后的 URL
+vaulty-keeper db shell <name>    # 仅 TTY：直接后端客户端
+vaulty-keeper db rm <name> [--yes]
+```
+
+`db show` / `db shell` 是明文出口（stdin TTY）。Agent 使用 `list` / `test` / `connect` / `on` / `off` / `regen`。
+
 ## 其他
 
 ```sh
 vaulty-keeper ui                              # 启动本地 Web UI（默认 127.0.0.1:8080，占用时自动顺延）
 vaulty-keeper serve --addr 0.0.0.0:8970       # 掩码代理（host 持有密钥时对容器/隔离域开放）
 vaulty-keeper remote list|get|compare ...     # 通过掩码代理读（形态与 apollo 子命令一致）
-vaulty-keeper db <init|add|list|test|connect|show|rm|shell|regen|on|off> ... # 加密数据库连接 + 隧道
 vaulty-keeper completion zsh | source /dev/stdin   # 或 bash / fish，加到 shell 配置
 vaulty-keeper lang [en|zh]    # 查看或设置共享的 UI/CLI 语言
 vaulty-keeper version

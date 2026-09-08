@@ -155,7 +155,7 @@ func dbAdd(args []string) int {
 	if err := dbproxy.Add(path, key, name, raw, *port); err != nil {
 		return fail("db add: %v", err)
 	}
-	fmt.Println(i18n.T("db.added", name, typ))
+	fmt.Println(i18n.T("db.added", name, typ, name))
 	return 0
 }
 
@@ -200,7 +200,7 @@ func dbList(args []string) int {
 		return 0
 	}
 	for _, c := range conns {
-		if c.Disabled {
+		if !c.Enabled {
 			fmt.Printf("%s (%s) :%d [%s]\n", c.Name, c.Type, c.Port, i18n.T("db.off-mark"))
 		} else {
 			fmt.Printf("%s (%s) :%d\n", c.Name, c.Type, c.Port)
@@ -248,10 +248,10 @@ func remoteDBList() []dbproxy.Conn {
 	}
 	var res struct {
 		Connections []struct {
-			Name     string `json:"name"`
-			Type     string `json:"type"`
-			Port     int    `json:"port"`
-			Disabled bool   `json:"disabled"`
+			Name    string `json:"name"`
+			Type    string `json:"type"`
+			Port    int    `json:"port"`
+			Enabled bool   `json:"enabled"`
 		} `json:"connections"`
 	}
 	if err := json.Unmarshal(body, &res); err != nil {
@@ -259,7 +259,7 @@ func remoteDBList() []dbproxy.Conn {
 	}
 	out := make([]dbproxy.Conn, 0, len(res.Connections))
 	for _, c := range res.Connections {
-		out = append(out, dbproxy.Conn{Name: c.Name, Type: c.Type, Port: c.Port, Disabled: c.Disabled})
+		out = append(out, dbproxy.Conn{Name: c.Name, Type: c.Type, Port: c.Port, Enabled: c.Enabled})
 	}
 	return out
 }
@@ -528,7 +528,7 @@ func dbConnect(args []string) int {
 	if err != nil {
 		return fail("db connect: %v", err)
 	}
-	if conn.Disabled {
+	if !conn.Enabled {
 		fmt.Fprintln(os.Stderr, i18n.T("db.connect-warn-off", name, name))
 	}
 	// Prefer the connection's dedicated token; fall back to the global bridge

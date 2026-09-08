@@ -1,6 +1,6 @@
 {
   "name": "vaulty-keeper",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Personal AI toolbox: encrypted-at-rest snapshots, AES helpers and local DB tunnels in a single Go binary, with a loopback web UI",
   "license": "MIT",
   "bin": {
