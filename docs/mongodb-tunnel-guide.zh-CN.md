@@ -148,9 +148,9 @@ db.getSiblingDB('businessdb').runCommand({
 
 ## 验证状态
 
-以下为 **2026-09-07 实现会话的历史证据**，来源保留于[实现记录](superpowers/plans/2026-09-07-mongodb-tunnel.zh-CN.md)。平台为 macOS 12.4 Intel、Docker Desktop；MongoDB 8.0.13 standalone 及已认证固定单节点副本集。被测状态是**基于 `7273bb21e8347777058a17fb95a16aa2a17a36dc` 的未提交 Mongo 工作区**，不是该 commit 本身，也不是发布二进制。此处未记录精确 dirty-tree 摘要及其余工具补丁版本，不能仅凭基线 SHA 推断可复现。该 Mongo 工作后续已随 **v0.8.0**（2026-09-07）发布。
+以下为 **2026-09-07 实现会话的历史证据**，来源保留于实现记录与设计（归档在 git tag `docs-superpowers-archive`）。平台为 macOS 12.4 Intel、Docker Desktop；MongoDB 8.0.13 standalone 及已认证固定单节点副本集。被测状态是**基于 `7273bb21e8347777058a17fb95a16aa2a17a36dc` 的未提交 Mongo 工作区**，不是该 commit 本身，也不是发布二进制。此处未记录精确 dirty-tree 摘要及其余工具补丁版本，不能仅凭基线 SHA 推断可复现。该 Mongo 工作后续已随 **v0.8.0**（2026-09-07）发布。
 
-[设计](superpowers/specs/2026-09-07-mongodb-tunnel-design.zh-CN.md) 解释已接受决策，计划保留执行来源，不构成长效 lead/worker 分工或可复用分支/提交许可。本指南是带日期验证矩阵的现行维护位置。下表每个通过项都是历史结果，**文档更正期间未重跑**；上方示例未执行。Mongo 工作已包含在已发布的 **v0.8.0** 中，其归档打包了 `docs/` 指南；更早的 0.6.0 包先于 MongoDB，也未附带所链接的 `docs/`。
+已归档的设计解释已接受决策，已归档的计划保留执行来源，不构成长效 lead/worker 分工或可复用分支/提交许可。本指南是带日期验证矩阵的现行维护位置。下表每个通过项都是历史结果，**文档更正期间未重跑**；上方示例未执行。Mongo 工作已包含在已发布的 **v0.8.0** 中，其归档打包了 `docs/` 指南；更早的 0.6.0 包先于 MongoDB，也未附带所链接的 `docs/`。
 
 | 检查 | 状态 / 范围 |
 |---|---|

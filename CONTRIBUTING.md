@@ -79,8 +79,9 @@ node scripts/check-docs.mjs
 - Keep one current home per subject: the security model lives only in
   `docs/security-model.md`; guides link it instead of duplicating it. Update
   `docs/README.md` when you add, move or retire a guide.
-- Historical records (`docs/superpowers/`) are dated evidence with a successor
-  link; do not rewrite them as current instructions and do not replay their
+- Historical implementation records (plans/designs) are archived under a git
+  tag (e.g. `docs-superpowers-archive`), not committed to the tree; do not
+  rewrite archived records as current instructions and do not replay their
   commands against real data.
 - If a change alters behavior, update the matching docs in the same change and
   make the doc describe the current source, not an old promise.

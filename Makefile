@@ -30,9 +30,8 @@ install: build
 	ln -sf $(CURDIR)/$(BIN) $(HOME)/.local/bin/vaulty-keeper
 
 # Current guides bundled into every archive so the packaged README's docs/*.md
-# relative links resolve offline. docs/superpowers/ historical records are
-# intentionally source-only and not shipped; the packaged docs/README.md keeps
-# its links to them (source-tree only), by design.
+# relative links resolve offline. Historical implementation records are archived
+# under git tag docs-superpowers-archive and are not shipped, by design.
 DOCS := docs/README.md docs/README.zh-CN.md \
         docs/security-model.md docs/security-model.zh-CN.md \
         docs/apollo-snapshot-guide.md docs/apollo-snapshot-guide.zh-CN.md \

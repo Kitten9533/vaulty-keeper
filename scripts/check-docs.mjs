@@ -31,7 +31,6 @@ const scope = ['README.md', 'README.zh-CN.md', 'AGENTS.md', 'CONTRIBUTING.md', '
 
 // Intentional single-language files. AGENTS.md is agent operating constraints
 // written in Chinese only; it is not a user-facing guide and has no sibling.
-// Historical docs under docs/superpowers/ are all bilingual and need no entry.
 const SINGLE_ENTRY = ['AGENTS.md'];
 
 let failures = 0;
