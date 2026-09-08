@@ -4,13 +4,28 @@
 
 Personal AI toolbox (single Go binary). Snapshot values and registered database URLs/tunnel tokens are encrypted at rest. This does not cover every local file: the AES key/IV list is plaintext JSON, and import sources, exports/downloads and editor temporary files can contain plaintext. `vaulty-keeper ui` serves a loopback-only web UI for snapshots, AES and database connections. OS key storage and optional native clients require platform facilities.
 
-Start here for installation and examples; the [documentation index](docs/README.md) links current guides and historical records. The [security model](docs/security-model.md) is the canonical reference for security boundaries.
+Start here for installation and examples; the [documentation index](docs/README.md) links current guides and historical records. The [security model](docs/security-model.md) is the canonical reference for security boundaries, [SECURITY.md](SECURITY.md) covers reporting, and [CONTRIBUTING.md](CONTRIBUTING.md) covers building and contributing.
 
 ## Quick start
 
-**Option 1: Download a prebuilt binary** (no Go required): grab the archive for your platform (macos/linux × x86_64/arm64, windows × x86_64) from [Releases](https://github.com/Kitten9533/vaulty-keeper/releases), extract, and put `vaulty-keeper` on your PATH (`vaulty-keeper.exe` on Windows; archive names include the version).
+**Option 1: Install via npm** (recommended; Node.js 18+ required):
 
-This README describes the current source workspace, including unreleased MongoDB work, not the existing **0.6.0** artifacts. Check release notes before assuming a downloaded binary supports a feature. Archives built by the current Makefile contain the binary, both READMEs, LICENSE, AGENTS.md and the current `docs/` guides (index, security model and five guides, English + Chinese); historical `docs/superpowers/` records are source-only. The existing 0.6.0 artifacts do not include `docs/`; for those, browse the matching tag's `docs/` in the [source repository](https://github.com/Kitten9533/vaulty-keeper). Current-workspace guides are not evidence for old binaries.
+```sh
+npm install -g vaulty-keeper
+```
+
+The npm channel downloads the prebuilt binary through the package manager rather than a browser, so macOS Gatekeeper and Windows SmartScreen do not flag it as a downloaded file — no "unidentified developer" / "Windows protected your PC" prompt. It installs the same Go binary as the releases below.
+
+**Option 2: Download a prebuilt binary** (no Go or Node.js required): grab the archive for your platform (macos/linux × x86_64/arm64, windows × x86_64) from [Releases](https://github.com/Kitten9533/vaulty-keeper/releases), extract, and put `vaulty-keeper` on your PATH (`vaulty-keeper.exe` on Windows; archive names include the version). Each release also attaches `sha256sums.txt` with the archive checksums.
+
+The binaries are not code-signed, so a **browser-downloaded** archive may be blocked at first run:
+
+- **macOS** — Gatekeeper shows "cannot be opened because the developer cannot be verified" (or "Apple cannot check it for malicious software" on Apple Silicon): right-click the binary and choose *Open*, or remove the quarantine attribute once with `xattr -cr /path/to/vaulty-keeper`.
+- **Windows** — SmartScreen shows "Windows protected your PC" / unknown publisher: click *More info* → *Run anyway*, or unblock once in PowerShell with `Unblock-File vaulty-keeper.exe`.
+
+Installing via npm or building from source avoids these prompts, because the file never carries a browser-download marker.
+
+This README describes the current source workspace. The latest release is **v0.8.0** (2026-09-07): it includes MongoDB 8 tunnel support and bundles both READMEs, LICENSE, AGENTS.md and the `docs/` guides (index, security model and five guides, English + Chinese); historical `docs/superpowers/` records are source-only. The current working tree additionally adds CONTRIBUTING.md/SECURITY.md to future release archives; that packaging change has not been published yet. Older archives such as **0.6.0** do not include `docs/`; for those, browse the matching tag's `docs/` in the [source repository](https://github.com/Kitten9533/vaulty-keeper). Guides in this workspace are not evidence for binaries older than v0.8.0.
 
 The following setup is for a human on the host and creates local keys/state; it is not an isolated test or an instruction for an agent to access real secrets:
 
@@ -20,7 +35,7 @@ vaulty-keeper sensitive init   # first run: create sensitive-value key
 vaulty-keeper ui               # long-running; use another terminal for later commands
 ```
 
-**Option 2: Build from source** (Go 1.26+, Git and Make; Node.js is also required for `make test`):
+**Option 3: Build from source** (Go 1.26+, Git and Make; Node.js is also required for `make test`):
 
 ```sh
 git clone https://github.com/Kitten9533/vaulty-keeper.git
@@ -34,7 +49,7 @@ Ensure `~/.local/bin` is on PATH, or use `bin/vaulty-keeper`. Maintainers can us
 
 ## Manual operation
 
-Running `vaulty-keeper` with no arguments prints the full command tree and performs first-run initialization automatically: creates the data directories (`~/.vaulty/`, `~/.vaulty/apollo/`, 0700), seeds a `default` AES key/iv entry (`~/.vaulty/aes.json`, 0600), and checks whether the three encryption keys (snapshot / sensitive / database) are initialized — if any is missing it offers to initialize it on your TTY, or prints a hint when not on a TTY. For manual CRUD, the recommended entry point is `vaulty-keeper ui` (local web UI covering all snapshot and AES features), or the subcommands below.
+Running `vaulty-keeper` with no arguments prints the full command tree and performs first-run initialization automatically: creates the data directories (`~/.vaulty/`, `~/.vaulty/apollo/`, 0700), seeds a `default` AES key/iv entry (`~/.vaulty/aes.json`, 0600), and checks key initialization — the snapshot and sensitive-value keys always, and the DB key only when a DB store already exists (`~/.vaulty/db.json`); the DB key is otherwise created on first `db init`. Missing keys are offered for initialization on your TTY, or a hint is printed when not on a TTY. For manual CRUD, the recommended entry point is `vaulty-keeper ui` (local web UI covering all snapshot and AES features), or the subcommands below.
 
 ```sh
 vaulty-keeper            # print full command tree
@@ -141,7 +156,7 @@ Parsing rules:
 
 - Each line is `KEY = value`, split at the first `=`, both sides trimmed (values may contain `=`).
 - Blank lines and whole lines starting with `#` (single/multi-line comments) are skipped.
-- Multiple `KEY = ` entries glued onto one line are split automatically with a warning (e.g. `A = 1B = 2`).
+- Multiple `KEY = ` entries glued onto one line starting with an uppercase letter are split automatically with a warning (e.g. `A = 1B = 2`; only all-uppercase keys are recognized).
 - Keys are validated against `[A-Za-z_][A-Za-z0-9_.-]*`; invalid lines are skipped with a warning.
 
 Two snapshot keys (normally in the OS secret store; nonempty environment overrides take precedence):
@@ -229,7 +244,7 @@ vaulty-keeper serve --addr 0.0.0.0:8970     # prints token and writes ~/.vaulty/
 
 ### Container side: agent isolation domain
 
-Human host terminal 2, from the repository: choose a project directory containing no secret files. The token handoff below is an authorization decision; the current entrypoint **prints the token to container logs**. Do not share those logs. The image builds Go inside Docker and includes neither optional agent CLIs nor database clients by default.
+Human host terminal 2, from the repository: choose a project directory containing no secret files. The token handoff below is an authorization decision; the entrypoint prints only a `<set>`/`<unset>` marker, never the token itself. The image builds Go inside Docker and includes neither optional agent CLIs nor database clients by default.
 
 ```sh
 # build from source inside Docker; no host make build needed
@@ -391,7 +406,7 @@ This is a summary; the [security model](docs/security-model.md) owns the complet
 
 ### Verification fixtures
 
-MongoDB fixture entry points are `bash scripts/mongotest.sh --mongosh` and `bash scripts/mongotest.sh --replica-set --mongosh`, using synthetic credentials and explicit temporary storage/test keys. The [verification matrix](docs/mongodb-tunnel-guide.md#verification-status) owns the dated MongoDB 8.0.13 standalone/fixed-replica-set and test/race/vet/build evidence from the 2026-09-07 implementation workspace; those historical results are not a new run or a release guarantee. Actual MongoDB TLS, manual interactive `db shell` and final independent re-review remain unverified.
+MongoDB fixture entry points are `bash scripts/mongotest.sh --mongosh` and `bash scripts/mongotest.sh --replica-set --mongosh`, using synthetic credentials and explicit temporary storage/test keys. The [verification matrix](docs/mongodb-tunnel-guide.md#verification-status) owns the dated MongoDB 8.0.13 standalone/fixed-replica-set and test/race/vet/build evidence from the 2026-09-07 implementation workspace; those historical results were not rerun for this documentation update and do not by themselves certify a release binary (MongoDB was shipped in v0.8.0). Actual MongoDB TLS, manual interactive `db shell` and final independent re-review remain unverified.
 
 **`scripts/dbtest.sh` is isolated and safe to run (C02 done).** The current script tracks its own serve PID and containers by label, uses a per-run temp dir and a fake HOME with synthetic keys, and `--clean` tears down only the resources it registered — it no longer broadly pkills serve processes, deletes fixed containers (`aipg`, `aimysql8`, `aimariadb`, `airedis`), or overwrites the real `~/.vaulty/bridge-token` as the historical version did. Read its header before use; keep it out of CI.
 
@@ -403,15 +418,15 @@ make build
 ./scripts/dbtest.sh --clean  # teardown: stop serve, remove containers
 ```
 
-Its actual fixtures are PostgreSQL `postgres:17.6-alpine`, MySQL `dockerproxy.net/library/mysql:8.0` (the recorded local image was 8.0.46, not 8.4/MariaDB) and Redis `redis:7`. It requires Docker, Python 3 and a built binary. Backend host ports are dynamic; tunnel ports and seeded queries are:
+Its actual fixtures are PostgreSQL `postgres:17.6-alpine`, MySQL `dockerproxy.net/library/mysql:8.0` (the recorded local image was 8.0.46, not 8.4/MariaDB) and Redis `redis:7`. It requires Docker, Python 3 and a built binary. Backend, tunnel and bridge ports are allocated dynamically per run (overridable via `PGP`/`TUN_PG`/... environment variables), so inspect the printed connection info; the prepared data and queries are:
 
-| Registration | Tunnel | Prepared data / query |
-|---|---|---|
-| `pgdb` | 15432 | `appdb.t`, `SELECT id,name FROM t ORDER BY id;` |
-| `mysqltest` / `mysqlnative` | 15435 / 15436 | `shop.customers`, `products`, `orders`; `SELECT COUNT(*) FROM shop.orders;` |
-| `cache` | 15434 | Authenticated Redis; `PING`, synthetic `SET`/`GET` |
+| Registration | Prepared data / query |
+|---|---|
+| `pgdb` | `appdb.t`, `SELECT id,name FROM t ORDER BY id;` |
+| `mysqltest` / `mysqlnative` | `shop.customers`, `products`, `orders`; `SELECT COUNT(*) FROM shop.orders;` |
+| `cache` | Authenticated Redis; `PING`, synthetic `SET`/`GET` |
 
-The script uses bridge port 8972 and a separate DB directory/key, not the host-default `db shell` context. Its commands/log output are fixture-specific historical examples, not proof that every client/configuration works. See the [DB examples guide](docs/db-proxy-examples.md) for native-client setup and positive/negative queries; review logs before sharing because upstream metadata and access tokens may be present.
+The script uses a separate DB directory/key, not the host-default `db shell` context. Its commands/log output are fixture-specific historical examples, not proof that every client/configuration works. See the [DB examples guide](docs/db-proxy-examples.md) for native-client setup and positive/negative queries; review logs before sharing because upstream metadata and access tokens may be present.
 
 ## Safe usage guide for AI / scripts
 

@@ -5,10 +5,11 @@
 // at the wrong file, an unclosed Markdown code fence, or a relative link to a
 // file that no longer exists.
 //
-// Scope: README.md, README.zh-CN.md, AGENTS.md and docs/**/*.md. Files listed
-// in SINGLE_ENTRY are intentionally single-language (agent/operating files);
-// pairing and language-switch checks are skipped for them, fence and link
-// checks still apply.
+// Scope: README.md, README.zh-CN.md, AGENTS.md, CONTRIBUTING.md,
+// CONTRIBUTING.zh-CN.md, SECURITY.md, SECURITY.zh-CN.md and docs/**/*.md.
+// Files listed in SINGLE_ENTRY are intentionally single-language
+// (agent/operating files); pairing and language-switch checks are skipped for
+// them, fence and link checks still apply.
 //
 // Run: node scripts/check-docs.mjs   (also wired into `make test` and CI)
 
@@ -19,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---- scope ----
-const scope = ['README.md', 'README.zh-CN.md', 'AGENTS.md'];
+const scope = ['README.md', 'README.zh-CN.md', 'AGENTS.md', 'CONTRIBUTING.md', 'CONTRIBUTING.zh-CN.md', 'SECURITY.md', 'SECURITY.zh-CN.md'];
 (function walk(dir) {
   for (const entry of readdirSync(dir).sort()) {
     const p = join(dir, entry);

@@ -1,0 +1,29 @@
+{
+  "name": "vaulty-keeper",
+  "version": "0.8.0",
+  "description": "Personal AI toolbox: encrypted-at-rest snapshots, AES helpers and local DB tunnels in a single Go binary, with a loopback web UI",
+  "license": "MIT",
+  "bin": {
+    "vaulty-keeper": "bin/vaulty-keeper.mjs"
+  },
+  "files": [
+    "bin",
+    "platform"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "vault",
+    "secrets",
+    "keychain",
+    "aes",
+    "database",
+    "tunnel",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kitten9533/vaulty-keeper.git"
+  }
+}

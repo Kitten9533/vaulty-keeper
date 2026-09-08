@@ -23,7 +23,7 @@ vaulty-keeper ui --allow-plaintext  # 额外开启明文接口（导出 / 解密
 
 ### Windows 启动方式
 
-Windows 发布包名包含版本，例如 `vaulty-keeper-0.6.0-windows-x86_64.zip`；解压后得到 `vaulty-keeper.exe`，命令使用 `.exe` 后缀：
+Windows 发布包名包含版本，例如 `vaulty-keeper-0.8.0-windows-x86_64.zip`；解压后得到 `vaulty-keeper.exe`，命令使用 `.exe` 后缀：
 
 ```powershell
 # PowerShell / CMD，进入解压目录后：
@@ -35,7 +35,7 @@ Windows 发布包名包含版本，例如 `vaulty-keeper-0.6.0-windows-x86_64.zi
 - 启动同样打印 `http://127.0.0.1:<port>/?t=<token>`，并自动用默认浏览器打开。
 - **PowerShell 里运行当前目录下的程序要加 `.\` 前缀**（直接敲 `vaulty-keeper.exe ui` 会提示找不到命令）；CMD 不需要。
 - 快照、敏感值和 DB 密钥使用 **Windows 凭据管理器**，但非空环境变量覆盖优先；数据位于 `%USERPROFILE%\.vaulty\`（快照在 `.vaulty\apollo\`，DB 连接在 `.vaulty\db.json`）。独立的 AES key/IV 列表是明文 JSON，不是凭据管理器条目。
-- 各平台共用 API 门禁（§8），浏览器启动和凭据库实现不同。当前工作区的功能（含 Mongo 增补）不代表旧发布二进制已经包含。
+- 各平台共用 API 门禁（§8），浏览器启动和凭据库实现不同。最新发布 **v0.8.0** 已包含 Mongo 增补并打包当前 `docs/` 指南；更早的发布二进制（如 0.6.0/0.7.x）先于它们。
 
 ## 2 · 界面总览
 
@@ -99,7 +99,7 @@ Windows 发布包名包含版本，例如 `vaulty-keeper-0.6.0-windows-x86_64.zi
 
 ### 3.6 显示单值明文（Reveal，需 `--allow-plaintext`）
 
-点 **Reveal**，再点对话框内的 **Show**。默认用配置的快照/敏感值密钥解开快照包装，显示存储的 value。如果 value 自身是外部 AES 密文，成功 reveal 显示的是该密文，不是外部明文。
+点 **Reveal**，再点对话框内的 **显示**（英文界面按钮为 **Reveal**）。默认用配置的快照/敏感值密钥解开快照包装，显示存储的 value。如果 value 自身是外部 AES 密文，成功 reveal 显示的是该密文，不是外部明文。
 
 手动 key/IV 字段**只在 reveal 请求失败后出现**，不是随时可展开的选项。同时填写两个覆盖值后重试，会先解开快照包装再解外部密文，不能修复缺失/错误的快照密钥。成功 reveal 后如需解外部密文，人工可在 AES 工具（§4）中使用原外部 key/IV。不要故意破坏密钥配置来显示高级字段。
 

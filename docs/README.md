@@ -9,6 +9,8 @@ Entry points and current-owner map for `vaulty-keeper` docs. Keep this index thi
 | Doc | Role |
 |---|---|
 | [../README.md](../README.md) · [中文](../README.zh-CN.md) | Install, quick start and command reference (human-facing). |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) · [中文](../CONTRIBUTING.zh-CN.md) | How to build, test and contribute; documentation conventions. |
+| [../SECURITY.md](../SECURITY.md) · [中文](../SECURITY.zh-CN.md) | Security reporting policy and boundary summary; links the security model. |
 | [../AGENTS.md](../AGENTS.md) | Agent operating constraints and checks (single-entry Chinese file). |
 
 ## Current guides (English + Chinese pairs)

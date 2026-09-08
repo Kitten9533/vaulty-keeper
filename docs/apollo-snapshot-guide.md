@@ -208,7 +208,7 @@ vaulty-keeper remote compare prod test --appid merdi --appid-to merdi2 --json
 
 - Each line is `KEY = value`, split on the **first `=`**, trimmed on both sides; values may contain `=` inside.
 - Blank lines and whole lines starting with `#` (single- or multi-line comments) are skipped.
-- **Auto-splitting of glued entries**: multiple `KEY = ` entries glued into one line are split apart with a warning (e.g. `A = 1B = 2`), while URL query params are not mis-split (a `?` before `...?TOKEN=1` is not glue).
+- **Auto-splitting of glued entries**: when a line contains several `KEY = ` entries that start with an uppercase letter, they are split apart with a warning (e.g. `A = 1B = 2`; the splitter only recognizes all-uppercase keys, so lower/mixed-case glued lines are not split). URL query params are not mis-split (a `?` before `...?TOKEN=1` is not glue).
 - Key validation `[A-Za-z_][A-Za-z0-9_.-]*`; invalid lines are skipped with a warning.
 - Matching pairs of quotes around a value are stripped (`"merdi"` ≡ `merdi`).
 
@@ -228,7 +228,7 @@ vaulty-keeper apollo edit prod --appid merdi                   # open in $EDITOR
 
 - These commands require stdin TTY (`isTerminal()` in `internal/cli/cli.go`); that is not a human-identity check. Agents must not run them on real data. `export --copy` still prints plaintext before invoking `pbcopy` and may fail to copy on other platforms.
 - `edit` flow = `Export` plaintext to a temp file (0600) → editor → `ParseKV` → full re-encrypt and write back (`app.EditLoad`/`EditApply`); you don't manage the two keys by hand while editing.
-- **Full replacement, not a patch**: edit and overwrite-import rebuild the snapshot, re-detect `secret`, and reset `safe` to false. Omitted or unparsed entries can disappear. Edit rejects an entirely unparseable result, but currently discards parser warnings when some entries parse; check the complete text before saving and review keys/counts/classification afterward. Use single-item `set` without flags when preserving existing classification is required.
+- **Full replacement, not a patch**: edit and overwrite-import rebuild the snapshot, re-detect `secret`, and reset `safe` to false. Omitted or unparsed entries can disappear. Edit rejects an entirely unparseable result and the CLI prints parser warnings to stderr (the app layer discards them, so warnings are only visible through the CLI, not the UI); check the complete text before saving and review keys/counts/classification afterward. Use single-item `set` without flags when preserving existing classification is required.
 - External AES ciphertext stored as a value is a second layer: first decrypt the snapshot wrapper, then use its original external key/IV. See the [UI AES workflow](ui-guide.md). New AES-GCM encryptions must never reuse a key/IV pair for different messages. `aes gen-key` prints generated secrets; do not treat it as a masked read.
 
 ---

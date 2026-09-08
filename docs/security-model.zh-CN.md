@@ -65,7 +65,7 @@ safe 值是**获得授权的明文输出**，不只是"非敏感"分类。因此
 ## 6 · 容器与网络边界
 
 - 附带的 `docker-compose.yml` **不挂载** `~/.vaulty`、系统密钥存储、`~/.ssh` 或 Docker socket；使用非 root 用户、`cap_drop: ALL` 和 `no-new-privileges`。这只是起点，不是测得的防护率（Docker 逃逸与守护进程权限仍在）。
-- Compose **不限制**所有出口必须经桥；entrypoint **把 bridge token 打印到容器日志**（`docker/agent-entrypoint.sh`）。不要分享这些日志。
+- Compose **不限制**所有出口必须经桥。entrypoint 对 bridge token 只打印 `<set>`/`<unset>` 占位标记，从不输出 token 本身（`docker/agent-entrypoint.sh`）；token 经环境变量进入容器，项目挂载、历史与日志仍可能暴露它。不要分享这些日志。
 - bridge token 授予 PG/MySQL/Redis 隧道访问权，交付它就是交付数据库访问权，不只是元数据。项目挂载、持久化历史与日志可能暴露凭据。
 - 隧道监听地址跟随 `serve --addr`；`0.0.0.0` 会把明文 HTTP 和隧道暴露给可达网络。token 检查不加密传输。使用 `127.0.0.1` 或防火墙受限接口。
 - 代理不强制只读（需要只读就注册只读账号），也不脱敏业务数据。

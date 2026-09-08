@@ -42,11 +42,11 @@ DOCS := docs/README.md docs/README.zh-CN.md \
         docs/mongodb-tunnel-guide.md docs/mongodb-tunnel-guide.zh-CN.md
 
 # Cross-compile release binaries into release/ (one tarball/zip per platform,
-# including the READMEs, LICENSE, AGENTS.md and the current docs/ guides),
-# ready to attach to a GitHub release.
+# including the READMEs, LICENSE, AGENTS.md, CONTRIBUTING.md, SECURITY.md and
+# the current docs/ guides), ready to attach to a GitHub release.
 release:
 	rm -rf release && mkdir -p release/docs
-	cp README.md README.zh-CN.md LICENSE AGENTS.md release/
+	cp README.md README.zh-CN.md LICENSE AGENTS.md CONTRIBUTING.md CONTRIBUTING.zh-CN.md SECURITY.md SECURITY.zh-CN.md release/
 	cp $(DOCS) release/docs/
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
@@ -58,14 +58,15 @@ release:
 		echo ">> building $$base..."; \
 		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "release/vaulty-keeper$$ext" .; \
 		if [ "$$os" = "windows" ]; then \
-			(cd release && zip -rq "$$base.zip" "vaulty-keeper$$ext" "README.md" "README.zh-CN.md" "LICENSE" "AGENTS.md" "docs"); \
+			(cd release && zip -rq "$$base.zip" "vaulty-keeper$$ext" "README.md" "README.zh-CN.md" "LICENSE" "AGENTS.md" "CONTRIBUTING.md" "CONTRIBUTING.zh-CN.md" "SECURITY.md" "SECURITY.zh-CN.md" "docs"); \
 		else \
-			tar -C release -czf "release/$$base.tar.gz" "vaulty-keeper" "README.md" "README.zh-CN.md" "LICENSE" "AGENTS.md" "docs"; \
+			tar -C release -czf "release/$$base.tar.gz" "vaulty-keeper" "README.md" "README.zh-CN.md" "LICENSE" "AGENTS.md" "CONTRIBUTING.md" "CONTRIBUTING.zh-CN.md" "SECURITY.md" "SECURITY.zh-CN.md" "docs"; \
 		fi; \
 		rm -f "release/vaulty-keeper$$ext"; \
 	done
-	rm -f release/README.md release/README.zh-CN.md release/LICENSE release/AGENTS.md
+	rm -f release/README.md release/README.zh-CN.md release/LICENSE release/AGENTS.md release/CONTRIBUTING.md release/CONTRIBUTING.zh-CN.md release/SECURITY.md release/SECURITY.zh-CN.md
 	rm -rf release/docs
+	shasum -a 256 release/*.tar.gz release/*.zip > release/sha256sums.txt
 	@echo ">> done:"
 	@ls -lh release/
 

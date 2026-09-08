@@ -1,6 +1,6 @@
 # AGENTS.md
 
-个人 AI 工具箱（Go 单二进制）：加密 Apollo 配置快照、AES 加解密（Java CryptoUtil 兼容）、本地 Web UI。完整命令文档见 `README.md`；每条命令都能用 `vaulty-keeper <cmd> -h` 自查。
+个人 AI 工具箱（Go 单二进制）：加密 Apollo 配置快照、AES 加解密（Java CryptoUtil 兼容）、本地 Web UI。完整命令文档见 `README.md`；每条命令都能用 `vaulty-keeper <cmd> -h` 自查。构建、测试与文档双语/围栏/链接约定见 `CONTRIBUTING.md`（含中文版）；安全报告见 `SECURITY.md`。
 
 ## 构建
 
@@ -33,7 +33,7 @@ make build     # 产物 bin/vaulty-keeper
 以下命令输出对 AI 安全（敏感值自动掩码为 `*** (n chars)`），默认使用：
 
 ```sh
-bin/vaulty-keeper apollo list [<env>] --appid <id> --json
+bin/vaulty-keeper apollo list [<env>] --appid <id> --json   # 带 <env> 才有 JSON；无 <env> 只列快照名（appid），--json 不生效
 bin/vaulty-keeper apollo compare <a> <b> --appid <a_id> --appid-to <b_id> --json
 bin/vaulty-keeper apollo get <env> <key> --appid <id>        # 非 TTY 只对标记为安全的 key 给明文
 bin/vaulty-keeper apollo set/unset <env> <key> [<value>] --appid <id>
@@ -73,7 +73,7 @@ Mongo 隔离验收：`bash scripts/mongotest.sh --mongosh`；固定副本集端�
 - **`--plain` 防误标守卫**：`set --plain` / `mark --plain` 命中敏感规则（password/token/secret/JWT/带凭据 URI）的 key 时，非 TTY 一律拒绝、TTY 需二次确认。AI 不要尝试用 `--plain` 放行敏感 key 给自己读明文。
 - 快照目录：`--dir` 或 `VAULTY_KEEPER_APOLLO_DIR`，默认 `~/.vaulty/apollo/`。
 - 非 TTY 下 `apollo rm` 需 `--yes`、`apollo import` 覆盖已有快照需 `--force`；不要绕过。
-- 无参数 `vaulty-keeper` 显示完整命令 usage，并自动完成首次初始化：创建数据目录（`~/.vaulty/`、`~/.vaulty/apollo/`，0700）并生成 AES key/iv 列表的 `default` 条目（`~/.vaulty/aes.json`，0600），检测三把加密密钥（快照/敏感值/数据库）是否已初始化——缺失时 TTY 询问初始化、非 TTY 打印提示（交互菜单已移除，手动操作走 `vaulty-keeper ui` 或直接子命令）。
+- 无参数 `vaulty-keeper` 显示完整命令 usage，并自动完成首次初始化：创建数据目录（`~/.vaulty/`、`~/.vaulty/apollo/`，0700）并生成 AES key/iv 列表的 `default` 条目（`~/.vaulty/aes.json`，0600），检测密钥初始化状态——快照与敏感值密钥总是检查，DB 密钥仅在 DB 存储已存在（`~/.vaulty/db.json`）时才检查，否则由首次 `db init` 创建（交互菜单已移除，手动操作走 `vaulty-keeper ui` 或直接子命令）。
 
 ## 开发
 

@@ -40,7 +40,13 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists; skipping create"
           else
-            gh release create "$GITHUB_REF_NAME" release/*.tar.gz release/*.zip \
+            SUMS=$(sed -E 's|^([0-9a-f]{64})  release/|\1  |' release/sha256sums.txt)
+            gh release create "$GITHUB_REF_NAME" release/*.tar.gz release/*.zip release/sha256sums.txt \
               --repo "$GITHUB_REPOSITORY" --title "vaulty-keeper $GITHUB_REF_NAME" \
-              --notes "Prebuilt binaries: macOS/linux × x86_64/arm64, Windows × x86_64 (with README & LICENSE). See README「Quick Start」for build instructions."
+              --notes "Prebuilt binaries: macOS/linux × x86_64/arm64, Windows × x86_64 (with README & LICENSE). See README「Quick Start」for build instructions.
+
+            These binaries are unsigned: macOS Gatekeeper and Windows SmartScreen may warn on browser-downloaded archives. \`npm install -g vaulty-keeper\` avoids the prompt. See README Quick Start for bypass steps.
+
+            SHA256 checksums (sha256sums.txt asset):
+            $SUMS"
           fi

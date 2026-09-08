@@ -208,7 +208,7 @@ vaulty-keeper remote compare prod test --appid merdi --appid-to merdi2 --json
 
 - 每行 `KEY = value`，按**第一个 `=`** 分割，两侧去空格，value 可含 `=`。
 - 空行、行首 `#` 的整行（单行/多行注释）跳过。
-- **粘连自动拆分**：一行内粘在一起的多个 `KEY = ` 条目自动拆开并告警（如 `A = 1B = 2`），同时避免误拆 URL 查询参数（`...?TOKEN=1` 前的 `?` 不是 glue）。
+- **粘连自动拆分**：一行内粘在一起的多个 `KEY = ` 条目自动拆开并告警（如 `A = 1B = 2`；拆分器只认全大写 key，小写/混合大小写粘连行不会拆分），同时避免误拆 URL 查询参数（`...?TOKEN=1` 前的 `?` 不是 glue）。
 - key 校验 `[A-Za-z_][A-Za-z0-9_.-]*`，非法行跳过并告警。
 - 值两侧成对引号会被剥掉（`"merdi"` ≡ `merdi`）。
 
@@ -228,7 +228,7 @@ vaulty-keeper apollo edit prod --appid merdi                   # $EDITOR 打开�
 
 - 这些命令要求 stdin TTY（`internal/cli/cli.go` 的 `isTerminal()`），不是在验证真人身份。Agent 不得对真实数据执行它们。`export --copy` 在调用 `pbcopy` 前仍打印明文，在其他平台可能复制失败。
 - `edit` 流程 = `Export` 明文到临时文件（0600）→ 编辑器 → `ParseKV` 解析 → 整份重新加密写回（`app.EditLoad`/`EditApply`），编辑时不用手动管两把钥匙。
-- **整份替换，不是局部补丁**：edit 和覆盖导入重建快照、重新检测 `secret`，并将 `safe` 重置为 false。省略或解析失败的条目可能消失。edit 会拒绝完全无法解析的结果，但只要部分条目可解析，目前就会丢弃解析警告；保存前检查全文，保存后复核 key、数量和分类。需要保留已有分类时，使用不带分类 flag 的单条 `set`。
+- **整份替换，不是局部补丁**：edit 和覆盖导入重建快照、重新检测 `secret`，并将 `safe` 重置为 false。省略或解析失败的条目可能消失。edit 会拒绝完全无法解析的结果，CLI 会把解析警告打印到 stderr（app 层会丢弃警告，所以只有 CLI 入口可见警告，UI 不可见）；保存前检查全文，保存后复核 key、数量和分类。需要保留已有分类时，使用不带分类 flag 的单条 `set`。
 - 作为 value 存储的外部 AES 密文是第二层：先解开快照包装，再用原外部 key/IV 解密。入口见 [UI AES 流程](ui-guide.zh-CN.md)。新 AES-GCM 加密绝不能对不同消息重复使用同一 key/IV。`aes gen-key` 会打印生成的秘密，不属于掩码读取。
 
 ---

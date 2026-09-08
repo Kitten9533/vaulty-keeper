@@ -111,7 +111,7 @@ TTY 门禁检查 stdin 是否为终端，不验证真人身份或 stdout 去向�
 
 数据库夹具和 agent 隔离是不同角色。数据库镜像带原生客户端，不代表宿主或 agent 镜像已安装。仓库 Dockerfile 在 Go 构建阶段编译 vaulty-keeper，运行镜像包含 Node、git 和非 root agent 用户。agent CLI（含 Codex）可选安装。数据库客户端/驱动需在执行域另行安装。
 
-Compose 丢弃 capabilities、启用 `no-new-privileges`，挂载项目及持久化 agent home，不主动挂载宿主密钥/存储或 Docker socket。它**没有**强制桥为唯一网络出口。项目挂载内的秘密仍可访问；广泛出口、宿主服务、容器逃逸及宿主同用户访问需另行控制。entrypoint 当前会打印真实 bridge token，持久化历史/日志可能保留它。只交付经过授权的代理凭据，不交付宿主 DB 密钥或后端真实 URL。只授权一条连接时，不得把全局 token 当成单连接凭据分发。
+Compose 丢弃 capabilities、启用 `no-new-privileges`，挂载项目及持久化 agent home，不主动挂载宿主密钥/存储或 Docker socket。它**没有**强制桥为唯一网络出口。项目挂载内的秘密仍可访问；广泛出口、宿主服务、容器逃逸及宿主同用户访问需另行控制。entrypoint 对 bridge token 只打印 `<set>`/`<unset>` 占位标记，从不输出 token 本身；但交付给容器的凭据仍可能留在持久化历史/日志中。只交付经过授权的代理凭据，不交付宿主 DB 密钥或后端真实 URL。只授权一条连接时，不得把全局 token 当成单连接凭据分发。
 
 **`scripts/dbtest.sh` 已隔离重构，可以安全运行（C02 完成）。** 当前脚本按 PID 与容器标签跟踪自己启动的 serve 和容器，使用每次运行独立的临时目录/容器名和假 HOME、合成密钥，`--clean` 只清理登记的运行——不再宽泛 pkill、不使用固定容器名（`aipg`、`aimysql8`、`aimariadb`、`airedis`）、不覆盖真实 HOME 的 bridge-token。使用前先读脚本头注释。镜像是 `postgres:17.6-alpine`、MySQL **8.0**（`dockerproxy.net/library/mysql:8.0`，历史为 8.0.46）和 `redis:7`，不是 MySQL 8.4/MariaDB。[示例](db-proxy-examples.zh-CN.md) 提供未执行的合成步骤作为替代走查，不是硬性要求。
 
@@ -119,4 +119,4 @@ Compose 丢弃 capabilities、启用 `no-new-privileges`，挂载项目及持久
 
 现行行为依据：[存储/Resolve](../internal/dbproxy/store.go)、[监听同步和分发](../internal/dbproxy/tunnel.go)、[PostgreSQL](../internal/dbproxy/postgres.go)、[MySQL](../internal/dbproxy/mysql.go)、[Redis](../internal/dbproxy/redis.go)、[CLI 输入/链接/shell](../internal/cli/db.go)、[serve 启动](../internal/cli/remote.go)、[取钥匙](../internal/apollo/keyring.go)、[UI 连接输出](../internal/ui/db.go)、[Compose](../docker-compose.yml) 和 [entrypoint](../docker/agent-entrypoint.sh)。
 
-本指南描述工作区实现，不证明预编译 0.6.0 包已包含这些功能。现有发布包缺少所链接的 `docs/` 指南，打包修正（C03）前请使用匹配源码检出。本次文档更正未生成发布包，未运行运行时测试、真实 TLS 测试或人工 TTY 检查。带日期的历史 Mongo 验证矩阵仅由 [Mongo 指南](mongodb-tunnel-guide.zh-CN.md#验证状态) 维护。
+本指南描述工作区实现。最新发布 **v0.8.0** 已包含当前 DB 隧道与 MongoDB 行为并打包 `docs/` 指南；预编译 0.6.0 归档先于两者，且缺少所链接的 `docs/`。本次文档更正未生成发布包，未运行运行时测试、真实 TLS 测试或人工 TTY 检查。带日期的历史 Mongo 验证矩阵仅由 [Mongo 指南](mongodb-tunnel-guide.zh-CN.md#验证状态) 维护。

@@ -129,7 +129,7 @@ db.getSiblingDB('businessdb').runCommand({
 - 宿主密钥/存储不能防同用户权限的恶意进程。agent 应运行在不能接触这些资源的独立隔离域。
 - `db regen mongo-app` 为新连接轮换 token；已认证会话保留既有语义。`db off mongo-app` 在通常约两秒的同步后关闭监听，不承诺终止既有会话。`db on mongo-app` 恢复监听。这些控制不是即时会话撤销。
 - 同名 `db add` 未指定端口时保留原端口，但替换 URL、生成新 token 并重置为开启。需重新分发 token，必要时显式恢复关闭状态。修改活跃监听端口时，先关闭并等待端口停止，再更新/开启，或重启自己管理的 serve。enabled 是配置，不是健康；自动分配排除注册端口，不探测 OS 占用。已接受的握手可能保留先前 Resolve 状态。
-- 与 MongoDB 不同，PG/MySQL/Redis 对新旧注册连接均接受全局 bridge token，轮换专属 token 不撤销该访问权。容器 entrypoint 当前会打印 bridge token，不得把它或生成链接当成无害日志。
+- 与 MongoDB 不同，PG/MySQL/Redis 对新旧注册连接均接受全局 bridge token，轮换专属 token 不撤销该访问权。容器 entrypoint 对 bridge token 只打印 `<set>`/`<unset>` 占位标记，从不输出 token 本身；经环境变量交付的 token 或生成链接仍不得当成无害日志。
 
 ## 安全排错
 
@@ -148,9 +148,9 @@ db.getSiblingDB('businessdb').runCommand({
 
 ## 验证状态
 
-以下为 **2026-09-07 实现会话的历史证据**，来源保留于[实现记录](superpowers/plans/2026-09-07-mongodb-tunnel.zh-CN.md)。平台为 macOS 12.4 Intel、Docker Desktop；MongoDB 8.0.13 standalone 及已认证固定单节点副本集。被测状态是**基于 `7273bb21e8347777058a17fb95a16aa2a17a36dc` 的未提交 Mongo 工作区**，不是该 commit 本身，也不是发布二进制。此处未记录精确 dirty-tree 摘要及其余工具补丁版本，不能仅凭基线 SHA 推断可复现。
+以下为 **2026-09-07 实现会话的历史证据**，来源保留于[实现记录](superpowers/plans/2026-09-07-mongodb-tunnel.zh-CN.md)。平台为 macOS 12.4 Intel、Docker Desktop；MongoDB 8.0.13 standalone 及已认证固定单节点副本集。被测状态是**基于 `7273bb21e8347777058a17fb95a16aa2a17a36dc` 的未提交 Mongo 工作区**，不是该 commit 本身，也不是发布二进制。此处未记录精确 dirty-tree 摘要及其余工具补丁版本，不能仅凭基线 SHA 推断可复现。该 Mongo 工作后续已随 **v0.8.0**（2026-09-07）发布。
 
-[设计](superpowers/specs/2026-09-07-mongodb-tunnel-design.zh-CN.md) 解释已接受决策，计划保留执行来源，不构成长效 lead/worker 分工或可复用分支/提交许可。本指南是带日期验证矩阵的现行维护位置。下表每个通过项都是历史结果，**文档更正期间未重跑**；上方示例未执行。工作区功能不代表预编译 0.6.0 已包含，后者也未附带所链接的 `docs/` 指南（C03）。
+[设计](superpowers/specs/2026-09-07-mongodb-tunnel-design.zh-CN.md) 解释已接受决策，计划保留执行来源，不构成长效 lead/worker 分工或可复用分支/提交许可。本指南是带日期验证矩阵的现行维护位置。下表每个通过项都是历史结果，**文档更正期间未重跑**；上方示例未执行。Mongo 工作已包含在已发布的 **v0.8.0** 中，其归档打包了 `docs/` 指南；更早的 0.6.0 包先于 MongoDB，也未附带所链接的 `docs/`。
 
 | 检查 | 状态 / 范围 |
 |---|---|

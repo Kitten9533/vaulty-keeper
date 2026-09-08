@@ -8,7 +8,7 @@
 
 ## 合成夹具
 
-只在可丢弃的本地开发环境、仓库根目录执行，预先备好当前构建的 `bin/vaulty-keeper`。前提：Bash、Node、有权拉取/运行镜像的 Docker，以及 PATH 中的宿主 `psql`、MySQL 8 `mysql`、`redis-cli`。数据库镜像和仓库 agent 镜像不会安装这些宿主客户端。源码构建需要 Go，`make test` 还需要 Node。预编译 0.6.0 不证明已具备工作区新功能；现有发布包缺少链接的 `docs/`，C03 打包修正前使用匹配源码检出。
+只在可丢弃的本地开发环境、仓库根目录执行，预先备好当前构建的 `bin/vaulty-keeper`。前提：Bash、Node、有权拉取/运行镜像的 Docker，以及 PATH 中的宿主 `psql`、MySQL 8 `mysql`、`redis-cli`。数据库镜像和仓库 agent 镜像不会安装这些宿主客户端。源码构建需要 Go，`make test` 还需要 Node。最新发布 **v0.8.0** 已包含当前 DB 隧道与 MongoDB 行为并打包 `docs/` 指南，其预编译归档是这里配方对应的参考版本；更早的 0.6.0 归档缺少链接的 `docs/`，也不代表当前工作区功能。
 
 下方密码/数据全是公开合成夹具，不是生产输入。步骤创建不绑定宿主目录的临时数据库容器、唯一临时 HOME/存储/日志、显式合成密钥及自己管理的 serve PID；退出只清理这些资源，包括容器匿名卷。不运行 `db init`，不使用真实 vault，不调用 Keychain。不要用真实凭据/密钥替换。Docker 镜像拉取/缓存会保留，不停止 Docker 或无关容器。镜像 tag 不是不可变 digest，需逐字节复现时应记录解析后的 digest。
 
@@ -201,7 +201,7 @@ vaulty-keeper db connect pg-readonly --container
 
 仅将授权代理命令/token 交付容器，再在容器执行原生客户端。`--container` 只把打印地址改为 `host.docker.internal`，不改监听。`db connect` 总需要本地 DBKey/Resolve，不是无密钥远程命令；不要挂载宿主密钥打通它。Linux Docker 需要 `host-gateway` 映射；客户端需在容器安装。
 
-有意交付 bridge 地址/token 后，容器可用 `vaulty-keeper remote dblist` 获取名称/类型/端口/状态；`db list` 在本地列表失败时会尝试该回退。这不返回专属 token。全局 bridge token 授予**所有可达 PG/MySQL/Redis 新旧注册连接**的访问权，含账号允许的写入，不是仅掩码能力。Compose 未限制所有出口必须经桥，entrypoint 还会打印 token。项目挂载、持久化历史及日志可能暴露凭据。授权容器前阅读[安全模型](security-model.zh-CN.md)。
+有意交付 bridge 地址/token 后，容器可用 `vaulty-keeper remote dblist` 获取名称/类型/端口/状态；`db list` 在本地列表失败时会尝试该回退。这不返回专属 token。全局 bridge token 授予**所有可达 PG/MySQL/Redis 新旧注册连接**的访问权，含账号允许的写入，不是仅掩码能力。Compose 未限制所有出口必须经桥；entrypoint 对 token 只打印 `<set>`/`<unset>` 占位标记，从不输出 token 本身，但 token 仍经环境变量进入容器。项目挂载、持久化历史及日志可能暴露凭据。授权容器前阅读[安全模型](security-model.zh-CN.md)。
 
 ## 生命周期与排错
 

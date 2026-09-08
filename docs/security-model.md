@@ -65,7 +65,7 @@ A safe value is *authorized plaintext output*, not merely a non-secret classific
 ## 6 · Container and network boundary
 
 - The supplied `docker-compose.yml` does **not** mount `~/.vaulty`, the OS secret store, `~/.ssh` or the Docker socket; it uses a non-root user, `cap_drop: ALL` and `no-new-privileges`. It is a starting point, not a measured prevention rate (Docker escape and daemon privileges remain).
-- Compose does **not** restrict all egress to the bridge; the entrypoint **prints the bridge token to container logs** (`docker/agent-entrypoint.sh`). Do not share those logs.
+- Compose does **not** restrict all egress to the bridge. The entrypoint prints only a `<set>`/`<unset>` marker for the bridge token, never the token itself (`docker/agent-entrypoint.sh`); the token reaches the container via the environment, where mounted projects, history and logs can still expose it. Do not share those logs.
 - The bridge token grants PG/MySQL/Redis tunnel access, so granting it is granting database access, not just metadata. Project mounts, persistent history and logs can expose credentials.
 - Tunnel listeners follow `serve --addr`; `0.0.0.0` exposes plaintext HTTP and tunnels to reachable networks. Token checks do not encrypt transport. Use `127.0.0.1` or a firewall-restricted interface.
 - The proxy does not enforce read-only (register a read-only account if desired) and does not redact business data.

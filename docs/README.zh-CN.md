@@ -9,6 +9,8 @@
 | 文档 | 职责 |
 |---|---|
 | [../README.md](../README.md) · [中文](../README.zh-CN.md) | 安装、快速开始与命令参考（面向人工）。 |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) · [中文](../CONTRIBUTING.zh-CN.md) | 构建、测试与贡献方式；文档约定。 |
+| [../SECURITY.md](../SECURITY.md) · [中文](../SECURITY.zh-CN.md) | 安全报告策略与边界摘要；链接安全模型。 |
 | [../AGENTS.md](../AGENTS.md) | Agent 操作约束与检查（单一入口中文文件）。 |
 
 ## 现行指南（英文 + 中文配对）

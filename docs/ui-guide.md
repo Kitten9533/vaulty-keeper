@@ -23,7 +23,7 @@ vaulty-keeper ui --allow-plaintext  # additionally enable plaintext endpoints (e
 
 ### Windows
 
-The Windows release name includes its version, for example `vaulty-keeper-0.6.0-windows-x86_64.zip`; unzip it to get `vaulty-keeper.exe`. Use the `.exe` suffix:
+The Windows release name includes its version, for example `vaulty-keeper-0.8.0-windows-x86_64.zip`; unzip it to get `vaulty-keeper.exe`. Use the `.exe` suffix:
 
 ```powershell
 # PowerShell / CMD, in the extraction directory:
@@ -35,7 +35,7 @@ The Windows release name includes its version, for example `vaulty-keeper-0.6.0-
 - It prints `http://127.0.0.1:<port>/?t=<token>` and opens your default browser automatically (via `rundll32`).
 - **In PowerShell you need the `.\` prefix to run a program in the current directory** (bare `vaulty-keeper.exe ui` is not found); CMD does not require it.
 - Snapshot, sensitive-value and DB keys use **Windows Credential Manager** unless a nonempty environment override takes precedence; data lives under `%USERPROFILE%\.vaulty\` (snapshots in `.vaulty\apollo\`, DB connections in `.vaulty\db.json`). The separate AES key/IV list is plaintext JSON, not a Credential Manager entry.
-- API gates are shared across platforms (§8); browser launch and credential-store implementations differ. Current workspace features, including Mongo additions, are not proof that an older release binary contains them.
+- API gates are shared across platforms (§8); browser launch and credential-store implementations differ. The latest release **v0.8.0** includes the Mongo additions and bundles the current `docs/` guides; earlier release binaries (e.g. 0.6.0/0.7.x) predate them.
 
 ## 2 · Interface overview
 
@@ -99,7 +99,7 @@ Both need the UI token and **`--allow-plaintext`**. The request field `confirm:t
 
 ### 3.6 Reveal a single value (needs `--allow-plaintext`)
 
-Click **Reveal**, then **Show** in the dialog. Normally this decrypts the snapshot wrapper using its configured snapshot/sensitive key and displays the stored value. If that value is itself external AES ciphertext, a successful reveal shows that ciphertext, not the external plaintext.
+Click **Reveal**, then the dialog's **Reveal** button (English UI) in the dialog to request the value. Normally this decrypts the snapshot wrapper using its configured snapshot/sensitive key and displays the stored value. If that value is itself external AES ciphertext, a successful reveal shows that ciphertext, not the external plaintext.
 
 The manual key/IV fields appear **only after a reveal request fails**, not as an always-expandable option. A retry with both overrides first decrypts the snapshot wrapper, then the external ciphertext; it cannot repair a missing/wrong snapshot key. To decrypt external ciphertext after a successful reveal, a human can use the AES tool (§4) with the original external key/IV. Do not deliberately break key configuration to expose the advanced fields.
 

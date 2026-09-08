@@ -4,13 +4,28 @@
 
 个人 AI 工具箱（Go 单二进制）。快照值、注册数据库 URL 和隧道 token 加密存储，但不覆盖所有本地文件：AES key/IV 列表是明文 JSON，导入源、导出/下载及编辑器临时文件可能含明文。`vaulty-keeper ui` 提供仅本机监听的快照、AES 和数据库连接 Web UI。系统密钥存储及可选原生客户端依赖平台设施。
 
-本页负责安装与入门；[文档索引](docs/README.md)链接现行指南和历史记录。[安全模型](docs/security-model.zh-CN.md)是安全边界的统一维护依据。
+本页负责安装与入门；[文档索引](docs/README.md)链接现行指南和历史记录。[安全模型](docs/security-model.zh-CN.md)是安全边界的统一维护依据，[SECURITY.md](SECURITY.zh-CN.md) 说明安全报告方式，[CONTRIBUTING.md](CONTRIBUTING.zh-CN.md) 说明构建与贡献方式。
 
 ## 快速开始
 
-**方式一：下载预编译二进制**（无需安装 Go）：从 [Releases](https://github.com/Kitten9533/vaulty-keeper/releases) 下载对应平台的压缩包（macos/linux × x86_64/arm64，windows × x86_64），解压后把 `vaulty-keeper` 放到 PATH（Windows 为 `vaulty-keeper.exe`，压缩包名包含版本）。
+**方式一：通过 npm 安装**（推荐；需要 Node.js 18+）：
 
-本 README 描述当前源码工作区，包括尚未发布的 MongoDB 工作，**不代表现有 0.6.0 产物**。使用下载的二进制前先查发布说明。当前 Makefile 构建的压缩包包含二进制、两版 README、LICENSE、AGENTS.md 和当前 `docs/` 指南（索引、安全模型与五份指南，中英双语）；`docs/superpowers/` 历史记录仅保留在源码中。现有 0.6.0 产物不含 `docs/`；如需离线阅读，请在[源码仓库](https://github.com/Kitten9533/vaulty-keeper)选择对应 tag 的 `docs/`。当前工作区指南不是旧二进制的能力证据。
+```sh
+npm install -g vaulty-keeper
+```
+
+npm 渠道通过包管理器下载预编译二进制，而不是浏览器，因此 macOS Gatekeeper 与 Windows SmartScreen 不会将其标记为"下载的文件"——不会出现"无法验证开发者 / Windows 已保护你的电脑"提示。安装的是与下方 Releases 相同的 Go 二进制。
+
+**方式二：下载预编译二进制**（无需安装 Go 或 Node.js）：从 [Releases](https://github.com/Kitten9533/vaulty-keeper/releases) 下载对应平台的压缩包（macos/linux × x86_64/arm64，windows × x86_64），解压后把 `vaulty-keeper` 放到 PATH（Windows 为 `vaulty-keeper.exe`，压缩包名包含版本）。每次发布还会附带 `sha256sums.txt`，内含各压缩包的校验和。
+
+二进制未做代码签名，因此**浏览器下载**的压缩包在首次运行时可能被拦截：
+
+- **macOS** — Gatekeeper 提示"无法打开，因为无法验证开发者"（Apple Silicon 上可能提示"Apple 无法检查其是否包含恶意软件"）：右键点按二进制选择"打开"，或一次性移除隔离属性 `xattr -cr /path/to/vaulty-keeper`。
+- **Windows** — SmartScreen 提示"Windows 已保护你的电脑"/未知发布者：点击"更多信息"→"仍要运行"，或在 PowerShell 中一次性解除阻止 `Unblock-File vaulty-keeper.exe`。
+
+通过 npm 安装或源码构建不会触发这些提示，因为文件不会带有浏览器下载标记。
+
+本 README 描述当前源码工作区。最新发布是 **v0.8.0**（2026-09-07）：包含 MongoDB 8 隧道支持，压缩包内含两版 README、LICENSE、AGENTS.md 和当前 `docs/` 指南（索引、安全模型与五份指南，中英双语）；`docs/superpowers/` 历史记录仅保留在源码中。当前工作区还额外将 CONTRIBUTING.md/SECURITY.md 加入未来的发布压缩包，该打包改动尚未发布。更早的归档如 **0.6.0** 不含 `docs/`；如需离线阅读，请在[源码仓库](https://github.com/Kitten9533/vaulty-keeper)选择对应 tag 的 `docs/`。本工作区指南不是早于 v0.8.0 的二进制的能力证据。
 
 以下初始化由人工在宿主执行，会创建本地密钥/状态；不是隔离测试，也不是让 agent 访问真实秘密的指令：
 
@@ -20,7 +35,7 @@ vaulty-keeper sensitive init   # 首次：生成敏感值密钥
 vaulty-keeper ui               # 长驻服务，后续命令另开终端执行
 ```
 
-**方式二：源码构建**（需要 Go 1.26+、Git 和 Make；`make test` 还需要 Node.js）：
+**方式三：源码构建**（需要 Go 1.26+、Git 和 Make；`make test` 还需要 Node.js）：
 
 ```sh
 git clone https://github.com/Kitten9533/vaulty-keeper.git
@@ -34,7 +49,7 @@ make test           # 单测（含 Java↔Go 互操作向量）
 
 ## 手动操作
 
-直接运行 `vaulty-keeper`（无参数）显示全部命令与用法；运行时会自动初始化首次使用所需的基础设施——创建数据目录（`~/.vaulty/`、`~/.vaulty/apollo/`，0700）并生成 AES key/iv 列表的 `default` 条目（`~/.vaulty/aes.json`，0600），检测加密密钥（快照/敏感值/数据库）是否已初始化，缺失则在你的终端询问并一键初始化（非 TTY 只打印提示）。需要手动增删改时推荐用 `vaulty-keeper ui`（本地 Web UI，覆盖全部快照与 AES 功能），或直接敲下面的子命令。
+直接运行 `vaulty-keeper`（无参数）显示全部命令与用法；运行时会自动初始化首次使用所需的基础设施——创建数据目录（`~/.vaulty/`、`~/.vaulty/apollo/`，0700）并生成 AES key/iv 列表的 `default` 条目（`~/.vaulty/aes.json`，0600），检测密钥初始化状态——快照与敏感值密钥总是检查，DB 密钥仅在 DB 存储已存在（`~/.vaulty/db.json`）时才检查，否则由首次 `db init` 创建；缺失时在终端询问并一键初始化（非 TTY 只打印提示）。需要手动增删改时推荐用 `vaulty-keeper ui`（本地 Web UI，覆盖全部快照与 AES 功能），或直接敲下面的子命令。
 
 ```sh
 vaulty-keeper            # 显示完整命令树
@@ -141,7 +156,7 @@ CLI 导入覆盖已有快照需要 TTY 确认或非 TTY 显式 `--force`；UI �
 
 - 每行 `KEY = value`，按第一个 `=` 分割，两侧去空格（value 可含 `=`）。
 - 空行、行首 `#` 的整行（单行/多行注释）跳过。
-- 一行内粘在一起的多个 `KEY = ` 条目自动拆分并警告（如 `A = 1B = 2`）。
+- 一行内以大写字母开头粘在一起的多个 `KEY = ` 条目自动拆分并警告（如 `A = 1B = 2`；只认全大写 key）。
 - key 校验 `[A-Za-z_][A-Za-z0-9_.-]*`，非法行跳过并警告。
 
 两把快照密钥（通常存于系统密钥库；非空环境变量覆盖优先）：
@@ -229,7 +244,7 @@ vaulty-keeper serve --addr 0.0.0.0:8970     # 打印 token 并写入 ~/.vaulty/b
 
 ### 容器侧：agent 隔离域
 
-人工宿主终端 2，从仓库目录执行：选择不含秘密文件的项目目录。以下 token 交付是一项授权决定；当前入口脚本会**把 token 打印进容器日志**，不要分享这些日志。镜像在 Docker 内构建 Go，默认不安装可选 agent CLI 或数据库客户端。
+人工宿主终端 2，从仓库目录执行：选择不含秘密文件的项目目录。以下 token 交付是一项授权决定；入口脚本只打印 `<set>`/`<unset>` 占位标记，从不输出 token 本身。镜像在 Docker 内构建 Go，默认不安装可选 agent CLI 或数据库客户端。
 
 ```sh
 # 在 Docker 内从源码构建，无需宿主先 make build
@@ -391,7 +406,7 @@ docker stop vaulty-readme-pg   # --rm 删除这个演示容器
 
 ### 验证夹具
 
-MongoDB 夹具入口为 `bash scripts/mongotest.sh --mongosh` 和 `bash scripts/mongotest.sh --replica-set --mongosh`，使用合成凭据及显式临时存储/test key。[验证矩阵](docs/mongodb-tunnel-guide.zh-CN.md#验证状态)统一维护 2026-09-07 实现工作区的 MongoDB 8.0.13 standalone/固定副本集及 test/race/vet/build 带日期证据；这些历史结果不代表本次重跑或发布保证。真实 MongoDB TLS、人工交互 `db shell` 和最终独立复审仍未验证。
+MongoDB 夹具入口为 `bash scripts/mongotest.sh --mongosh` 和 `bash scripts/mongotest.sh --replica-set --mongosh`，使用合成凭据及显式临时存储/test key。[验证矩阵](docs/mongodb-tunnel-guide.zh-CN.md#验证状态)统一维护 2026-09-07 实现工作区的 MongoDB 8.0.13 standalone/固定副本集及 test/race/vet/build 带日期证据；这些历史结果本次文档更新未重跑，也不单独认证某个发布二进制（MongoDB 已随 v0.8.0 发布）。真实 MongoDB TLS、人工交互 `db shell` 和最终独立复审仍未验证。
 
 **`scripts/dbtest.sh` 已隔离重构，可以安全运行（C02 完成）。** 当前脚本按 PID 与容器标签跟踪自己启动的 serve 和容器，使用每次运行独立的临时目录与假 HOME、合成密钥，`--clean` 只清理它登记的资源——不再像历史版本那样宽泛 pkill serve 进程、删除固定容器（`aipg`、`aimysql8`、`aimariadb`、`airedis`）或覆盖真实 `~/.vaulty/bridge-token`。使用前先读脚本头注释；不要放进 CI。
 
@@ -403,15 +418,15 @@ make build
 ./scripts/dbtest.sh --clean  # 收尾：停 serve、删容器
 ```
 
-实际夹具镜像为 PostgreSQL `postgres:17.6-alpine`、MySQL `dockerproxy.net/library/mysql:8.0`（历史本地镜像为 8.0.46，不是 8.4/MariaDB）及 Redis `redis:7`。脚本需要 Docker、Python 3 和已构建二进制。后端宿主端口动态分配，隧道端口及种子查询如下：
+实际夹具镜像为 PostgreSQL `postgres:17.6-alpine`、MySQL `dockerproxy.net/library/mysql:8.0`（历史本地镜像为 8.0.46，不是 8.4/MariaDB）及 Redis `redis:7`。脚本需要 Docker、Python 3 和已构建二进制。后端、隧道与桥接端口每次运行动态分配（可用 `PGP`/`TUN_PG` 等环境变量覆盖），以脚本打印的连接方式为准；已准备数据及查询如下：
 
-| 注册名 | 隧道端口 | 已准备数据 / 查询 |
-|---|---|---|
-| `pgdb` | 15432 | `appdb.t`，`SELECT id,name FROM t ORDER BY id;` |
-| `mysqltest` / `mysqlnative` | 15435 / 15436 | `shop.customers`、`products`、`orders`；`SELECT COUNT(*) FROM shop.orders;` |
-| `cache` | 15434 | 需认证的 Redis；`PING`、合成 `SET`/`GET` |
+| 注册名 | 已准备数据 / 查询 |
+|---|---|
+| `pgdb` | `appdb.t`，`SELECT id,name FROM t ORDER BY id;` |
+| `mysqltest` / `mysqlnative` | `shop.customers`、`products`、`orders`；`SELECT COUNT(*) FROM shop.orders;` |
+| `cache` | 需认证的 Redis；`PING`、合成 `SET`/`GET` |
 
-脚本使用桥接端口 8972 及独立 DB 目录/密钥，不是宿主默认 `db shell` 上下文。其中命令/日志是特定夹具的历史示例，不证明所有客户端/配置可用。原生客户端准备及正/负向查询见 [DB 示例指南](docs/db-proxy-examples.zh-CN.md)；分享日志前先检查，其中可能含上游元数据和访问 token。
+脚本使用独立 DB 目录/密钥，不是宿主默认 `db shell` 上下文。其中命令/日志是特定夹具的历史示例，不证明所有客户端/配置可用。原生客户端准备及正/负向查询见 [DB 示例指南](docs/db-proxy-examples.zh-CN.md)；分享日志前先检查，其中可能含上游元数据和访问 token。
 
 ## AI / 脚本使用安全指引
 
