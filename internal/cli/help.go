@@ -24,16 +24,16 @@ var commandHelp = []cmdHelp{
 	// apollo
 	{domain: "apollo", path: "apollo init", syntax: "vaulty-keeper apollo init [--force]", descKey: "help.d.apollo.init"},
 	{domain: "apollo", path: "apollo import", syntax: "vaulty-keeper apollo import <file|-> [--name <env>] --appid <id> [--force] [--dir <dir>]", descKey: "help.d.apollo.import"},
-	{domain: "apollo", path: "apollo list", syntax: "vaulty-keeper apollo list [<env>] [--appid <id>] [--json] [--reveal] [--dir <dir>]", descKey: "help.d.apollo.list"},
+	{domain: "apollo", path: "apollo list", syntax: "vaulty-keeper apollo list [<env> [<appid>]] [--appid <id>] [--names] [--json] [--reveal] [--dir <dir>]", descKey: "help.d.apollo.list"},
 	{domain: "apollo", path: "apollo get", syntax: "vaulty-keeper apollo get <env> <key> [--appid <id>] [--dir <dir>]", descKey: "help.d.apollo.get"},
 	{domain: "apollo", path: "apollo set", syntax: "vaulty-keeper apollo set <env> <key> <value> [--plain|--secret] [--appid <id>] [--dir <dir>]", descKey: "help.d.apollo.set"},
 	{domain: "apollo", path: "apollo unset", syntax: "vaulty-keeper apollo unset <env> <key> [--appid <id>] [--dir <dir>]", descKey: "help.d.apollo.unset"},
 	{domain: "apollo", path: "apollo mark", syntax: "vaulty-keeper apollo mark <env> <key> --plain|--secret [--appid <id>] [--dir <dir>]", descKey: "help.d.apollo.mark"},
 	{domain: "apollo", path: "apollo compare", syntax: "vaulty-keeper apollo compare <envA> <envB> [--appid <a>] [--appid-to <b>] [--json] [--reveal] [--dir <dir>]", descKey: "help.d.apollo.compare"},
 	{domain: "apollo", path: "apollo reveal", syntax: "vaulty-keeper apollo reveal <env> <key...> [--appid <id>] [--json] [--key <aes>] [--iv <aes>] [--dir <dir>]", descKey: "help.d.apollo.reveal"},
-	{domain: "apollo", path: "apollo edit", syntax: "vaulty-keeper apollo edit <env> [--appid <id>] [--editor <bin>] [--dir <dir>]", descKey: "help.d.apollo.edit"},
-	{domain: "apollo", path: "apollo export", syntax: "vaulty-keeper apollo export <env> [--appid <id>] [--copy] [--dir <dir>]", descKey: "help.d.apollo.export"},
-	{domain: "apollo", path: "apollo rm", syntax: "vaulty-keeper apollo rm <env> --appid <id> [--yes] [--dir <dir>]", descKey: "help.d.apollo.rm"},
+	{domain: "apollo", path: "apollo edit", syntax: "vaulty-keeper apollo edit <env> [<appid>] [--appid <id>] [--editor <bin>] [--dir <dir>]", descKey: "help.d.apollo.edit"},
+	{domain: "apollo", path: "apollo export", syntax: "vaulty-keeper apollo export <env> [<appid>] [--appid <id>] [--copy] [--dir <dir>]", descKey: "help.d.apollo.export"},
+	{domain: "apollo", path: "apollo rm", syntax: "vaulty-keeper apollo rm <env> [<appid>] [--appid <id>] [--yes] [--dir <dir>]", descKey: "help.d.apollo.rm"},
 
 	// aes
 	{domain: "aes", path: "aes encrypt", syntax: "vaulty-keeper aes encrypt [--key <k>] [--iv <i>] [--name <entry>] [--file <p>] [<text>]", descKey: "help.d.aes.encrypt"},

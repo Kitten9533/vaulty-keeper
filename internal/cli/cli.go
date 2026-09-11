@@ -259,16 +259,37 @@ func snapDir(flagDir string) (string, error) {
 	return filepath.Join(home, ".vaulty", "apollo"), nil
 }
 
-func snapPath(dir, name, appID string) (string, error) {
-	if err := apollo.ValidateSnapshotName(name); err != nil {
-		return "", err
+// envAppID reads <env> [appid] from positional args. A second positional is
+// the AppID; --appid may still be used instead. Extra positionals, or a
+// second positional that disagrees with --appid, are errors so "test merdi"
+// is never silently dropped.
+func envAppID(fs *flag.FlagSet, flagAppID, usageKey string) (name, appID string, err error) {
+	switch fs.NArg() {
+	case 0:
+		return "", "", errors.New(i18n.T(usageKey))
+	case 1:
+		return fs.Arg(0), flagAppID, nil
+	case 2:
+		name, appID = fs.Arg(0), fs.Arg(1)
+		if flagAppID != "" && flagAppID != appID {
+			return "", "", fmt.Errorf("%s", i18n.T("cli.appid-conflict", appID, flagAppID))
+		}
+		return name, appID, nil
+	default:
+		return "", "", fmt.Errorf("%s", i18n.T("cli.too-many-args", fs.Arg(2)))
 	}
-	return apollo.SnapPath(dir, name, appID), nil
 }
 
-func mustSnapshot(path, name string) (*apollo.Snapshot, int) {
+func loadSnapshot(dir, name, appID string) (*apollo.Snapshot, int) {
+	if err := apollo.ValidateSnapshotName(name); err != nil {
+		return nil, fail("%s", err.Error())
+	}
+	path := apollo.SnapPath(dir, name, appID)
 	s, err := apollo.Load(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fail("%s", app.SnapshotNotFound(dir, name, appID).Error())
+		}
 		return nil, fail("%s", i18n.T("cli.load-snapshot-failed", name, err.Error()))
 	}
 	return s, 0
@@ -414,8 +435,9 @@ func apolloList(args []string) int {
 	reveal := fs.Bool("reveal", false, "show plaintext values")
 	yes := fs.Bool("yes", false, "deprecated: plaintext is TTY-only; --yes no longer enables it when piped")
 	jsonOut := fs.Bool("json", false, "output JSON")
+	namesOnly := fs.Bool("names", false, "list key names only (no decrypt)")
 	dir := fs.String("dir", "", "snapshot directory")
-	appID := fs.String("appid", "", "app id (default: legacy {env}.json)")
+	appIDFlag := fs.String("appid", "", "app id (default: legacy {env}.json)")
 	if code, helped := parseFlags(fs, args); helped || code != 0 {
 		return code
 	}
@@ -423,15 +445,33 @@ func apolloList(args []string) int {
 	if *reveal && !isTerminal() {
 		return fail("apollo list: %s", i18n.T("cli.plaintext-tty-only"))
 	}
+	if *namesOnly && *reveal {
+		return fail("apollo list: %s", i18n.T("cli.names-reveal-conflict"))
+	}
 
 	dirPath, err := snapDir(*dir)
 	if err != nil {
 		return fail("apollo list: %v", err)
 	}
 	if fs.NArg() == 0 {
+		if *appIDFlag != "" {
+			return fail("apollo list: %s", i18n.T("usage.apollo.list"))
+		}
 		refs, err := apollo.ListSnapshots(dirPath)
 		if err != nil {
 			return fail("apollo list: %v", err)
+		}
+		if *jsonOut {
+			snaps := make([]map[string]string, 0, len(refs))
+			for _, r := range refs {
+				snaps = append(snaps, map[string]string{"name": r.Name, "app_id": r.AppID})
+			}
+			b, err := json.MarshalIndent(map[string]any{"snapshots": snaps}, "", "  ")
+			if err != nil {
+				return fail("apollo list: %v", err)
+			}
+			fmt.Println(string(b))
+			return 0
 		}
 		for _, r := range refs {
 			if r.AppID != "" {
@@ -442,16 +482,11 @@ func apolloList(args []string) int {
 		}
 		return 0
 	}
-	name := fs.Arg(0)
-	snapKey, sensitiveKey, err := bothKeys()
+	name, appID, err := envAppID(fs, *appIDFlag, "usage.apollo.list")
 	if err != nil {
 		return fail("apollo list: %v", err)
 	}
-	path, err := snapPath(dirPath, name, *appID)
-	if err != nil {
-		return fail("apollo list: %v", err)
-	}
-	s, code := mustSnapshot(path, name)
+	s, code := loadSnapshot(dirPath, name, appID)
 	if code != 0 {
 		return code
 	}
@@ -461,6 +496,29 @@ func apolloList(args []string) int {
 	}
 	sort.Strings(keys)
 
+	if *namesOnly {
+		if *jsonOut {
+			b, err := json.MarshalIndent(map[string]any{
+				"name":   name,
+				"app_id": s.Meta.AppID,
+				"keys":   keys,
+			}, "", "  ")
+			if err != nil {
+				return fail("apollo list: %v", err)
+			}
+			fmt.Println(string(b))
+			return 0
+		}
+		for _, k := range keys {
+			fmt.Println(k)
+		}
+		return 0
+	}
+
+	snapKey, sensitiveKey, err := bothKeys()
+	if err != nil {
+		return fail("apollo list: %v", err)
+	}
 	decrypted := map[string]string{}
 	for _, k := range keys {
 		v, err := s.DecryptItem(s.Items[k], snapKey, sensitiveKey)
@@ -801,10 +859,10 @@ func apolloExport(args []string) int {
 	if !isTerminal() {
 		return fail("apollo export: %s", i18n.T("cli.plaintext-tty-only"))
 	}
-	if fs.NArg() != 1 {
-		return fail("apollo export: %s", i18n.T("usage.apollo.export"))
+	name, resolvedAppID, err := envAppID(fs, *appID, "usage.apollo.export")
+	if err != nil {
+		return fail("apollo export: %v", err)
 	}
-	name := fs.Arg(0)
 	dirPath, err := snapDir(*dir)
 	if err != nil {
 		return fail("apollo export: %v", err)
@@ -813,7 +871,7 @@ func apolloExport(args []string) int {
 	if err != nil {
 		return fail("apollo export: %v", err)
 	}
-	text, err := app.Export(dirPath, name, *appID, key, sensitiveKey)
+	text, err := app.Export(dirPath, name, resolvedAppID, key, sensitiveKey)
 	if err != nil {
 		return fail("apollo export: %v", err)
 	}
@@ -840,11 +898,11 @@ func apolloRm(args []string) int {
 	if code, helped := parseFlags(fs, args); helped || code != 0 {
 		return code
 	}
-	if fs.NArg() != 1 {
-		return fail("apollo rm: %s", i18n.T("usage.apollo.rm"))
+	name, resolvedAppID, err := envAppID(fs, *appID, "usage.apollo.rm")
+	if err != nil {
+		return fail("apollo rm: %v", err)
 	}
-	name := fs.Arg(0)
-	if err := apollo.ValidateAppID(*appID); err != nil {
+	if err := apollo.ValidateAppID(resolvedAppID); err != nil {
 		return fail("apollo rm: --appid is required: %v", err)
 	}
 	dirPath, err := snapDir(*dir)
@@ -852,7 +910,7 @@ func apolloRm(args []string) int {
 		return fail("apollo rm: %v", err)
 	}
 	if !*yes && isTerminal() {
-		fmt.Printf("%s", i18n.T("cli.rm-confirm", name, *appID))
+		fmt.Printf("%s", i18n.T("cli.rm-confirm", name, resolvedAppID))
 		var ans string
 		fmt.Scanln(&ans)
 		if !strings.EqualFold(ans, "y") && !strings.EqualFold(ans, "yes") {
@@ -862,14 +920,14 @@ func apolloRm(args []string) int {
 	} else if !*yes {
 		return fail("apollo rm: %s", i18n.T("cli.rm-non-tty"))
 	}
-	ok, err := app.Remove(dirPath, name, *appID)
+	ok, err := app.Remove(dirPath, name, resolvedAppID)
 	if err != nil {
 		return fail("apollo rm: %v", err)
 	}
 	if !ok {
-		return fail("apollo rm: %s", i18n.T("cli.rm-not-found", name, *appID))
+		return fail("apollo rm: %s", i18n.T("cli.rm-not-found", name, resolvedAppID))
 	}
-	fmt.Println(green(i18n.T("cli.removed-snapshot", name, *appID)))
+	fmt.Println(green(i18n.T("cli.removed-snapshot", name, resolvedAppID)))
 	return 0
 }
 
@@ -945,10 +1003,10 @@ func apolloEdit(args []string) int {
 	if !isTerminal() {
 		return fail("apollo edit: %s", i18n.T("cli.plaintext-tty-only-edit"))
 	}
-	if fs.NArg() != 1 {
-		return fail("apollo edit: %s", i18n.T("usage.apollo.edit"))
+	name, resolvedAppID, err := envAppID(fs, *appID, "usage.apollo.edit")
+	if err != nil {
+		return fail("apollo edit: %v", err)
 	}
-	name := fs.Arg(0)
 	dirPath, err := snapDir(*dir)
 	if err != nil {
 		return fail("apollo edit: %v", err)
@@ -957,7 +1015,7 @@ func apolloEdit(args []string) int {
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
-	text, err := app.EditLoad(dirPath, name, *appID, snapKey, sensitiveKey)
+	text, err := app.EditLoad(dirPath, name, resolvedAppID, snapKey, sensitiveKey)
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}
@@ -999,7 +1057,7 @@ func apolloEdit(args []string) int {
 	for _, w := range warnings {
 		fmt.Fprintln(os.Stderr, i18n.T("cli.warning", w))
 	}
-	n, err := app.EditApply(dirPath, name, *appID, snapKey, sensitiveKey, string(content))
+	n, err := app.EditApply(dirPath, name, resolvedAppID, snapKey, sensitiveKey, string(content))
 	if err != nil {
 		return fail("apollo edit: %v", err)
 	}

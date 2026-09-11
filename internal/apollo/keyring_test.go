@@ -2,8 +2,25 @@ package apollo
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
+
+func TestSetKeyStoreForTestRestores(t *testing.T) {
+	t.Setenv(EnvKey, "")
+	old := keyStoreGet
+	restore := SetKeyStoreForTest(
+		func(string) (string, error) { return "", errors.New("empty") },
+		nil,
+	)
+	if _, err := SnapshotKey(); err == nil {
+		t.Fatal("stubbed empty store should fail SnapshotKey")
+	}
+	restore()
+	if fmt.Sprintf("%p", keyStoreGet) != fmt.Sprintf("%p", old) {
+		t.Fatal("SetKeyStoreForTest did not restore keyStoreGet")
+	}
+}
 
 // TestGenerateAndStoreDBKeyInMemory exercises key generation against an
 // in-memory store. It deliberately does NOT touch the real Keychain: a real

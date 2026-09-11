@@ -30,8 +30,10 @@ vaulty-keeper sensitive init                       # 首次：生成敏感值密
 vaulty-keeper apollo import prod.txt --appid xx    # 解析粘贴内容；--appid 必填；--name 省略时自动取文件名；已存在时需 --force 覆盖
 vaulty-keeper apollo import - --name prod --appid xx   # 从 stdin 读（旧写法 --app-id 仍兼容）
 vaulty-keeper apollo list                          # 列出快照（环境 + AppID）
+vaulty-keeper apollo list --json                   # catalog JSON：{snapshots:[{name, app_id}, ...]}
+vaulty-keeper apollo list test merdi --names --json # 只打 key 名，不解密；第二个位置参数是 appid
 vaulty-keeper apollo list prod --appid xx          # 非 TTY 未放行值掩码；--reveal 要求 stdin TTY
-vaulty-keeper apollo list prod --appid xx --json   # JSON 输出（AI 友好）
+vaulty-keeper apollo list prod --appid xx --json   # JSON 值（AI 友好）
 vaulty-keeper apollo get prod --appid xx SOME_KEY  # 非 TTY 下只对标记为安全的 key 输出明文，其余掩码
 vaulty-keeper apollo set prod --appid xx SOME_KEY value
 vaulty-keeper apollo set prod --appid xx SOME_KEY value --plain    # 显式标记为安全：AI/脚本可读明文
@@ -42,10 +44,10 @@ vaulty-keeper apollo compare prod test --appid xx --appid-to yy   # added/remove
 vaulty-keeper apollo compare prod test --appid xx --appid-to yy --json
 vaulty-keeper apollo reveal prod --appid xx SECRET_TOKEN          # 显示敏感值明文（仅 TTY）
 vaulty-keeper apollo reveal prod --appid xx app.fs.oss.secret-key --key <aes> --iv <aes>   # 解密外部 AES 密文（仅 TTY）
-vaulty-keeper apollo edit prod --appid xx         # $EDITOR 打开明文编辑，保存后自动重新加密（仅 TTY）
-vaulty-keeper apollo export prod --appid xx       # 解密全量输出，供粘贴回 Apollo（仅 TTY）
+vaulty-keeper apollo edit prod --appid xx         # $EDITOR 打开明文编辑，保存后自动重新加密（仅 TTY）；也接受 `edit prod merdi`
+vaulty-keeper apollo export prod --appid xx       # 解密全量输出，供粘贴回 Apollo（仅 TTY）；也接受 `export prod merdi`
 vaulty-keeper apollo export prod --appid xx --copy # 先打印，再用 macOS pbcopy 复制（仅 TTY）
-vaulty-keeper apollo rm prod --appid xx           # 删除快照（TTY 确认；非 TTY 需 --yes）
+vaulty-keeper apollo rm prod --appid xx           # 删除快照（TTY 确认；非 TTY 需 --yes）；也接受 `rm prod merdi --yes`
 ```
 
 > 明文命令（`reveal`/`export`/`edit`/`list|compare --reveal`/`aes decrypt`）要求 **stdin 为 TTY**，`--yes` 不绕过此检查。这是防误操作门禁，不是真人认证，也不检查 stdout。TTY 下 `get` 可以直接输出明文。agent 不得调用真实秘密的明文出口或伪造 TTY。

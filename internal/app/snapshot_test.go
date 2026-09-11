@@ -242,3 +242,22 @@ func TestLoadErrorMentionsAppIDAndHints(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadErrorHintsSwappedEnvAndAppID(t *testing.T) {
+	dir := t.TempDir()
+	key := make([]byte, 32)
+	if _, err := Import(dir, "test", "merdi", "A = 1\n", key, key); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err := GetValueSafe(dir, "merdi", "test", key, key, "A")
+	if err == nil {
+		t.Fatal("expected an error for swapped env/appid")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `"merdi" (appid test)`) {
+		t.Errorf("error missing requested snapshot:\n%s", msg)
+	}
+	if !strings.Contains(msg, "test (appid merdi)") {
+		t.Errorf("error missing swapped candidate:\n%s", msg)
+	}
+}

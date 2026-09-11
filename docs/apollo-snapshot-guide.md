@@ -238,13 +238,14 @@ vaulty-keeper apollo edit prod --appid merdi                   # open in $EDITOR
 | What you want | Command |
 |---|---|
 | Land config copied from Apollo | `apollo import prod.txt --name prod --appid merdi` |
-| List all snapshots | `apollo list` |
+| List all snapshots | `apollo list --json` |
+| Check missing keys (no decrypt) | `apollo list test merdi --names --json` |
 | AI reads a value (masked) | `apollo get prod KEY --appid merdi` |
 | AI checks two environments match | `apollo compare prod test --appid merdi --appid-to merdi2 --json` |
 | Allowlist a definitely-safe key for AI | `apollo set prod KEY v --plain --appid merdi` / `apollo mark prod KEY --plain --appid merdi` |
 | Revoke the allowlist (also classify as secret) | `apollo mark prod KEY --secret --appid merdi` |
 | View sensitive plaintext (your TTY) | `apollo reveal prod KEY --appid merdi` |
 | Full export / edit | `apollo export prod --appid merdi` / `apollo edit prod --appid merdi` |
-| "Snapshot not found" error | look for the **similar snapshots** in the hint (other appids of the same env) — usually a typo in `--appid` |
+| "Snapshot not found" error | look for the **similar snapshots** in the hint (other appids of the same env, or the env/appid swap) — usually a typo or swapped `--appid` |
 
 Commands in this table are subcommands: prefix them with `vaulty-keeper`. `KEY`/`v` are placeholders, not fixture names/values.

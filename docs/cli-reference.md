@@ -30,8 +30,10 @@ vaulty-keeper sensitive init                       # first run: create sensitive
 vaulty-keeper apollo import prod.txt --appid xx    # parse pasted content; --appid required; --name defaults to file name; existing snapshot needs --force
 vaulty-keeper apollo import - --name prod --appid xx   # read from stdin (legacy --app-id still accepted)
 vaulty-keeper apollo list                          # list snapshots (env + AppID)
+vaulty-keeper apollo list --json                   # catalog JSON: {snapshots:[{name, app_id}, ...]}
+vaulty-keeper apollo list test merdi --names --json # key names only, no decrypt; second positional is appid
 vaulty-keeper apollo list prod --appid xx          # non-TTY: unmarked values masked; --reveal requires stdin TTY
-vaulty-keeper apollo list prod --appid xx --json   # JSON output (AI-friendly)
+vaulty-keeper apollo list prod --appid xx --json   # JSON values (AI-friendly)
 vaulty-keeper apollo get prod --appid xx SOME_KEY  # non-TTY: plaintext only for keys explicitly marked safe, everything else masked
 vaulty-keeper apollo set prod --appid xx SOME_KEY value
 vaulty-keeper apollo set prod --appid xx SOME_KEY value --plain    # explicitly mark as safe: AI/scripts may read plaintext
@@ -42,10 +44,10 @@ vaulty-keeper apollo compare prod test --appid xx --appid-to yy   # added/remove
 vaulty-keeper apollo compare prod test --appid xx --appid-to yy --json
 vaulty-keeper apollo reveal prod --appid xx SECRET_TOKEN          # show sensitive plaintext (TTY only)
 vaulty-keeper apollo reveal prod --appid xx app.fs.oss.secret-key --key <aes> --iv <aes>   # decrypt external AES ciphertext (TTY only)
-vaulty-keeper apollo edit prod --appid xx         # $EDITOR plaintext edit, re-encrypted on save (TTY only)
-vaulty-keeper apollo export prod --appid xx       # decrypt everything for pasting back into Apollo (TTY only)
+vaulty-keeper apollo edit prod --appid xx         # $EDITOR plaintext edit, re-encrypted on save (TTY only); `edit prod merdi` also accepted
+vaulty-keeper apollo export prod --appid xx       # decrypt everything for pasting back into Apollo (TTY only); `export prod merdi` also accepted
 vaulty-keeper apollo export prod --appid xx --copy # prints first, then copies using macOS pbcopy (TTY only)
-vaulty-keeper apollo rm prod --appid xx           # delete snapshot (TTY confirms; non-TTY needs --yes)
+vaulty-keeper apollo rm prod --appid xx           # delete snapshot (TTY confirms; non-TTY needs --yes); `rm prod merdi --yes` also accepted
 ```
 
 > Plaintext commands (`reveal`/`export`/`edit`/`list|compare --reveal`/`aes decrypt`) require **stdin to be a TTY**; `--yes` does not bypass that check. This is an accident-prevention gate, not human authentication or a check on stdout. TTY `get` can print plaintext directly. Agents must not invoke real-secret plaintext exits or fabricate a TTY.

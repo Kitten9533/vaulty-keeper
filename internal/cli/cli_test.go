@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"vaulty-keeper/internal/aesx"
+	"vaulty-keeper/internal/apollo"
 	"vaulty-keeper/internal/i18n"
 )
 
@@ -450,6 +452,173 @@ func TestListAndCompareJSON(t *testing.T) {
 	}
 	if _, ok := cm.Changed["FOO"]; !ok {
 		t.Errorf("compare --json missing FOO: %s", out)
+	}
+}
+
+func TestApolloListCatalogJSONAndPositionalAppID(t *testing.T) {
+	i18nTest(t)
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	in := filepath.Join(dir, "paste.txt")
+	os.WriteFile(in, []byte("FOO = 1\nSECRET_TOKEN = abc\n"), 0o600)
+	if code := Run([]string{"apollo", "import", in, "--name", "test", "--dir", snap, "--appid", "merdi"}); code != 0 {
+		t.Fatalf("import failed with code %d", code)
+	}
+	if code := Run([]string{"apollo", "import", in, "--name", "prod", "--dir", snap, "--appid", "merdi"}); code != 0 {
+		t.Fatalf("import prod failed with code %d", code)
+	}
+
+	out := captureStdout(t, func() {
+		if code := Run([]string{"apollo", "list", "--json", "--dir", snap}); code != 0 {
+			t.Fatalf("catalog --json failed with code %d", code)
+		}
+	})
+	var catalog struct {
+		Snapshots []struct {
+			Name  string `json:"name"`
+			AppID string `json:"app_id"`
+		} `json:"snapshots"`
+	}
+	if err := json.Unmarshal([]byte(out), &catalog); err != nil {
+		t.Fatalf("catalog --json not valid json: %v\n%s", err, out)
+	}
+	seen := map[string]bool{}
+	for _, s := range catalog.Snapshots {
+		seen[s.Name+"/"+s.AppID] = true
+	}
+	if !seen["test/merdi"] || !seen["prod/merdi"] {
+		t.Fatalf("catalog missing test/merdi or prod/merdi: %s", out)
+	}
+
+	out = captureStdout(t, func() {
+		if code := Run([]string{"apollo", "list", "test", "merdi", "--names", "--json", "--dir", snap}); code != 0 {
+			t.Fatalf("list test merdi --names failed with code %d", code)
+		}
+	})
+	var named struct {
+		Name  string            `json:"name"`
+		AppID string            `json:"app_id"`
+		Keys  []string          `json:"keys"`
+		Items map[string]string `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &named); err != nil {
+		t.Fatalf("names --json not valid json: %v\n%s", err, out)
+	}
+	if named.Name != "test" || named.AppID != "merdi" {
+		t.Fatalf("names addressed wrong snapshot: %#v", named)
+	}
+	if named.Items != nil {
+		t.Fatalf("--names leaked items: %#v", named.Items)
+	}
+	wantKeys := map[string]bool{"FOO": true, "SECRET_TOKEN": true}
+	if len(named.Keys) != 2 || !wantKeys[named.Keys[0]] || !wantKeys[named.Keys[1]] {
+		t.Fatalf("keys = %#v", named.Keys)
+	}
+
+	errOut := captureStderr(t, func() {
+		if code := Run([]string{"apollo", "list", "test", "merdi", "extra", "--dir", snap}); code != 1 {
+			t.Fatalf("extra positional returned %d, want 1", code)
+		}
+	})
+	if !strings.Contains(errOut, "extra") && !strings.Contains(errOut, "too many") && !strings.Contains(errOut, "usage") {
+		t.Fatalf("extra positional stderr %q should mention the extra arg or usage", errOut)
+	}
+
+	errOut = captureStderr(t, func() {
+		if code := Run([]string{"apollo", "list", "test", "merdi", "--appid", "other", "--dir", snap}); code != 1 {
+			t.Fatalf("conflicting --appid returned %d, want 1", code)
+		}
+	})
+	if !strings.Contains(errOut, "appid") {
+		t.Fatalf("conflicting --appid stderr %q should mention appid", errOut)
+	}
+}
+
+func TestApolloListNamesSkipsKeys(t *testing.T) {
+	i18nTest(t)
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	in := filepath.Join(dir, "paste.txt")
+	os.WriteFile(in, []byte("FOO = 1\nSECRET_TOKEN = abc\n"), 0o600)
+	if code := Run([]string{"apollo", "import", in, "--name", "test", "--dir", snap, "--appid", "merdi"}); code != 0 {
+		t.Fatalf("import failed with code %d", code)
+	}
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", "")
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", "")
+	// Isolate the platform store too: a machine that already ran apollo init
+	// would otherwise let a mistaken bothKeys() still succeed.
+	t.Cleanup(apollo.SetKeyStoreForTest(
+		func(string) (string, error) { return "", errors.New("test keystore empty") },
+		func(string, string) error { return errors.New("test keystore read-only") },
+	))
+
+	out := captureStdout(t, func() {
+		if code := Run([]string{"apollo", "list", "test", "merdi", "--names", "--json", "--dir", snap}); code != 0 {
+			t.Fatalf("--names without keys failed with code %d", code)
+		}
+	})
+	var named struct {
+		Keys []string `json:"keys"`
+	}
+	if err := json.Unmarshal([]byte(out), &named); err != nil {
+		t.Fatalf("names --json: %v\n%s", err, out)
+	}
+	if len(named.Keys) != 2 {
+		t.Fatalf("keys = %#v", named.Keys)
+	}
+}
+
+func TestApolloListMissingSnapshotHintsSwappedEnv(t *testing.T) {
+	i18nTest(t)
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	in := filepath.Join(dir, "paste.txt")
+	os.WriteFile(in, []byte("FOO = 1\n"), 0o600)
+	if code := Run([]string{"apollo", "import", in, "--name", "test", "--dir", snap, "--appid", "merdi"}); code != 0 {
+		t.Fatalf("import failed with code %d", code)
+	}
+
+	errOut := captureStderr(t, func() {
+		if code := Run([]string{"apollo", "list", "merdi", "--appid", "test", "--dir", snap}); code != 1 {
+			t.Fatalf("swapped env/appid returned %d, want 1", code)
+		}
+	})
+	if !strings.Contains(errOut, "similar snapshots") || !strings.Contains(errOut, "test (appid merdi)") {
+		t.Fatalf("hint should mention similar snapshots: test (appid merdi), got %q", errOut)
+	}
+}
+
+func TestApolloRmPositionalAppID(t *testing.T) {
+	i18nTest(t)
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("VAULTY_KEEPER_APOLLO_KEY", key)
+	t.Setenv("VAULTY_KEEPER_SENSITIVE_KEY", key)
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	in := filepath.Join(dir, "paste.txt")
+	os.WriteFile(in, []byte("FOO = 1\n"), 0o600)
+	if code := Run([]string{"apollo", "import", in, "--name", "test", "--dir", snap, "--appid", "merdi"}); code != 0 {
+		t.Fatalf("import failed with code %d", code)
+	}
+	if code := Run([]string{"apollo", "rm", "test", "merdi", "--yes", "--dir", snap}); code != 0 {
+		t.Fatalf("rm test merdi failed with code %d", code)
+	}
+	out := captureStdout(t, func() {
+		if code := Run([]string{"apollo", "list", "--json", "--dir", snap}); code != 0 {
+			t.Fatalf("catalog after rm failed with code %d", code)
+		}
+	})
+	if strings.Contains(out, "merdi") {
+		t.Fatalf("removed snapshot still listed: %s", out)
 	}
 }
 

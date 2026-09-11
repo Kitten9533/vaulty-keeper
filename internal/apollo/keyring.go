@@ -47,6 +47,22 @@ var (
 	keyStoreSet = keyStoreSetImpl
 )
 
+// SetKeyStoreForTest replaces the platform secret-store accessors so tests
+// never touch the real Keychain. Restore via the returned function
+// (typically t.Cleanup).
+func SetKeyStoreForTest(get func(account string) (string, error), set func(account, value string) error) func() {
+	oldGet, oldSet := keyStoreGet, keyStoreSet
+	if get != nil {
+		keyStoreGet = get
+	}
+	if set != nil {
+		keyStoreSet = set
+	}
+	return func() {
+		keyStoreGet, keyStoreSet = oldGet, oldSet
+	}
+}
+
 // SnapshotKey resolves the snapshot encryption key: env override first, then
 // the platform secret store.
 func SnapshotKey() ([]byte, error) {

@@ -246,6 +246,8 @@ docker stop vaulty-readme-pg   # --rm 删除这个演示容器
 非 TTY 支持取决于具体命令：明文出口刻意拒绝，写操作可能需要显式 flag。`--json` 也非通用（包括 `apollo compare --json` 无差异时的文本结果）。stdout 明文可能进入对话上下文、会话日志和同步系统。含 token 的命令也必须按凭据对待。
 
 **日常读取及获授权写入（不是统一授权）**
+- `apollo list --json` — catalog `{snapshots:[{name, app_id}, ...]}`（不解密）
+- `apollo list <env> [<appid>] --names --json` — 只打 key 名，不解密
 - `apollo list <env> --appid xx [--json]` — 非 TTY 未放行值显示 `*** (n chars)`
 - `apollo compare <a> <b> --appid xx --appid-to yy [--json]` — 非 TTY 未放行值掩码 + 长度
 - `apollo get <env> <key> --appid xx` — 非 TTY 下未放行值掩码，TTY 可能输出明文

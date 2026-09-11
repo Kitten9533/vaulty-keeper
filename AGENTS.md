@@ -30,10 +30,18 @@ make build     # 产物 bin/vaulty-keeper
 
 ### 命令
 
+寻址：快照 = **env + appid**（文件 `{env}__{appid}.json`）。口语「test merdi」里 `test` 是 env、`merdi` 是 appid，**禁止**把 appid 当 env。完成标准：
+
+1. `apollo list --json` 在 catalog 里精确命中一行 `{name, app_id}`。
+2. 缺 key：`apollo list <env> <appid> --names --json`，对对话里的 key 做集合差。不要 `list` 全量值、不要 `get` 明文、不要 `compare --reveal`。
+3. 多出来的位置参数会报错；`--appid` 与第二个位置参数不一致也会报错。找错时看 stderr 的 `similar snapshots`。
+
 以下命令输出对 AI 安全（敏感值自动掩码为 `*** (n chars)`），默认使用：
 
 ```sh
-bin/vaulty-keeper apollo list [<env>] --appid <id> --json   # 带 <env> 才有 JSON；无 <env> 只列快照名（appid），--json 不生效
+bin/vaulty-keeper apollo list --json                          # catalog：{snapshots:[{name, app_id}, ...]}
+bin/vaulty-keeper apollo list <env> <appid> --names --json    # 只打 key 名，不解密
+bin/vaulty-keeper apollo list <env> --appid <id> --json       # 带值（非 TTY 未放行则掩码）
 bin/vaulty-keeper apollo compare <a> <b> --appid <a_id> --appid-to <b_id> --json
 bin/vaulty-keeper apollo get <env> <key> --appid <id>        # 非 TTY 只对标记为安全的 key 给明文
 bin/vaulty-keeper apollo set/unset <env> <key> [<value>] --appid <id>

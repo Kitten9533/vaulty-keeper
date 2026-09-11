@@ -246,6 +246,8 @@ This is a summary; the [security model](docs/security-model.md) owns the complet
 Non-TTY support is command-specific; plaintext exits are deliberately refused and writes may need explicit flags. `--json` is not universal (including the no-difference `apollo compare --json` text result). Plaintext on stdout can enter conversation context, session logs and sync systems. Treat token-bearing commands as credentials, too.
 
 **Routine reads and authorized writes (not a blanket grant of permission)**
+- `apollo list --json` — catalog `{snapshots:[{name, app_id}, ...]}` (no decrypt)
+- `apollo list <env> [<appid>] --names --json` — key names only, no decrypt
 - `apollo list <env> --appid xx [--json]` — non-TTY unmarked values show `*** (n chars)`
 - `apollo compare <a> <b> --appid xx --appid-to yy [--json]` — non-TTY unmarked values masked + length
 - `apollo get <env> <key> --appid xx` — non-TTY unmarked values are masked; TTY can print plaintext

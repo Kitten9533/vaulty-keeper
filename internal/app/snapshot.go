@@ -268,39 +268,63 @@ func load(dir, name, appID string) (*apollo.Snapshot, error) {
 	s, err := apollo.Load(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			msg := fmt.Sprintf("snapshot %q not found", name)
-			if appID != "" {
-				msg = fmt.Sprintf("snapshot %q (appid %s) not found", name, appID)
-			}
-			if hints := snapshotHints(dir, name, appID); len(hints) > 0 {
-				msg += "; similar snapshots: " + strings.Join(hints, ", ")
-			}
-			return nil, errors.New(msg)
+			return nil, SnapshotNotFound(dir, name, appID)
 		}
 		return nil, err
 	}
 	return s, nil
 }
 
-// snapshotHints lists other snapshots sharing the same environment name, so a
-// typo'd or missing app id is surfaced instead of a bare "not found" error.
+// SnapshotNotFound is the not-found error for a missing env/appid pair. It
+// includes similar snapshots so a swapped env/appid or a typo'd appid is
+// recoverable without listing the whole catalog.
+func SnapshotNotFound(dir, name, appID string) error {
+	msg := fmt.Sprintf("snapshot %q not found", name)
+	if appID != "" {
+		msg = fmt.Sprintf("snapshot %q (appid %s) not found", name, appID)
+	}
+	if hints := snapshotHints(dir, name, appID); len(hints) > 0 {
+		msg += "; similar snapshots: " + strings.Join(hints, ", ")
+	}
+	return errors.New(msg)
+}
+
+func formatSnapshotRef(r apollo.SnapshotRef) string {
+	if r.AppID != "" {
+		return fmt.Sprintf("%s (appid %s)", r.Name, r.AppID)
+	}
+	return r.Name
+}
+
+// snapshotHints lists nearby snapshots: other appids of the same env, other
+// envs of the same appid, then the env/appid swap (requested env is an appid).
 func snapshotHints(dir, name, appID string) []string {
 	refs, err := apollo.ListSnapshots(dir)
 	if err != nil {
 		return nil
 	}
-	var hints []string
-	for _, r := range refs {
-		if r.Name != name || r.AppID == appID {
-			continue
+	var sameName, sameAppID, swapped []string
+	seen := map[string]bool{}
+	add := func(dst *[]string, r apollo.SnapshotRef) {
+		label := formatSnapshotRef(r)
+		if seen[label] {
+			return
 		}
-		if r.AppID != "" {
-			hints = append(hints, fmt.Sprintf("%s (appid %s)", r.Name, r.AppID))
-		} else {
-			hints = append(hints, r.Name)
+		seen[label] = true
+		*dst = append(*dst, label)
+	}
+	for _, r := range refs {
+		switch {
+		case r.Name == name && r.AppID != appID:
+			add(&sameName, r)
+		case appID != "" && r.AppID == appID && r.Name != name:
+			add(&sameAppID, r)
+		case r.AppID == name && (appID == "" || r.Name == appID):
+			add(&swapped, r)
 		}
 	}
-	return hints
+	out := append(sameName, sameAppID...)
+	return append(out, swapped...)
 }
 
 // Remove deletes a snapshot file. Returns whether it existed.

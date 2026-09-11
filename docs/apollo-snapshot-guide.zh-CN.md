@@ -238,13 +238,14 @@ vaulty-keeper apollo edit prod --appid merdi                   # $EDITOR 打开�
 | 想干什么 | 命令 |
 |---|---|
 | 从 Apollo 复制配置落地 | `apollo import prod.txt --name prod --appid merdi` |
-| 列出全部快照 | `apollo list` |
+| 列出全部快照 | `apollo list --json` |
+| 查缺 key（不解密） | `apollo list test merdi --names --json` |
 | AI 读某个值（掩码） | `apollo get prod KEY --appid merdi` |
 | AI 判断两环境是否一致 | `apollo compare prod test --appid merdi --appid-to merdi2 --json` |
 | 给 AI 放行一个确定安全的 key | `apollo set prod KEY v --plain --appid merdi` / `apollo mark prod KEY --plain --appid merdi` |
 | 撤销放行（同时分类为 secret） | `apollo mark prod KEY --secret --appid merdi` |
 | 看敏感值明文（自己 TTY） | `apollo reveal prod KEY --appid merdi` |
 | 整份导出/编辑 | `apollo export prod --appid merdi` / `apollo edit prod --appid merdi` |
-| 报错"快照不存在" | 看提示里的**相近快照**（同 env 的其他 appid），多半是 `--appid` 拼错 |
+| 报错"快照不存在" | 看提示里的**相近快照**（同 env 的其他 appid，或 env/appid 对调），多半是拼错或把 appid 当成了 env |
 
 表中命令为子命令，需加 `vaulty-keeper` 前缀；`KEY`/`v` 是占位符，不是夹具里的名字/值。
